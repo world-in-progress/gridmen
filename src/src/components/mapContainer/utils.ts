@@ -628,14 +628,14 @@ export function calculateGridCounts(
     southWest: [number, number],
     basePoint: [number, number],
     gridLevel: [number, number]
-): { widthCount: number, heightCount: number } {
+): { widthCounts: number, heightCounts: number } {
     const gridWidth = gridLevel[0]
     const gridHeight = gridLevel[1]
     const [swX, swY] = southWest
     const [baseX, baseY] = basePoint
-    const widthCount = Math.abs((swX - baseX) / gridWidth)
-    const heightCount = Math.abs((swY - baseY) / gridHeight)
-    return { widthCount, heightCount }
+    const widthCounts = Math.abs((swX - baseX) / gridWidth)
+    const heightCounts = Math.abs((swY - baseY) / gridHeight)
+    return { widthCounts, heightCounts }
 }
 
 

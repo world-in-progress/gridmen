@@ -169,11 +169,11 @@ export default function PatchesPage({
             const adjustedDrawBoundsOn4326 = [alignedSWPoint[0], alignedSWPoint[1], alignedNEPoint[0], alignedNEPoint[1]] as [number, number, number, number]
             addMapPatchBounds(adjustedDrawBoundsOn4326, 'adjusted-bounds')
 
-            const { widthCount, heightCount } = calculateGridCounts(expandedBounds!.southWest, schemaBasePoint.current, schemaGridLevel.current)
-            pageContext.current.widthCount = widthCount
-            pageContext.current.heightCount = heightCount
+            const { widthCounts, heightCounts } = calculateGridCounts(expandedBounds!.southWest, schemaBasePoint.current, schemaGridLevel.current)
+            pageContext.current.widthCount = widthCounts
+            pageContext.current.heightCount = heightCounts
 
-            addMapLineBetweenPoints(schemaMarkerPoint.current, alignedSWPoint, widthCount, heightCount)
+            addMapLineBetweenPoints(schemaMarkerPoint.current, alignedSWPoint, widthCounts, heightCounts)
             pageContext.current.hasBounds = true
         }
 

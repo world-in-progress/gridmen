@@ -21,6 +21,8 @@ import DefaultScenarioNode from '@/core/scenario/default'
 import { SceneNode, SceneTree } from './resourceScene/scene'
 import { IconBarClickHandlers } from '@/components/iconBar/types'
 import ResourceTreeComponent from './resourceScene/sceneComponent'
+import Store from '@/store'
+import AreaPage from '@/resource/scenario/area/areaPage'
 
 function FrameworkComponent() {
     //i18 methods
@@ -65,6 +67,9 @@ function FrameworkComponent() {
     const iconClickHandlers: IconBarClickHandlers = {}
     ICON_REGISTRY.forEach(icon => {
         iconClickHandlers[icon.id] = (iconID: string) => {
+            // Disable icon clicks when create resource dialog is open
+            const isCreateResourceDialogOpen = Store.get<boolean>('isCreateResourceDialogOpen') || false
+            if (isCreateResourceDialogOpen) return
 
             if (icon.id === 'grid-editor') {
                 if (activeIconID === 'grid-editor') {
@@ -372,6 +377,10 @@ function FrameworkComponent() {
 
     // Handle clicking tab
     const handleTabClick = useCallback((tab: Tab) => {
+        // Disable tab clicks when create resource dialog is open
+        const isCreateResourceDialogOpen = Store.get<boolean>('isCreateResourceDialogOpen') || false
+        if (isCreateResourceDialogOpen) return
+        
         const node = tab.node as SceneNode
         const isPublic = node.tree.isPublic
         const _publicTree = publicTree as SceneTree
@@ -677,7 +686,8 @@ function FrameworkComponent() {
             {/* <div className='main-content-area'> */}
             <div className='flex flex-col flex-1 h-full overflow-hidden'>
                 {/* Fixed TabBar - no horizontal scroll */}
-                {nodeStack.current.length > 0 && (
+                {/* {nodeStack.current.length > 0 && ( */}
+                {nodeStack.current.length === 0 && (
                     <TabBar
                         focusNode={focusNode as SceneNode | null}
                         triggerFocus={triggerFocus}
@@ -703,7 +713,8 @@ function FrameworkComponent() {
                 )}
 
                 {/* Hello Page */}
-                {nodeStack.current.length === 0 && <Hello />}
+                {/* {nodeStack.current.length === 0 && <Hello />} */}
+                {nodeStack.current.length === 0 && <AreaPage node={focusNode!} />}
             </div>
         </div >
     )
