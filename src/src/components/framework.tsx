@@ -686,8 +686,7 @@ function FrameworkComponent() {
             {/* <div className='main-content-area'> */}
             <div className='flex flex-col flex-1 h-full overflow-hidden'>
                 {/* Fixed TabBar - no horizontal scroll */}
-                {/* {nodeStack.current.length > 0 && ( */}
-                {nodeStack.current.length === 0 && (
+                {nodeStack.current.length > 0 && (
                     <TabBar
                         focusNode={focusNode as SceneNode | null}
                         triggerFocus={triggerFocus}
@@ -713,8 +712,7 @@ function FrameworkComponent() {
                 )}
 
                 {/* Hello Page */}
-                {/* {nodeStack.current.length === 0 && <Hello />} */}
-                {nodeStack.current.length === 0 && <AreaPage node={focusNode!} />}
+                {nodeStack.current.length === 0 && <Hello />}
             </div>
         </div >
     )

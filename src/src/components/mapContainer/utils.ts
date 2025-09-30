@@ -167,7 +167,25 @@ export const convertSinglePointCoordinate = (
     fromEPSG: string,
     toEPSG: string
 ): [number, number] => {
-    if (!coord) return [0, 0]
+    if (!coord || coord.length !== 2) {
+        console.error('Invalid coordinate input:', coord)
+        return [0, 0]
+    }
+    
+    if (!Number.isFinite(coord[0]) || !Number.isFinite(coord[1])) {
+        console.error('Coordinate values must be finite numbers:', coord)
+        return [0, 0]
+    }
+    
+    if (!fromEPSG || !toEPSG) {
+        console.error('Invalid EPSG codes:', { fromEPSG, toEPSG })
+        return coord
+    }
+    
+    if (fromEPSG === toEPSG) {
+        return coord
+    }
+    
     try {
         // Ensure source and target projection definitions are registered
         if (epsgDefinitions[fromEPSG]) {
@@ -181,9 +199,16 @@ export const convertSinglePointCoordinate = (
         const toProjection = `EPSG:${toEPSG}`
 
         // Perform coordinate conversion
-        return proj4(fromProjection, toProjection, coord)
+        const result = proj4(fromProjection, toProjection, coord)
+        
+        if (!Number.isFinite(result[0]) || !Number.isFinite(result[1])) {
+            console.error('Coordinate conversion resulted in invalid values:', result)
+            return coord
+        }
+        
+        return result
     } catch (e) {
-        console.error('Coordinate conversion error:', e)
+        console.error('Coordinate conversion error:', e, { coord, fromEPSG, toEPSG })
         return coord // Return original coordinates when error occurs
     }
 }
@@ -532,7 +557,25 @@ export const adjustPatchBounds = (
     alignedBounds: RectangleCoordinates | null
     expandedBounds: RectangleCoordinates | null
 } => {
-    if (!bounds || !gridLevel || !toEPSG || !schemaBasePoint || gridLevel.length < 2) {
+    if (!bounds || bounds.length !== 4 || !gridLevel || gridLevel.length !== 2 || 
+        !fromEPSG || !toEPSG || !schemaBasePoint || schemaBasePoint.length !== 2) {
+        console.error('Invalid parameters for adjustPatchBounds:', { bounds, gridLevel, fromEPSG, toEPSG, schemaBasePoint })
+        return {
+            convertedBounds: null,
+            alignedBounds: null,
+            expandedBounds: null
+        }
+    }
+    
+    const isValidBounds = bounds.every(coord => Number.isFinite(coord))
+    const isValidGridLevel = gridLevel.every(val => Number.isFinite(val) && val > 0)
+    const isValidBasePoint = schemaBasePoint.every(coord => Number.isFinite(coord))
+    
+    if (!isValidBounds || !isValidGridLevel || !isValidBasePoint) {
+        console.error('Invalid numeric values for adjustPatchBounds:', { 
+            bounds, gridLevel, schemaBasePoint,
+            isValidBounds, isValidGridLevel, isValidBasePoint 
+        })
         return {
             convertedBounds: null,
             alignedBounds: null,
