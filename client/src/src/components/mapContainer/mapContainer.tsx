@@ -117,10 +117,11 @@ export const MapContainer = forwardRef<MapboxDraw, MapContainerProps>((props, re
                 modes: {
                     ...MapboxDrawConstructor.modes,
                     draw_rectangle: SnapRectangleMode,  // 使用带吸附功能的矩形模式
-                    draw_point: SnapPointMode,
-                    draw_polygon: SnapPolygonMode,
-                    draw_line_string: SnapLineMode,
-                    direct_select: SnapDirectSelect,
+                    draw_snap_rectangle: SnapRectangleMode,
+                    // draw_point: SnapPointMode,
+                    // draw_polygon: SnapPolygonMode,
+                    // draw_line_string: SnapLineMode,
+                    // direct_select: SnapDirectSelect,
                 },
                 // styles: [
                 //     // Active point style
@@ -219,19 +220,48 @@ export const MapContainer = forwardRef<MapboxDraw, MapContainerProps>((props, re
                         // 添加已绘制的要素
                         features.push(...draw.getAll().features)
                         
-                        // 查询所有已渲染的要素，特别是patch bounds图层
+                        // 获取所有bounds相关的图层并转换为GeoJSON features
                         try {
+                            const style = map.getStyle()
+                            if (style && style.sources) {
+                                // 遍历所有source，找到bounds相关的
+                                Object.keys(style.sources).forEach(sourceId => {
+                                    if (sourceId.includes('bounds-source')) {
+                                        const source = map.getSource(sourceId)
+                                        if (source && source._data) {
+                                            // 如果source有数据，将其添加到features列表
+                                            const data = source._data
+                                            if (data.type === 'Feature') {
+                                                features.push(data)
+                                            } else if (data.type === 'FeatureCollection') {
+                                                features.push(...data.features)
+                                            }
+                                        }
+                                    }
+                                })
+                            }
+                            
+                            // 备用方案：使用queryRenderedFeatures
                             const renderedFeatures = map.queryRenderedFeatures()
                             const boundLayers = renderedFeatures.filter((feature: any) => {
-                                return feature.sourceLayer === 'bounds-source' || 
-                                       (feature.source && typeof feature.source === 'string' && 
-                                        feature.source.includes('bounds-source'))
+                                // 对于geojson source，检查source字段
+                                return feature.source && 
+                                       typeof feature.source === 'string' && 
+                                       feature.source.includes('bounds-source')
                             })
-                            features.push(...boundLayers)
+                            
+                            // 合并features，避免重复
+                            const existingIds = new Set(features.map((f: any) => f.id))
+                            boundLayers.forEach((feature: any) => {
+                                if (!feature.id || !existingIds.has(feature.id)) {
+                                    features.push(feature)
+                                }
+                            })
                         } catch (e) {
                             console.warn('Error querying rendered features for snap:', e)
                         }
                         
+                        console.log('Snap features:', features.length, features) // 调试日志
                         return features
                     }
                 },
@@ -257,32 +287,6 @@ export const MapContainer = forwardRef<MapboxDraw, MapContainerProps>((props, re
                     font-size: 12px;
                     z-index: 1000;
                 `
-
-                // 矩形绘制按钮
-                const rectangleButton = document.createElement('button')
-                rectangleButton.textContent = '⬜ Rectangle'
-                rectangleButton.style.cssText = `
-                    display: block;
-                    width: 100%;
-                    margin-bottom: 8px;
-                    padding: 4px 8px;
-                    border: 1px solid #ccc;
-                    border-radius: 3px;
-                    background: white;
-                    cursor: pointer;
-                    font-size: 12px;
-                `
-                rectangleButton.addEventListener('click', () => {
-                    if (drawInstance) {
-                        drawInstance.changeMode('draw_rectangle')
-                    }
-                })
-                rectangleButton.addEventListener('mouseenter', () => {
-                    rectangleButton.style.background = '#f0f0f0'
-                })
-                rectangleButton.addEventListener('mouseleave', () => {
-                    rectangleButton.style.background = 'white'
-                })
 
                 // Snap when draw 按钮
                 const snapToggle = document.createElement('label')
@@ -327,7 +331,6 @@ export const MapContainer = forwardRef<MapboxDraw, MapContainerProps>((props, re
                 guidesToggle.appendChild(guidesCheckbox)
                 guidesToggle.appendChild(document.createTextNode('Show guides'))
 
-                snapControlsContainer.appendChild(rectangleButton)
                 snapControlsContainer.appendChild(snapToggle)
                 snapControlsContainer.appendChild(guidesToggle)
 

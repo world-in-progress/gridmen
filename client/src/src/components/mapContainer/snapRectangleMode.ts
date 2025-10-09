@@ -25,13 +25,16 @@ const enhanceWithSnapping = (mode: any) => {
       
       // 1. 查询地图上渲染的要素（包括patch bounds）
       const renderedFeatures = this.map.queryRenderedFeatures(bbox);
+      console.log('Queried features for snap:', renderedFeatures.length); // 调试日志
+
       renderedFeatures.forEach((feature: any) => {
         // 特别处理patch bounds图层
-        if (feature.source && (
-          feature.source.toString().includes('bounds-source') || 
-          feature.source === 'confirmed-area' ||
-          feature.source.startsWith('patch-')
-        )) {
+        // 检查source字段是否包含bounds-source
+        const sourceId = feature.source ? feature.source.toString() : '';
+        
+        if (sourceId.includes('bounds-source')) {
+          console.log('Found bounds feature:', feature); // 调试日志
+          
           if (feature.geometry && feature.geometry.coordinates) {
             const vertices = this.extractVertices(feature.geometry.coordinates);
             vertices.forEach((vertex: any) => {
@@ -44,6 +47,7 @@ const enhanceWithSnapping = (mode: any) => {
               if (distance < minDistance) {
                 minDistance = distance;
                 nearestVertex = vertex;
+                console.log('New nearest vertex found:', nearestVertex, 'distance:', distance); // 调试日志
               }
             });
           }
