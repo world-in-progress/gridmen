@@ -39,8 +39,6 @@ interface SceneTreeProps {
     focusNode: ISceneNode | null
     publicTree: SceneTree | null
     privateTree: SceneTree | null
-    onOpenFile: (fileName: string, filePath: string) => void
-    onPinFile: (fileName: string, filePath: string) => void
     onNodeMenuOpen: (node: ISceneNode, menuItem: any) => void
     onNodeStartEditing: (node: ISceneNode) => void
     onNodeStopEditing: (node: ISceneNode) => void
@@ -480,8 +478,6 @@ export default function ResourceTreeComponent({
     triggerFocus,
     privateTree,
     publicTree,
-    onOpenFile,
-    onPinFile,
     onNodeMenuOpen,
     onNodeStartEditing,
     onNodeStopEditing,
@@ -500,8 +496,6 @@ export default function ResourceTreeComponent({
     useEffect(() => {
         if (privateTree) {
             privateTree.bindHandlers({
-                openFile: onOpenFile,
-                pinFile: onPinFile,
                 handleNodeMenuOpen: onNodeMenuOpen,
                 handleNodeStartEditing: onNodeStartEditing,
                 handleNodeStopEditing: onNodeStopEditing,
@@ -515,14 +509,12 @@ export default function ResourceTreeComponent({
                 unsubscribe()
             }
         }
-    }, [privateTree, onOpenFile, onPinFile, onNodeMenuOpen, onNodeStartEditing, onNodeStopEditing, onNodeDoubleClick, onNodeClick, onNodeRemove])
+    }, [privateTree, onNodeMenuOpen, onNodeStartEditing, onNodeStopEditing, onNodeDoubleClick, onNodeClick, onNodeRemove])
 
     // Bind handlers to public tree
     useEffect(() => {
         if (publicTree) {
             publicTree.bindHandlers({
-                openFile: onOpenFile,
-                pinFile: onPinFile,
                 handleNodeMenuOpen: onNodeMenuOpen,
                 handleNodeStartEditing: onNodeStartEditing,
                 handleNodeStopEditing: onNodeStopEditing,
@@ -536,7 +528,7 @@ export default function ResourceTreeComponent({
                 unsubscribe()
             }
         }
-    }, [publicTree, onOpenFile, onPinFile, onNodeMenuOpen, onNodeStartEditing, onNodeStopEditing, onNodeDoubleClick, onNodeClick, onNodeRemove])
+    }, [publicTree, onNodeMenuOpen, onNodeStartEditing, onNodeStopEditing, onNodeDoubleClick, onNodeClick, onNodeRemove])
 
     useEffect(() => {
         if (focusNode) {

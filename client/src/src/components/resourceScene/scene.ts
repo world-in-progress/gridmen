@@ -1,15 +1,15 @@
-import store from '@/store'
-import { Tab } from '../tabBar/types'
+import { Tab } from '../tabBar'
 import * as api from '@/core/apis/apis'
+import DefaultPageContext from '@/core/context/default'
 import { IScenarioNode } from '@/core/scenario/iscenario'
 import ContextStorage from '@/core/context/contextStorage'
 import { ISceneNode, ISceneTree } from '@/core/scene/iscene'
 import { SCENARIO_NODE_REGISTRY, SCENARIO_PAGE_CONTEXT_REGISTRY } from '@/resource/scenarioRegistry'
-import DefaultPageContext from '@/core/context/default'
 
 export class SceneNode implements ISceneNode {
     key: string
     tree: SceneTree
+    lockId: string | null = null
     aligned: boolean = false
     parent: ISceneNode | null
     scenarioNode: IScenarioNode
@@ -109,8 +109,6 @@ export class SceneTree implements ISceneTree {
     scene: Map<string, ISceneNode> = new Map()
     cs: ContextStorage = ContextStorage.getInstance()   // cs: context storage
 
-    private handleOpenFile: (fileName: string, filePath: string) => void = () => {}
-    private handlePinFile: (fileName: string, filePath: string) => void = () => {}
     private handleNodeMenuOpen: (node: ISceneNode, menuItem: any) => void = () => {}
     private handleNodeStartEditing: (node: ISceneNode) => void = () => {}
     private handleNodeStopEditing: (node: ISceneNode) => void = () => {}
@@ -134,8 +132,6 @@ export class SceneTree implements ISceneTree {
      * pinning files, opening dropdown menus, and starting/stopping node editing.
      */
     bindHandlers(handlers: {
-        openFile: (fileName: string, filePath: string) => void
-        pinFile: (fileName: string, filePath: string) => void
         handleNodeMenuOpen: (node: ISceneNode, menuItem: any) => void
         handleNodeStartEditing: (node: ISceneNode) => void
         handleNodeStopEditing: (node: ISceneNode) => void
@@ -143,8 +139,6 @@ export class SceneTree implements ISceneTree {
         handleNodeClick: (node: ISceneNode) => void
         handleNodeRemove: (node: ISceneNode) => void
     }): void {
-        this.handleOpenFile = handlers.openFile
-        this.handlePinFile = handlers.pinFile
         this.handleNodeMenuOpen = handlers.handleNodeMenuOpen
         this.handleNodeStartEditing = handlers.handleNodeStartEditing
         this.handleNodeStopEditing = handlers.handleNodeStopEditing

@@ -49,7 +49,6 @@ import MapContainer from '@/components/mapContainer/mapContainer'
 import CustomLayerGroup from '@/components/mapContainer/customLayerGroup'
 import TopologyLayer from '@/components/mapContainer/TopologyLayer'
 import { SceneNode, SceneTree } from '@/components/resourceScene/scene'
-import { useSettingsStore } from "@/components/settingPage/settingStore"
 import { GridCheckingInfo, TopologyEditorProps, TopologyOperationType } from './types'
 
 const topologyTips = [
@@ -106,7 +105,7 @@ export default function TopologyEditor(
     const pageContext = useRef<PatchPageContext>(new PatchPageContext())
     const gridInfo = useRef<GridCheckingInfo | null>(null)
 
-    const highSpeedMode = useSettingsStore(state => state.highSpeedMode)
+    // const highSpeedMode = useSettingsStore(state => state.highSpeedMode)
 
     useEffect(() => {
         const map = store.get<mapboxgl.Map>('map')!
@@ -314,18 +313,18 @@ export default function TopologyEditor(
     }
 
     const handleSelectAllClick = () => {
-        if (highSpeedMode) {
-            handleConfirmSelectAll();
-            return;
-        }
+        // if (highSpeedMode) {
+        //     handleConfirmSelectAll();
+        //     return;
+        // }
         setSelectAllDialogOpen(true);
     };
 
     const handleDeleteSelectClick = () => {
-        if (highSpeedMode) {
-            handleConfirmDeleteSelect();
-            return;
-        }
+        // if (highSpeedMode) {
+        //     handleConfirmDeleteSelect();
+        //     return;
+        // }
         setDeleteSelectDialogOpen(true);
     };
 
@@ -371,29 +370,30 @@ export default function TopologyEditor(
     }, [activeTopologyOperation, topologyLayer]);
 
     const onTopologyOperationClick = (operationType: string) => {
-        if (highSpeedMode && operationType !== null) {
-            switch (operationType) {
-                case 'subdivide':
-                    topologyLayer!.executeSubdivideGrids();
-                    break;
-                case 'merge':
-                    topologyLayer!.executeMergeGrids();
-                    break;
-                case 'delete':
-                    topologyLayer!.executeDeleteGrids();
-                    break;
-                case 'recover':
-                    topologyLayer!.executeRecoverGrids();
-                    break;
-                default:
-                    console.warn(
-                        'Unknown topology operation type:',
-                        operationType
-                    );
-            }
-        } else {
-            setActiveTopologyOperation(operationType as TopologyOperationType);
-        }
+        // if (highSpeedMode && operationType !== null) {
+        //     switch (operationType) {
+        //         case 'subdivide':
+        //             topologyLayer!.executeSubdivideGrids();
+        //             break;
+        //         case 'merge':
+        //             topologyLayer!.executeMergeGrids();
+        //             break;
+        //         case 'delete':
+        //             topologyLayer!.executeDeleteGrids();
+        //             break;
+        //         case 'recover':
+        //             topologyLayer!.executeRecoverGrids();
+        //             break;
+        //         default:
+        //             console.warn(
+        //                 'Unknown topology operation type:',
+        //                 operationType
+        //             );
+        //     }
+        // } else {
+        //     setActiveTopologyOperation(operationType as TopologyOperationType);
+        // }
+        setActiveTopologyOperation(operationType as TopologyOperationType);
     };
 
     const handleFeatureClick = useCallback(async () => {
@@ -435,19 +435,21 @@ export default function TopologyEditor(
                 }
                 if (event.key === 'A' || event.key === 'a') {
                     event.preventDefault();
-                    if (highSpeedMode) {
-                        handleConfirmSelectAll()
-                    } else {
-                        setSelectAllDialogOpen(true);
-                    }
+                    // if (highSpeedMode) {
+                    //     handleConfirmSelectAll()
+                    // } else {
+                    //     setSelectAllDialogOpen(true);
+                    // }
+                    setSelectAllDialogOpen(true);
                 }
                 if (event.key === 'C' || event.key === 'c') {
                     event.preventDefault();
-                    if (highSpeedMode) {
-                        handleConfirmDeleteSelect();
-                    } else {
-                        setDeleteSelectDialogOpen(true);
-                    }
+                    // if (highSpeedMode) {
+                    //     handleConfirmDeleteSelect();
+                    // } else {
+                    //     setDeleteSelectDialogOpen(true);
+                    // }
+                    setDeleteSelectDialogOpen(true);
                 }
                 if (event.key === '1') {
                     event.preventDefault();
@@ -467,35 +469,39 @@ export default function TopologyEditor(
                 }
                 if (event.key === 'S' || event.key === 's') {
                     event.preventDefault();
-                    if (highSpeedMode) {
-                        topologyLayer!.executeSubdivideGrids();
-                    } else {
-                        setActiveTopologyOperation('subdivide');
-                    }
+                    // if (highSpeedMode) {
+                    //     topologyLayer!.executeSubdivideGrids();
+                    // } else {
+                    //     setActiveTopologyOperation('subdivide');
+                    // }
+                    setActiveTopologyOperation('subdivide');
                 }
                 if (event.key === 'M' || event.key === 'm') {
                     event.preventDefault();
-                    if (highSpeedMode) {
-                        topologyLayer!.executeMergeGrids();
-                    } else {
-                        setActiveTopologyOperation('merge');
-                    }
+                    // if (highSpeedMode) {
+                    //     topologyLayer!.executeMergeGrids();
+                    // } else {
+                    //     setActiveTopologyOperation('merge');
+                    // }
+                    setActiveTopologyOperation('merge');
                 }
                 if (event.key === 'D' || event.key === 'd') {
                     event.preventDefault();
-                    if (highSpeedMode) {
-                        topologyLayer!.executeDeleteGrids();
-                    } else {
-                        setActiveTopologyOperation('delete');
-                    }
+                    // if (highSpeedMode) {
+                    //     topologyLayer!.executeDeleteGrids();
+                    // } else {
+                    //     setActiveTopologyOperation('delete');
+                    // }
+                    setActiveTopologyOperation('delete');
                 }
                 if (event.key === 'R' || event.key === 'r') {
                     event.preventDefault();
-                    if (highSpeedMode) {
-                        topologyLayer!.executeRecoverGrids();
-                    } else {
-                        setActiveTopologyOperation('recover');
-                    }
+                    // if (highSpeedMode) {
+                    //     topologyLayer!.executeRecoverGrids();
+                    // } else {
+                    //     setActiveTopologyOperation('recover');
+                    // }
+                    setActiveTopologyOperation('recover');
                 }
             }
         };
@@ -512,7 +518,7 @@ export default function TopologyEditor(
         selectTab,
         topologyLayer,
         checkSwitchOn,
-        highSpeedMode
+        // highSpeedMode
     ]);
 
     const toggleCheckSwitch = () => {

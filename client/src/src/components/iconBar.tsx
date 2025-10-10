@@ -1,12 +1,21 @@
 import { cn } from '@/utils/utils'
-import { IconBarResourceBinding } from './types'
-import { Button } from '@/components/ui/button'
-import { ICON_REGISTRY } from '../../resource/iconRegistry'
-import { useTranslation } from 'react-i18next';
+import { LucideProps } from 'lucide-react'
+import { ICON_REGISTRY } from '../resource/iconRegistry'
 
-function MyComponent () {
-  const { t, i18n } = useTranslation();
-  return <h1>{t('Welcome to React')}</h1>
+export interface IconBarClickHandlers {
+    [iconID: string]: (iconID: string) => void
+}
+
+interface IconBarResourceBinding {
+    currentActiveId: string
+    clickHandlers: IconBarClickHandlers
+}
+
+export interface IconEntry {
+    id: string
+    label: string
+    style?: string
+    icon: React.ComponentType<LucideProps>
 }
 
 export default function IconBar({ currentActiveId, clickHandlers }: IconBarResourceBinding) {

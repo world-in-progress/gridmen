@@ -1,29 +1,41 @@
-import {
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuTrigger,
-} from '@/components/ui/context-menu'
 import { cn } from '@/utils/utils'
-import { ISceneNode } from '@/core/scene/iscene'
+import { DropResult } from '@hello-pangea/dnd'
 import { Cloudy, FileText, User, X } from 'lucide-react'
 import React, { useEffect, useReducer, useRef } from 'react'
-import { SceneNode, SceneTree } from '../resourceScene/scene'
-import { TabBarProps, Tab, renderNodeTabProps } from './types'
+import { ISceneNode, ISceneTree } from '@/core/scene/iscene'
+import { SceneNode, SceneTree } from './resourceScene/scene'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DragDropContext, Droppable, Draggable, DragStart } from '@hello-pangea/dnd'
 
 
-const getTabContextMenu = (tab: Tab) => (
-    <ContextMenuContent className='bg-white border-gray-50'>
-        <ContextMenuItem>复制路径</ContextMenuItem>
-        <ContextMenuItem>在文件管理器中显示</ContextMenuItem>
-        <ContextMenuItem>重命名</ContextMenuItem>
-        <ContextMenuItem className="text-red-500 focus:text-red-500 focus:bg-red-50">
-            删除
-        </ContextMenuItem>
-    </ContextMenuContent>
-)
+export interface Tab {
+    name: string
+    node: ISceneNode
+    isActive: boolean
+    isPreview?: boolean
+    resourceTree?: ISceneTree
+}
+
+export interface TabBarProps{
+    focusNode: SceneNode | null
+    triggerFocus: number
+    tabs: Tab[]
+    localTree?: SceneTree | null
+    remoteTree?: SceneTree | null
+    onTabDragEnd: (result: DropResult) => void
+    onTabClick: (tab: Tab) => void
+    width?: number
+}
+
+export interface renderNodeTabProps {
+    focusNode: ISceneNode | null
+    node: SceneNode,
+    index: number,
+    triggerFocus: number,
+    onTabClick: (tab: Tab) => void
+}
+
 
 const RenderNodeTab: React.FC<renderNodeTabProps> = ({
     focusNode,
@@ -75,9 +87,9 @@ const RenderNodeTab: React.FC<renderNodeTabProps> = ({
                                 <X
                                     className={cn(
                                         'w-4 h-4 ml-2',
-                                        isFocused 
-                                        ? 'text-white hover:text-amber-400' 
-                                        : 'text-gray-500 hover:text-white invisible group-hover:visible'
+                                        isFocused
+                                            ? 'text-white hover:text-amber-400'
+                                            : 'text-gray-500 hover:text-white invisible group-hover:visible'
                                     )}
                                     onClick={(e) => {
                                         e.stopPropagation()
@@ -93,7 +105,7 @@ const RenderNodeTab: React.FC<renderNodeTabProps> = ({
     )
 }
 
-const RenderNodeTabs: React.FC<{focusNode: ISceneNode | null, tabs: Tab[], onTabClick: (tab: Tab) => void, triggerFocus: number}> = ({
+const RenderNodeTabs: React.FC<{ focusNode: ISceneNode | null, tabs: Tab[], onTabClick: (tab: Tab) => void, triggerFocus: number }> = ({
     focusNode,
     tabs,
     onTabClick,
@@ -171,7 +183,7 @@ export default function TabBar({
     }
 
     return (
-        <div 
+        <div
             className='bg-[#252526] flex shrink-0 h-[4vh]'
             style={{ width: width ? `${width}px` : '[84.5%]' }}
         >

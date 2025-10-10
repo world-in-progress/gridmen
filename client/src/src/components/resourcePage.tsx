@@ -1,5 +1,10 @@
-import MapContainer from '../mapContainer/mapContainer'
-import { CreatePageProps } from './types'
+import { ISceneNode } from '@/core/scene/iscene'
+import MapContainer from './mapContainer/mapContainer'
+
+type CreatePageProps = {
+    node: ISceneNode
+    menuItem: any
+}
 
 export default function ResourcePage({
     node,

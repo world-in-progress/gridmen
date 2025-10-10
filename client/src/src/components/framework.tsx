@@ -1,32 +1,19 @@
-import {
-    useRef,
-    useState,
-    useEffect,
-    useReducer,
-    useCallback,
-} from 'react'
+import { useRef, useState, useEffect, useReducer, useCallback } from 'react'
+import Store from '@/store'
+import IconBar from './iconBar'
 import Hello from './hello/hello'
-import TabBar from './tabBar/tabBar'
-import { Tab } from './tabBar/types'
-import IconBar from './iconBar/iconBar'
-import LoginPage from './user/loginPage'
+import TabBar from './tabBar'
+import { Tab } from './tabBar'
+import ResourcePage from './resourcePage'
 import { DropResult } from '@hello-pangea/dnd'
-import { useTranslation } from 'react-i18next'
 import { ISceneNode } from '@/core/scene/iscene'
-import Simulation from './simulation/simulationPage'
-import ResourcePage from './functionPage/createPage'
-import SettingsPage from './settingPage/settingsPage'
 import { ICON_REGISTRY } from '@/resource/iconRegistry'
 import DefaultScenarioNode from '@/core/scenario/default'
+import { IconBarClickHandlers } from '@/components/iconBar'
 import { SceneNode, SceneTree } from './resourceScene/scene'
-import { IconBarClickHandlers } from '@/components/iconBar/types'
 import ResourceTreeComponent from './resourceScene/sceneComponent'
-import Store from '@/store'
-import AreaPage from '@/resource/scenario/area/areaPage'
 
 function FrameworkComponent() {
-    //i18 methods
-    const { t, i18n } = useTranslation();
 
     // Framework-related ref and state
     const nodeTabs = useRef<Tab[]>([])
@@ -82,11 +69,11 @@ function FrameworkComponent() {
                     }
                 } else if (activeIconID === 'settings' || activeIconID === 'simulation' || activeIconID === 'user') {
                     setActiveIconID(iconID)
-                    
+
                     const validNodes = nodeStack.current.filter(node => {
                         return node.key !== 'settings' && node.key !== 'simulation' && node.key !== 'user';
                     });
-                    
+
                     if (validNodes.length > 0) {
                         const targetNode = validNodes[validNodes.length - 1] as SceneNode;
                         targetNode.tree.selectedNode = targetNode;
@@ -106,37 +93,6 @@ function FrameworkComponent() {
                         setResourceTreeWidth(lastResourceTreeWidth || 200)
                     }
                 }
-            }
-            else if (icon.id === 'languages') {
-                i18n.changeLanguage(i18n.language === "szh" ? "en" : "szh")
-
-            }
-            else if (icon.id === 'settings') {
-                setActiveIconID(iconID);
-                createOrActivateVirtualNode(
-                    'settings',
-                    'Settings',
-                    'settings',
-                    <SettingsPage />
-                );
-            }
-            else if (icon.id === 'simulation') {
-                setActiveIconID(iconID);
-                createOrActivateVirtualNode(
-                    'simulation',
-                    'Simulation',
-                    'simulation',
-                    <Simulation />
-                );
-            }
-            else if (icon.id === 'user') {
-                setActiveIconID(iconID);
-                createOrActivateVirtualNode(
-                    'user',
-                    'User',
-                    'user',
-                    <LoginPage />
-                );
             }
             else {
                 setActiveIconID(iconID)
@@ -206,61 +162,6 @@ function FrameworkComponent() {
     //////////////////////////////////////////////////////////////
     // Handlers //////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////
-
-    // File processing handlers
-    const handleOpenFile = useCallback((fileName: string, filePath: string) => {
-        // setTabNames(prevTabs => {
-        //     const existingPinnedTab = prevTabs.find(t => t.path === filePath && !t.isPreview)
-        //     if (existingPinnedTab) {
-        //         return prevTabs.map(t => ({ ...t, isActive: t.path === filePath }))
-        //     }
-
-        //     const newTabs = prevTabs.map(t => ({ ...t, isActive: false }))
-        //     const previewIndex = newTabs.findIndex(t => t.isPreview)
-
-        //     const newTab: Tab = {
-        //         name: fileName,
-        //         path: filePath,
-        //         isActive: true,
-        //         isPreview: true,
-        //     }
-
-        //     if (previewIndex !== -1) {
-        //         newTabs[previewIndex] = newTab
-        //     } else {
-        //         newTabs.push(newTab)
-        //     }
-
-        //     return newTabs
-        // })
-    }, [])
-
-    const handlePinFile = useCallback((fileName: string, filePath: string) => {
-        // setTabNames((prevTabs) => {
-        //     const existingTabIndex = prevTabs.findIndex((t) => t.path === filePath)
-        //     let newTabs = [...prevTabs]
-
-        //     if (existingTabIndex !== -1) {
-        //         newTabs[existingTabIndex] = { ...newTabs[existingTabIndex], isPreview: false, isActive: true }
-        //         newTabs = newTabs.map((t, index) => (index === existingTabIndex ? { ...t } : { ...t, isActive: false }))
-        //     } else {
-        //         newTabs = newTabs.map((t) => ({ ...t, isActive: false }))
-        //         const newTab: Tab = {
-        //             name: fileName,
-        //             path: filePath,
-        //             isActive: true,
-        //             isPreview: false,
-        //         }
-        //         const previewIndex = newTabs.findIndex(t => t.isPreview)
-        //         if (previewIndex !== -1) {
-        //             newTabs[previewIndex] = newTab
-        //         } else {
-        //             newTabs.push(newTab)
-        //         }
-        //     }
-        //     return newTabs
-        // })
-    }, [])
 
     // Handle opening menu
     const handleNodeMenuOpen = useCallback((node: ISceneNode, menuItem: any) => {
@@ -380,7 +281,7 @@ function FrameworkComponent() {
         // Disable tab clicks when create resource dialog is open
         const isCreateResourceDialogOpen = Store.get<boolean>('isCreateResourceDialogOpen') || false
         if (isCreateResourceDialogOpen) return
-        
+
         const node = tab.node as SceneNode
         const isPublic = node.tree.isPublic
         const _publicTree = publicTree as SceneTree
@@ -665,8 +566,6 @@ function FrameworkComponent() {
                         triggerFocus={triggerFocus}
                         privateTree={privateTree}
                         publicTree={publicTree}
-                        onOpenFile={handleOpenFile}
-                        onPinFile={handlePinFile}
                         onNodeMenuOpen={handleNodeMenuOpen}
                         onNodeStartEditing={handleNodeStartEditing}
                         onNodeStopEditing={handleNodeStopEditing}
