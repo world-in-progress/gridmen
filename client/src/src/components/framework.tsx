@@ -12,8 +12,11 @@ import DefaultScenarioNode from '@/core/scenario/default'
 import { IconBarClickHandlers } from '@/components/iconBar'
 import { SceneNode, SceneTree } from './resourceScene/scene'
 import ResourceTreeComponent from './resourceScene/sceneComponent'
+import ViewBar from './viewBar'
 
 function FrameworkComponent() {
+
+    const viewTabs = useRef<Tab[]>([])
 
     // Framework-related ref and state
     const nodeTabs = useRef<Tab[]>([])
@@ -597,6 +600,12 @@ function FrameworkComponent() {
                         width={viewportWidth}
                     />
                 )}
+
+                <ViewBar
+                    width={viewportWidth}
+                    tabs={viewTabs.current}
+                    onTabDragEnd={handleTabDragEnd}
+                />
 
                 {/* Scrollable content area */}
                 {nodeStack.current.length > 0 && (
