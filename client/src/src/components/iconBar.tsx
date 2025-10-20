@@ -1,6 +1,6 @@
+import { ICON_REGISTRY } from '@/registry/iconRegistry'
 import { cn } from '@/utils/utils'
 import { LucideProps } from 'lucide-react'
-import { ICON_REGISTRY } from '../resource/iconRegistry'
 
 export interface IconBarClickHandlers {
     [iconID: string]: (iconID: string) => void
@@ -20,7 +20,7 @@ export interface IconEntry {
 
 export default function IconBar({ currentActiveId, clickHandlers }: IconBarResourceBinding) {
     return (
-        <div className='w-[2.08%] h-full bg-[#333333] flex flex-col items-center py-2'>
+        <div className='w-[2%] h-full bg-[#333333] flex flex-col items-center py-2'>
             {ICON_REGISTRY.map(item => (
                 <button
                     type='button'
