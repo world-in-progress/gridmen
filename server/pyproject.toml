@@ -1,0 +1,31 @@
+[project]
+name = "nh-grid-server"
+version = "0.1.0"
+description = "NH Grid Server with Go-based resource management"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.116.1",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "c-two>=0.2.6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "httpx>=0.27.0",
+]
+
+[tool.uv.sources]
+c-two = { git = "https://github.com/world-in-progress/c-two.git", branch = "main" }
+
+[tool.uv.workspace]
+members = [
+    "py-noodle",
+]
+
+[build-system]
+requires = ["setuptools>=40.8.0"]
+build-backend = "setuptools.build_meta"
