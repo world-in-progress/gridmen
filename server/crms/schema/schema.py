@@ -15,18 +15,14 @@ class Schema(ISchema):
             # 默认值
             self.name = ""
             self.epsg = 4326
-            self.starred = False
-            self.description = ""
-            self.base_point = [0.0, 0.0]
+            self.alignment_origin = [0.0, 0.0]
             self.grid_info = []
         else:
             with open(self.resource_path, 'r') as f:
                 data = json.load(f)
                 self.name = data.get("name", "")
                 self.epsg = data.get("epsg", 4326)
-                self.starred = data.get("starred", False)
-                self.description = data.get("description", "")
-                self.base_point = data.get("base_point", [0.0, 0.0])
+                self.alignment_origin = data.get("alignment_origin", [0.0, 0.0])
                 self.grid_info = data.get("grid_info", [])
     
     def get_epsg(self) -> str:
@@ -44,7 +40,7 @@ class Schema(ISchema):
             return f"EPSG:{self.epsg}"
 
     def get_alignment_point(self) -> tuple[float, float]:
-        return tuple(self.base_point)
+        return tuple(self.alignment_origin)
 
     def get_level_resolutions(self) -> list[tuple[float, float]]:
         return [tuple(item) for item in self.grid_info]
@@ -55,12 +51,8 @@ class Schema(ISchema):
                 self.name = info["name"]
             if "epsg" in info:
                 self.epsg = info["epsg"]
-            if "starred" in info:
-                self.starred = info["starred"]
-            if "description" in info:
-                self.description = info["description"]
-            if "base_point" in info:
-                self.base_point = info["base_point"]
+            if "alignment_origin" in info:
+                self.alignment_origin = info["alignment_origin"]
             if "grid_info" in info:
                 self.grid_info = info["grid_info"]
                 
@@ -85,9 +77,7 @@ class Schema(ISchema):
         data = {
             "name": self.name,
             "epsg": self.epsg,
-            "starred": self.starred,
-            "description": self.description,
-            "base_point": self.base_point,
+            "alignment_origin": self.alignment_origin,
             "grid_info": self.grid_info
         }
         with open(self.resource_path, 'w') as f:

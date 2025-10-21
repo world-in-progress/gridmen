@@ -34,9 +34,7 @@ if __name__ == '__main__':
         schema.update_info({
             "name": "test_schema",
             "epsg": 3857,
-            "starred": True,
-            "description": "A test schema for grid system",
-            "base_point": [116.3975, 39.9085],  # 北京的经纬度
+            "alignment_origin": [116.3975, 39.9085],  # 北京的经纬度
             "grid_info": [[100.0, 100.0], [50.0, 50.0], [25.0, 25.0]]
         })
         print("Schema info updated")

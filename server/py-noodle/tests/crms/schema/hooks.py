@@ -11,9 +11,7 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
         default_schema = {
             "name": name,
             "epsg": 4326,
-            "starred": False,
-            "description": "A default schema",
-            "base_point": [0, 0],
+            "alignment_origin": [0, 0],
             "grid_info": []
         }
         with resource_space.open('w') as f:

@@ -24,9 +24,7 @@ async def lifespan(app: FastAPI):
         schema.update_info({
             "name": "remote_test_schema",
             "epsg": 4326,
-            "starred": False,
-            "description": "A remote test schema for grid system",
-            "base_point": [-74.0060, 40.7128],
+            "alignment_origin": [-74.0060, 40.7128],
             "grid_info": [[500.0, 500.0], [250.0, 250.0], [125.0, 125.0]]
         })
 
