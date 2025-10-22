@@ -1,11 +1,11 @@
 import { useEffect, useRef, forwardRef, useState, useCallback } from 'react'
-import MapView from './mapView'
+import MapView, { MapViewContext } from './mapView'
+import { create } from 'zustand'
 import mapboxgl from 'mapbox-gl'
 import ToolPanel from './toolPanel'
 import LayerGroup from './layerGroup'
 import { VIEW_REGISTRY } from '@/registry/viewRegistry'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-
 
 const initialLongitude = 114.051537
 const initialLatitude = 22.446937
@@ -26,8 +26,14 @@ const debounce = (func: (...args: any[]) => void, delay: number) => {
     }
 }
 
+const useMapStore = create<MapViewContext>((set) => ({
+    map: null,
+    setMap: (map: mapboxgl.Map) => set({ map }),
+}))
+
 const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad }, ref) => {
     const mapWrapperRef = useRef<HTMLDivElement>(null)
+    const { map, setMap } = useMapStore()
 
     useEffect(() => {
         mapboxgl.accessToken = import.meta.env.VITE_MAP_TOKEN
@@ -56,6 +62,8 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
                 onMapLoad(mapInstance)
             }
 
+            setMap(mapInstance as mapboxgl.Map)
+
             const currentMapInstance = mapInstance
             resizer = new ResizeObserver(
                 debounce(() => {
@@ -75,7 +83,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
             }
         }
 
-    }, [onMapLoad])
+    }, [onMapLoad, setMap])
 
     return (
         <div className="flex h-full items-center justify-center">
@@ -84,8 +92,10 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
     )
 })
 
+
+
+
 export default function MapViewComponent() {
-    // 存储 map 实例的 state
     const [mapInstance, setMapInstance] = useState<mapboxgl.Map | null>(null)
 
     // 从 viewRegistry 中获取当前视图的 viewModels

@@ -9,3 +9,8 @@ export interface SceneMeta {
     template_name: string
     children: SceneMeta[] | null
 }
+
+export interface baseResponse {
+    success: boolean
+    message: string
+}
