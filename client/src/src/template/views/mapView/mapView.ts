@@ -16,4 +16,5 @@ export default class MapView implements IView {
 
 export interface MapViewContext extends IViewContext {
     map: mapboxgl.Map | null
+    setMap: (map: mapboxgl.Map) => void
 }

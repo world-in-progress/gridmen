@@ -8,6 +8,7 @@ import { MapViewContext } from '../views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
 import { addMapMarker, clearMapMarkers, convertCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { createSchema } from './schemaAPI'
 
 interface SchemaCreationProps {
     context: IViewContext
@@ -388,6 +389,8 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
         setGeneralMessage(null)
         setConvertedCoord(null)
         setIsSelectingPoint(false)
+
+        triggerRepaint()
     }
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -417,7 +420,14 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
 
         setGeneralMessage('Submitting data...')
 
-        // const res = await createSchema.fetch(schemaData,)
+        const res = await createSchema(schemaData)
+        if (res.success) {
+            setGeneralMessage('Created successfully')
+        } else {
+            setGeneralMessage(res.message)
+        }
+
+        resetForm()
     }
 
     return (
