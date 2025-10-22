@@ -1,12 +1,11 @@
 import json
 import logging
 from pathlib import Path
-import pyproj
-from tests.icrms.ischema import ISchema
+import pyproj #gdal
 
 logger = logging.getLogger(__name__)
 
-class Schema(ISchema):
+class Schema:
     def __init__(self, resource_space: str):
         """Initialize Schema from resource space (JSON file)"""
         self.resource_path = Path(resource_space)

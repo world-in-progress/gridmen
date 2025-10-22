@@ -7,7 +7,6 @@ from nh_grid_server.core.config import settings
 from nh_grid_server.schemas.base import BaseResponse
 from nh_grid_server.schemas.project import ProjectMeta
 from nh_grid_server.schemas.schema import GridSchema, ResponseWithGridSchema
-from icrms.ischema import ISchema
 
 # 导入pynoodle相关模块
 import sys
@@ -46,20 +45,7 @@ def get_schema(name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to read schema: {str(e)}')
     
-    # 通过pynoodle连接到Schema CRM获取proj4_defs
-    try:
-        node_key = f'root.topo.schemas.{name}'
-        with noodle.connect(ISchema, node_key, 'lr') as schema:
-            # 调用CRM的get_epsg方法获取转换参数
-            logger.info(f"Getting proj4_defs from CRM for schema {name}")
-            proj4_defs = schema.get_epsg()
-            # 将proj4_defs添加到返回数据中
-            data['proj4_defs'] = proj4_defs
-    except Exception as e:
-        logger.warning(f"Failed to get proj4_defs from CRM: {str(e)}")
-        # 如果无法从CRM获取，则使用空值
-        data['proj4_defs'] = ""  # 改为使用空字符串而不是None
-    
+    # 不再从CRM获取proj4_defs，仅返回存储的schema数据
     return ResponseWithGridSchema(
         grid_schema=GridSchema(**data)
     )

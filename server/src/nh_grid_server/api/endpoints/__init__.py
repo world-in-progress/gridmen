@@ -1,6 +1,4 @@
-from fastapi import APIRouter
 from . import schema
+from . import proj
 
-router = APIRouter(prefix='/api', tags=['api'])
-
-router.include_router(schema.router)
+__all__ = ['schema', 'proj']

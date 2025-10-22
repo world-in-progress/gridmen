@@ -7,7 +7,6 @@ class GridSchema(BaseModel):
     epsg: int # EPSG code for the grid
     alignment_origin: tuple[float, float] # [lon, lat], base point of the grid
     grid_info: list[tuple[float, float]] # [(width_in_meter, height_in_meter), ...], grid size in each level
-    proj4_defs: str = "" # PROJ4 definition string for coordinate transformation
 
     @field_validator('alignment_origin')
     def validate_alignment_origin(cls, v):
