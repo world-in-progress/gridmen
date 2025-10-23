@@ -18,30 +18,9 @@ export default defineConfig(({ command, mode }) => {
                 allow: ['..', '../src/'],
             },
             proxy: {
-                '/local': {
-                    target: env.VITE_LOCAL_API_URL,
+                '/api': {
+                    target: env.VITE_API_URL,
                     changeOrigin: true,
-                    rewrite: (path) => path.replace(/^\/local/, ''),
-                },
-                '/local_model': {
-                    target: env.VITE_LOCAL_MODEL_API_URL,
-                    changeOrigin: true,
-                    rewrite: (path) => path.replace(/^\/local_model/, ''),
-                },
-                '/remote': {
-                    target: env.VITE_REMOTE_API_URL,
-                    changeOrigin: true,
-                    rewrite: (path) => path.replace(/^\/remote/, ''),
-                },
-                '/model': {
-                    target: env.VITE_MODEL_API_URL,
-                    changeOrigin: true,
-                    rewrite: (path) => path.replace(/^\/model/, ''),
-                },
-                '/resource': {
-                    target: env.VITE_RESOURCE_API_URL,
-                    changeOrigin: true,
-                    rewrite: (path) => path.replace(/^\/resource/, ''),
                 },
             },
         },

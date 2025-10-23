@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
+import { createSchema } from './schemaAPI'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -8,7 +9,6 @@ import { MapViewContext } from '../views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
 import { addMapMarker, clearMapMarkers, convertCoordinate, pickCoordsFromMap } from '@/utils/utils'
-import { createSchema } from './schemaAPI'
 
 interface SchemaCreationProps {
     context: IViewContext
@@ -163,28 +163,24 @@ const validateSchemaForm = (
     }
     let generalError: string | null = null
 
-    // Validate name
     if (!data.name.trim()) {
         errors.name = true
         generalError = 'Please enter schema name'
         return { isValid: false, errors, generalError }
     }
 
-    // Validate EPSG code
     if (!data.epsg || isNaN(Number(data.epsg))) {
         errors.epsg = true
         generalError = 'Please enter a valid EPSG code'
         return { isValid: false, errors, generalError }
     }
 
-    // Validate coordinates
     if (!data.lon.trim() || !data.lat.trim() || isNaN(Number(data.lon)) || isNaN(Number(data.lat))) {
         errors.coordinates = true
         generalError = 'Please enter valid coordinates'
         return { isValid: false, errors, generalError }
     }
 
-    // Validate grid levels
     if (data.gridLayerInfos.length === 0) {
         generalError = 'Please add at least one grid level'
         return { isValid: false, errors, generalError }
@@ -207,7 +203,6 @@ const validateSchemaForm = (
         return { isValid: false, errors, generalError }
     }
 
-    // Validate converted coordinates
     if (!data.convertedCoord) {
         generalError = 'Unable to get converted coordinates'
         return { isValid: false, errors, generalError }
@@ -282,7 +277,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
         triggerRepaint()
     }
 
-    const updateCoords = () => {
+    const updateCoords = async () => {
         const pc = pageContext.current
         const epsg = pc.epsg
         const alignmentOrigin = pc.alignmentOrigin
@@ -292,7 +287,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
 
             else if (epsg.toString().length < 4) converted = null
 
-            else converted = convertCoordinate(alignmentOrigin, epsg, 4326)
+            else converted = await convertCoordinate(alignmentOrigin, 4326, epsg)
         }
         setConvertedCoord(converted)
     }

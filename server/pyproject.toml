@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "c-two>=0.2.6",
+    "pyproj>=3.7.1",
 ]
 
 [dependency-groups]

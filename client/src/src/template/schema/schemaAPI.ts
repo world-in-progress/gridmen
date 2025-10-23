@@ -8,6 +8,9 @@ export const createSchema = async (schema: SchemaData): Promise<baseResponse> =>
         const url = API_PREFIX
         const response = await fetch(url, {
             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify(schema),
         })
         if (!response.ok) {
@@ -25,8 +28,7 @@ export const getSchema = async (schemaName: string): Promise<SchemaData> => {
         const url = API_PREFIX + `/${schemaName}`
         const response = await fetch(url, { method: 'GET' })
         if (!response.ok) {
-            throw new Error(`HTTP error! Stat
-                us: ${response.status}`)
+            throw new Error(`HTTP error! Status: ${response.status}`)
         }
         const responseData: SchemaData = await response.json()
         return responseData
