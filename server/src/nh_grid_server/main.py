@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 
 from icrms.ischema import ISchema
-# 修改导入方式，直接从api模块导入
 from nh_grid_server.api import api_router as schema_router
 from pynoodle import noodle, NOODLE_INIT, NOODLE_TERMINATE
 
@@ -24,23 +23,23 @@ async def lifespan(app: FastAPI):
     NOODLE_INIT(app)
 
     try:
-        # 挂载 schemaSet 节点
-        logging.info("Mounting schemaSet node...")
+        # Mount schemaSet node (for test)
+        logging.info('Mounting schemaSet node...')
         noodle.mount('schemaSet', 'schema')
-        logging.info("schemaSet node mounted successfully")
-        
+        logging.info('schemaSet node mounted successfully')
+
     except Exception as e:
-        logging.error(f"Failed to mount or initialize schemaSet node: {e}")
+        logging.error(f'Failed to mount or initialize schemaSet node: {e}')
         raise
 
     yield
     
     try:
         noodle.unmount('schemaSet')
-        logging.info("schemaSet node unmounted successfully")
+        logging.info('schemaSet node unmounted successfully')
     except Exception as e:
-        logging.error(f"Failed to unmount schemaSet node: {e}")
-    
+        logging.error(f'Failed to unmount schemaSet node: {e}')
+
     NOODLE_TERMINATE()
 
 def create_app() -> FastAPI:

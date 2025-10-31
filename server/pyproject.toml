@@ -11,6 +11,8 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "c-two>=0.2.6",
     "pyproj>=3.7.1",
+    "pyyaml>=6.0.3",
+    "py-noodle",
 ]
 
 [dependency-groups]
@@ -21,11 +23,7 @@ dev = [
 
 [tool.uv.sources]
 c-two = { git = "https://github.com/world-in-progress/c-two.git", branch = "main" }
-
-[tool.uv.workspace]
-members = [
-    "py-noodle",
-]
+py-noodle = { path = "py-noodle", editable = true }
 
 [build-system]
 requires = ["setuptools>=40.8.0"]

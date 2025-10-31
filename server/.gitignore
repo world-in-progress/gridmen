@@ -186,5 +186,6 @@ Thumbs.db
 resource
 
 temp/
+noodle.db
 
 *.ignore.yaml
