@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from nh_grid_server.api.endpoints import schema, proj
+from .endpoints import schema, proj
 
 api_router = APIRouter(prefix='/api')
 api_router.include_router(schema.router)

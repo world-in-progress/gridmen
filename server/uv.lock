@@ -296,6 +296,46 @@ wheels = [
 ]
 
 [[package]]
+name = "gridmen-backend"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "c-two" },
+    { name = "fastapi" },
+    { name = "py-noodle" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyproj", version = "3.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pyproj", version = "3.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyyaml" },
+    { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "c-two", git = "https://github.com/world-in-progress/c-two.git?branch=main" },
+    { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "py-noodle", editable = "py-noodle" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "pyproj", specifier = ">=3.7.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "uvicorn", specifier = ">=0.30.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pytest", specifier = ">=7.0.0" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -433,46 +473,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979 },
-]
-
-[[package]]
-name = "nh-grid-server"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "c-two" },
-    { name = "fastapi" },
-    { name = "py-noodle" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyproj", version = "3.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pyproj", version = "3.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pyyaml" },
-    { name = "uvicorn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "c-two", git = "https://github.com/world-in-progress/c-two.git?branch=main" },
-    { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "py-noodle", editable = "py-noodle" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydantic-settings", specifier = ">=2.0.0" },
-    { name = "pyproj", specifier = ">=3.7.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "uvicorn", specifier = ">=0.30.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "pytest", specifier = ">=7.0.0" },
 ]
 
 [[package]]

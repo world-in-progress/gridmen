@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 
 from icrms.ischema import ISchema
-from nh_grid_server.api import api_router as schema_router
+from gridmen_backend.api import api_router as schema_router
 from pynoodle import noodle, NOODLE_INIT, NOODLE_TERMINATE
 
 logging.basicConfig(level=logging.INFO)
@@ -65,4 +65,4 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == '__main__':
-    uvicorn.run('src.nh_grid_server.main:app', host='0.0.0.0', port=8001)
+    uvicorn.run('src.gridmen_backend.main:app', host='0.0.0.0', port=8001)

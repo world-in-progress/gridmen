@@ -1,24 +1,14 @@
 import json
+import logging
 from pathlib import Path
+from pynoodle import noodle
 from fastapi import APIRouter, HTTPException
 
-# 修改相对导入为绝对导入
-from nh_grid_server.core.config import settings
-from nh_grid_server.schemas.base import BaseResponse
-from nh_grid_server.schemas.project import ProjectMeta
-from nh_grid_server.schemas.schema import GridSchema, ResponseWithGridSchema
+from ...core.config import settings
+from ...schemas.base import BaseResponse
+from ...schemas.schema import GridSchema, ResponseWithGridSchema
 
-# 导入pynoodle相关模块
-import sys
-import os
-py_noodle_path = os.path.join(settings.ROOT_DIR, '..', 'py-noodle', 'src')
-if py_noodle_path not in sys.path:
-    sys.path.insert(0, py_noodle_path)
 
-# 现在可以导入pynoodle模块了
-from pynoodle import noodle, NOODLE_INIT, NOODLE_TERMINATE
-
-import logging
 logger = logging.getLogger(__name__)
 
 # APIs for single grid schema ##################################################

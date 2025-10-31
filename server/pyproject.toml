@@ -1,7 +1,7 @@
 [project]
-name = "nh-grid-server"
+name = "gridmen-backend"
 version = "0.1.0"
-description = "NH Grid Server with Go-based resource management"
+description = "The Gridmen Backend"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

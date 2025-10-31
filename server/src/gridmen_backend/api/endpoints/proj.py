@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 # 修改相对导入为绝对导入
-from nh_grid_server.core.config import settings
+from ...core.config import settings
 from crms.proj.proj import Proj  # 直接导入Proj类
 
 import pyproj  # 直接导入pyproj用于备用方案
