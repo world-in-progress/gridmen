@@ -6,6 +6,7 @@ export interface GetTreeNodeInfoParams {
 
 export interface SceneMeta {
     node_key: string
+    access_info: string | null
     template_name: string
     children: SceneMeta[] | null
 }

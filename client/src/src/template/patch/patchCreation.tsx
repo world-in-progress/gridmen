@@ -1,428 +1,56 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { createSchema } from './schemaAPI'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
-import { GridLayerInfo, SchemaData } from './types'
-import { IViewContext } from '../views/IViewContext'
-import { MapViewContext } from '../views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
-import { addMapMarker, clearMapMarkers, convertCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { Crosshair, MapPin, MapPinPlus, Save, SquaresIntersect, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { SchemaData } from '../schema/types'
 
-interface SchemaCreationProps {
-    context: IViewContext
-}
-
-interface GridLayer {
-    id: number
-    width: string
-    height: string
-}
+const patchTips = [
+    { tip1: 'Fill in the name of the Schema and the EPSG code.' },
+    { tip2: 'Description is optional.' },
+    { tip3: 'Click the button to draw and obtain or manually fill in the coordinates of the reference point.' },
+    { tip4: 'Set the grid size for each level.' },
+]
 
 interface PageContext {
     name: string
+    schema: SchemaData | null
     epsg: number | null
-    alignmentOrigin: [number, number]
-    gridLayers: GridLayer[]
 }
 
-interface FormErrors {
-    name: boolean
-    epsg: boolean
-    coordinates: boolean
-}
 
-interface ValidationResult {
-    isValid: boolean
-    errors: FormErrors
-    generalError: string | null
-}
+export default function PatchCreation() {
 
-const schemaTips = [
-    { tip1: 'Fill in the name of the Schema and the EPSG code.' },
-    { tip2: 'Click the button to draw and obtain or manually fill in the coordinates of the reference point.' },
-    { tip3: 'Set the grid size for each level.' },
-]
-
-const gridLevelText = {
-    title: 'Grid Level',
-    addButton: 'Add Grid Level',
-    noLayers: 'No layers added yet. Click the button above to add a layer.',
-    rulesTitle: 'Grid levels should follow these rules:',
-    rule1: 'Each level should have smaller cell dimensions than the previous level',
-    rule2: "Previous level's width/height must be a multiple of the current level's width/height",
-    rule3: 'First level defines the base grid cell size, and higher levels define increasingly finer grids'
-}
-
-const gridItemText = {
-    level: 'Level',
-    remove: 'Remove',
-    width: 'Width/m',
-    height: 'Height/m',
-    widthPlaceholder: 'Width',
-    heightPlaceholder: 'Height'
-}
-
-const validateGridLayers = (gridLayers: GridLayerInfo[]): { errors: Record<number, string>, isValid: boolean } => {
-    const errors: Record<number, string> = {}
-    let isValid = true
-
-    const errorText = {
-        and: () => ` and `,
-        empty: () => 'Width and height cannot be empty',
-        notPositive: () => 'Width and height must be positive numbers',
-        notSmaller: (prevWidth: number, prevHeight: number) => `Cell dimensions should be smaller than previous level (${prevWidth}×${prevHeight})`,
-        notMultiple: (prevWidth: number, currentWidth: number, prevHeight: number, currentHeight: number) => `Previous level's dimensions (${prevWidth}×${prevHeight}) must be multiples of current level (${currentWidth}×${currentHeight})`,
-        widthNotSmaller: (prevWidth: number) => `Width must be smaller than previous level (${prevWidth})`,
-        widthNotMultiple: (prevWidth: number, currentWidth: number) => `Previous level's width (${prevWidth}) must be a multiple of current width (${currentWidth})`,
-        heightNotSmaller: (prevHeight: number) => `Height must be smaller than previous level (${prevHeight})`,
-        heightNotMultiple: (prevHeight: number, currentHeight: number) => `Previous level's height (${prevHeight}) must be a multiple of current height (${currentHeight})`,
-    }
-
-    gridLayers.forEach((layer, index) => {
-        delete errors[layer.id]
-        const width = String(layer.width).trim()
-        const height = String(layer.height).trim()
-
-        if (width == '' || height == '') {
-            errors[layer.id] = errorText.empty()
-            isValid = false
-            return
-        }
-
-        const currentWidth = Number(width)
-        const currentHeight = Number(height)
-
-        if (index > 0) {
-            const prevLayer = gridLayers[index - 1]
-            const prevWidth = Number(String(prevLayer.width).trim())
-            const prevHeight = Number(String(prevLayer.height).trim())
-
-            let hasWidthError = false
-            if (currentWidth >= prevWidth) {
-                errors[layer.id] = errorText.widthNotSmaller(prevWidth)
-                hasWidthError = true
-                isValid = false
-            } else if (prevWidth % currentWidth !== 0) {
-                errors[layer.id] = errorText.widthNotMultiple(
-                    prevWidth,
-                    currentWidth
-                )
-                hasWidthError = true
-                isValid = false
-            }
-
-            if (currentHeight >= prevHeight) {
-                if (hasWidthError) {
-                    errors[layer.id] +=
-                        errorText.and +
-                        errorText.heightNotSmaller(prevHeight)
-                } else {
-                    errors[layer.id] =
-                        errorText.heightNotSmaller(prevHeight)
-                }
-                isValid = false
-            } else if (prevHeight % currentHeight !== 0) {
-                if (hasWidthError) {
-                    errors[layer.id] +=
-                        errorText.and +
-                        errorText.heightNotMultiple(
-                            prevHeight,
-                            currentHeight
-                        )
-                } else {
-                    errors[layer.id] = errorText.heightNotMultiple(
-                        prevHeight,
-                        currentHeight
-                    )
-                }
-                isValid = false
-            }
-        }
-    })
-    return { errors, isValid }
-}
-
-const validateSchemaForm = (
-    data: {
-        name: string
-        epsg: number
-        lon: string
-        lat: string
-        gridLayerInfos: GridLayerInfo[]
-        convertedCoord: [number, number] | null
-    },
-): ValidationResult => {
-    const errors = {
+    const [formErrors, setFormErrors] = useState<{
+        name: boolean
+        bounds: boolean
+    }>({
         name: false,
-        epsg: false,
-        description: false,
-        coordinates: false,
-    }
-    let generalError: string | null = null
-
-    if (!data.name.trim()) {
-        errors.name = true
-        generalError = 'Please enter schema name'
-        return { isValid: false, errors, generalError }
-    }
-
-    if (!data.epsg || isNaN(Number(data.epsg))) {
-        errors.epsg = true
-        generalError = 'Please enter a valid EPSG code'
-        return { isValid: false, errors, generalError }
-    }
-
-    if (!data.lon.trim() || !data.lat.trim() || isNaN(Number(data.lon)) || isNaN(Number(data.lat))) {
-        errors.coordinates = true
-        generalError = 'Please enter valid coordinates'
-        return { isValid: false, errors, generalError }
-    }
-
-    if (data.gridLayerInfos.length === 0) {
-        generalError = 'Please add at least one grid level'
-        return { isValid: false, errors, generalError }
-    }
-    for (let i = 0; i < data.gridLayerInfos.length; i++) {
-        const layer = data.gridLayerInfos[i]
-        if (
-            !layer.width.toString().trim() ||
-            !layer.height.toString().trim() ||
-            isNaN(parseInt(layer.width.toString())) ||
-            isNaN(parseInt(layer.height.toString()))
-        ) {
-            generalError = `Please enter valid width and height for grid level ${i + 1}`
-            return { isValid: false, errors, generalError }
-        }
-    }
-    const { errors: layerErrors, isValid: gridInfoValid } = validateGridLayers(data.gridLayerInfos)
-    if (!gridInfoValid) {
-        generalError = 'Please fix errors in grid levels'
-        return { isValid: false, errors, generalError }
-    }
-
-    if (!data.convertedCoord) {
-        generalError = 'Unable to get converted coordinates'
-        return { isValid: false, errors, generalError }
-    }
-
-    return { isValid: true, errors, generalError }
-}
-
-export default function SchemaCreation({ context }: SchemaCreationProps) {
-    const mapContext = context as MapViewContext
-    const map = mapContext.map
-
+        bounds: false,
+    })
     const pageContext = useRef<PageContext>({
         name: '',
+        schema: null,
         epsg: null,
-        alignmentOrigin: [0, 0],
-        gridLayers: []
     })
-
-    const picking = useRef<{ marker: mapboxgl.Marker | null, cancel: () => void }>({ marker: null, cancel: () => { } })
-
-    const [isSelectingPoint, setIsSelectingPoint] = useState(false)
-    const [generalMessage, setGeneralMessage] = useState<string | null>(null)
-    const [layerErrors, setLayerErrors] = useState<Record<number, string>>({})
-    const [convertedCoord, setConvertedCoord] = useState<[number, number] | null>(null)
-    const [formErrors, setFormErrors] = useState<FormErrors>({
-        name: false,
-        epsg: false,
-        coordinates: false,
-    })
-
-    let bgColor = 'bg-red-50'
-    let textColor = 'text-red-700'
-    let borderColor = 'border-red-200'
-    if (generalMessage?.includes('Submitting data')) {
-        bgColor = 'bg-orange-50'
-        textColor = 'text-orange-700'
-        borderColor = 'border-orange-200'
-    }
-    else if (generalMessage?.includes('Created successfully')) {
-        bgColor = 'bg-green-50'
-        textColor = 'text-green-700'
-        borderColor = 'border-green-200'
-    }
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
-    useEffect(() => {
-        loadContext()
-
-        return () => {
-            unloadContext()
-        }
-    }, [])
-
-    const loadContext = async () => {
-        triggerRepaint()
-    }
-
-    const unloadContext = async () => {
-        return
-    }
-
-    const handleSetName = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.name = e.target.value
-        triggerRepaint()
-    }
-
-    const handleSetEPSG = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.epsg = parseInt(e.target.value)
-        updateCoords()
-        triggerRepaint()
-    }
-
-    const updateCoords = async () => {
-        const pc = pageContext.current
-        const epsg = pc.epsg
-        const alignmentOrigin = pc.alignmentOrigin
-        let converted: [number, number] | null = null
-        if (alignmentOrigin[0] && alignmentOrigin[1] && epsg) {
-            if (epsg < 1000 || epsg > 32767) converted = null
-
-            else if (epsg.toString().length < 4) converted = null
-
-            else converted = await convertCoordinate(alignmentOrigin, 4326, epsg)
-        }
-        setConvertedCoord(converted)
-    }
-
-    const handleSetAlignmentOriginLon = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.alignmentOrigin[0] = parseFloat(e.target.value)
-        updateCoords()
-        triggerRepaint()
-    }
-
-    const handleSetAlignmentOriginLat = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.alignmentOrigin[1] = parseFloat(e.target.value)
-        updateCoords()
-        triggerRepaint()
-    }
-
-    const handlePickAlignmentOrigin = () => {
-        if (!map) return
-
-        if (isSelectingPoint) {
-            setIsSelectingPoint(false)
-            picking.current.cancel()
-            picking.current.cancel = () => { }
-            return
-        }
-
-        clearMapMarkers()
-        picking.current.marker = null
-
-        picking.current.cancel = pickCoordsFromMap(map, { color: '#FF0000' }, (marker) => {
-            picking.current.marker = marker
-
-            const pc = pageContext.current
-            const bp = marker.getLngLat()
-            pc.alignmentOrigin = [bp.lng, bp.lat]
-            updateCoords()
-            setIsSelectingPoint(false)
-        })
-
-        setIsSelectingPoint(true)
-    }
-
-    const handleDrawAlignmentOrigin = () => {
-        if (!map || !pageContext.current.alignmentOrigin) return
-        clearMapMarkers()
-        addMapMarker(map, pageContext.current.alignmentOrigin)
-    }
-
-    const handleAddGridLayer = () => {
-        const gridLayers = pageContext.current.gridLayers
-        gridLayers[gridLayers.length] = {
-            id: gridLayers.length,
-            width: '',
-            height: ''
-        }
-        triggerRepaint()
-    }
-
-    const handleUpdateGridSize = (id: number, width: string, height: string) => {
-        const gridLayers = pageContext.current.gridLayers
-        if (id >= gridLayers.length) gridLayers[id] = { id, width, height }
-        gridLayers[id] = { id, width, height }
-
-        const { errors } = validateGridLayers(gridLayers)
-        setLayerErrors(errors)
-        triggerRepaint()
-    }
-
-    const handleRemoveLayer = (id: number) => {
-
-        if (id >= pageContext.current.gridLayers.length) return
-
-        pageContext.current.gridLayers = pageContext.current.gridLayers.filter(layer => layer.id !== id)
-        pageContext.current.gridLayers.forEach((layer, index) => layer.id = index)
-
-        const { errors } = validateGridLayers(pageContext.current.gridLayers)
-        setLayerErrors(errors)
-        triggerRepaint()
-    }
-
-    const resetForm = async () => {
-
-        // await (node as ResourceNode).deletePageContext()
-        // pageContext.current = new SchemasPageContext()
-
-        picking.current.marker?.remove()
-
-        setFormErrors({
-            name: false,
-            epsg: false,
-            coordinates: false,
-        })
-        setLayerErrors({})
-        setGeneralMessage(null)
-        setConvertedCoord(null)
-        setIsSelectingPoint(false)
-
-        triggerRepaint()
-    }
-
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSchemaNodeDragOver = (e: React.DragEvent) => {
         e.preventDefault()
-
-        const validation = validateSchemaForm({
-            name: pageContext.current.name,
-            epsg: pageContext.current.epsg!,
-            lon: pageContext.current.alignmentOrigin[0].toString(),
-            lat: pageContext.current.alignmentOrigin[1].toString(),
-            gridLayerInfos: pageContext.current.gridLayers,
-            convertedCoord
-        })
-
-        if (!validation.isValid) {
-            setFormErrors(validation.errors)
-            setGeneralMessage(validation.generalError)
-            return
-        }
-
-        const schemaData: SchemaData = {
-            name: pageContext.current.name,
-            epsg: pageContext.current.epsg!,
-            alignment_origin: pageContext.current.alignmentOrigin,
-            grid_info: pageContext.current.gridLayers.map(layer => [parseFloat(layer.width), parseFloat(layer.height)]),
-        }
-
-        setGeneralMessage('Submitting data...')
-
-        const res = await createSchema(schemaData)
-        if (res.success) {
-            setGeneralMessage('Created successfully')
-        } else {
-            setGeneralMessage(res.message)
-        }
-
-        resetForm()
+        e.currentTarget.classList.add('border-blue-500', 'bg-blue-50')
     }
+    const handleSchemaNodeDragLeave = (e: React.DragEvent) => {
+        e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
+    }
+    const handleSchemaNodeDrop = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
+        const schemaName = e.dataTransfer.getData('text/plain')
+        if (schemaName) {
+            console.log('Dropped schema:', schemaName)
+        }
+    }
+
 
     return (
         <div className='w-full h-full flex flex-col'>
@@ -433,11 +61,11 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                 <div className='w-full flex justify-center items-center gap-4 p-4'>
                     <Avatar className='h-10 w-10 border-2 border-white'>
                         <AvatarFallback className='bg-[#007ACC]'>
-                            <MapPinPlus className='h-6 w-6 text-white' />
+                            <SquaresIntersect className='h-6 w-6 text-white' />
                         </AvatarFallback>
                     </Avatar>
                     <h1 className='font-bold text-[25px] relative flex items-center'>
-                        Create New Schema
+                        Create New Patch
                         <span className=" bg-[#D63F26] rounded px-0.5 mb-2 text-[12px] inline-flex items-center mx-1">WorkSpace</span>
                     </h1>
                 </div>
@@ -450,7 +78,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                     {/* ----------*/}
                     <div className='text-sm px-4'>
                         <ul className='list-disc space-y-1'>
-                            {schemaTips.map((tip, index) => (
+                            {patchTips.map((tip, index) => (
                                 <li key={index}>
                                     {Object.values(tip)[0]}
                                 </li>
@@ -459,7 +87,6 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                     </div>
                 </div>
             </div>
-            {/* 功能部分 - 可滚动 */}
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
                 <div className='w-2/3 mx-auto mt-4 mb-4 space-y-4 pb-4'>
                     {/* ----------- */}
@@ -467,17 +94,48 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                     {/* ----------- */}
                     <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
                         <h2 className='text-black text-lg font-semibold mb-2'>
-                            New Schema Name
+                            New Patch Name
                         </h2>
                         <div className='space-y-2'>
                             <Input
                                 id='name'
                                 value={pageContext.current.name}
-                                onChange={handleSetName}
-                                placeholder={'Enter new schema name'}
+                                onChange={(e) => {
+                                    pageContext.current.name = e.target.value
+                                    triggerRepaint()
+                                }}
+                                placeholder={'Enter new patch name'}
                                 className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''
                                     }`}
                             />
+                        </div>
+                    </div>
+                    {/* --------- */}
+                    {/* Belong To Schema */}
+                    {/* --------- */}
+                    <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
+                        <h2 className='text-black text-lg font-semibold mb-2'>
+                            Belong To Schema
+                        </h2>
+                        <div className='space-y-2'>
+                            <div
+                                onDragOver={handleSchemaNodeDragOver}
+                                onDragLeave={handleSchemaNodeDragLeave}
+                                onDrop={handleSchemaNodeDrop}
+                                className='border-2 border-dashed border-gray-300 rounded-lg p-6 text-center transition-colors cursor-pointer hover:border-gray-400'
+                            >
+                                {pageContext.current.schema?.name ? (
+                                    <div className='text-black'>
+                                        <div className='font-medium'>{pageContext.current.schema.name}</div>
+                                        <div className='text-sm text-gray-500 mt-1'>Click or drag to change</div>
+                                    </div>
+                                ) : (
+                                    <div className='text-gray-500'>
+                                        <div className='font-medium'>Drag a schema here</div>
+                                        <div className='text-sm mt-1'>or click to select</div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     {/* --------- */}

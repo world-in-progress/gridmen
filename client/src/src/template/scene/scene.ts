@@ -2,23 +2,43 @@ import * as api from '../noodle/apis'
 import DefaultPageContext from "../context/default"
 import ContextStorage from "../context/contextStorage"
 import { IResourceNode, IResourceTree } from "./iscene"
+import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
+import DefaultTemplate from '../default'
+import { INodeTemplate } from '../itemplate'
 
 export class ResourceNode implements IResourceNode {
     key: string
-    tree: ResourceTree
+    lockId: string = ''
     aligned: boolean = false
+    tree: ResourceTree
+    template: INodeTemplate | null
     parent: IResourceNode | null
-    template_name: string
     children: Map<string, IResourceNode> = new Map()
+
+    get id(): string { return this.key }
+    get name(): string { return this.key.split('.').pop() || '' }
+    get template_name(): string { return this.template?.templateName || '' }
+
 
     private _pageContext: DefaultPageContext | undefined | null = null
 
-    constructor(tree: ResourceTree, node_key: string, parent: IResourceNode | null) {
+    constructor(tree: ResourceTree, node_key: string, parent: IResourceNode | null, template: INodeTemplate | null) {
         this.key = node_key
         this.tree = tree
         this.parent = parent
-        this.template_name = ''
+        this.template = template
     }
+}
+
+interface TreeUpdateCallback {
+    (): void
+}
+
+interface ResourceTreeHandlers {
+    onNodeMenuOpen: (node: IResourceNode) => void
+    onNodeRemove: (node: IResourceNode) => void
+    onNodeClick: (node: IResourceNode) => void
+    onNodeDoubleClick: (node: IResourceNode) => void
 }
 
 export class ResourceTree implements IResourceTree {
@@ -27,7 +47,30 @@ export class ResourceTree implements IResourceTree {
 
     cs: ContextStorage = ContextStorage.getInstance()
 
+    private handleNodeClick: (node: IResourceNode) => void = () => { }
+    private handleNodeDoubleClick: (node: IResourceNode) => void = () => { }
+    private handleNodeMenuOpen: (node: IResourceNode) => void = () => { }
+    private handleNodeRemove: (node: IResourceNode) => void = () => { }
+
+    private updateCallbacks: Set<TreeUpdateCallback> = new Set()
     private expandedNodes: Set<string> = new Set()
+
+    editingNodeIds: Set<string> = new Set()
+
+    constructor() {
+
+    }
+
+    bindHandlers(handlers: ResourceTreeHandlers): void {
+        this.handleNodeMenuOpen = handlers.onNodeMenuOpen
+        this.handleNodeRemove = handlers.onNodeRemove
+        this.handleNodeClick = handlers.onNodeClick
+        this.handleNodeDoubleClick = handlers.onNodeDoubleClick
+    }
+
+    getNodeMenuHandler(): (node: IResourceNode) => void {
+        return this.handleNodeMenuOpen
+    }
 
     async setRoot(root: IResourceNode): Promise<void> {
         if (this.root) {
@@ -52,15 +95,14 @@ export class ResourceTree implements IResourceTree {
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Update parent-child relationship
-        const idPrefix = this.isPublic ? 'public:' : 'private:'
         if (meta.children && meta.children.length > 0) {
             for (const child of meta.children) {
-                if (oldChildrenMap.has(idPrefix + child.node_key)) {
-                    node.children.set(idPrefix + child.node_key, oldChildrenMap.get(idPrefix + child.node_key)!)
+                if (oldChildrenMap.has(child.node_key)) {
+                    node.children.set(child.node_key, oldChildrenMap.get(child.node_key)!)
                     continue // skip if child node already exists
                 }
 
-                const childNode = new ResourceNode(this, child.node_key, node, new SCENARIO_NODE_REGISTRY[child.template_name]())
+                const childNode = new ResourceNode(this, child.node_key, node, TEMPLATE_REGISTRY[child.template_name])
                 this.scene.set(childNode.id, childNode) // add child node to the scene map
             }
         }
@@ -71,5 +113,45 @@ export class ResourceTree implements IResourceTree {
 
         // Mark as aligned after loading
         node.aligned = true
+    }
+
+    subscribe(callback: TreeUpdateCallback): () => void {
+        this.updateCallbacks.add(callback)
+        return () => {
+            this.updateCallbacks.delete(callback)
+        }
+    }
+
+    notifyDomUpdate(): void {
+        this.updateCallbacks.forEach(callback => callback())
+    }
+
+    async removeNode(node: IResourceNode): Promise<void> {
+        const parent = node.parent as ResourceNode
+        parent.children.delete(node.id)
+
+        this.scene.delete(node.id)
+        await this.alignNodeInfo(parent, true)
+
+        if (this.editingNodeIds.has(node.id))
+            await this.stopEditingNode(node)
+
+        this.handleNodeRemove(node) // notify all trees that the node has been removed
+        this.notifyDomUpdate()
+    }
+
+    static async create(): Promise<ResourceTree> {
+        try {
+            const tree = new ResourceTree()
+
+            const rootNodeMeta = await api.scene.getTreeNodeInfo({ node_key: '_' })
+            const rootNode = new ResourceNode(tree, rootNodeMeta.node_key, null, TEMPLATE_REGISTRY[rootNodeMeta.template_name])
+
+            await tree.setRoot(rootNode)
+
+            return tree
+        } catch (error) {
+            throw new Error(`Failed to create resource tree: ${error}`)
+        }
     }
 }
