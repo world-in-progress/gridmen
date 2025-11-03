@@ -10,12 +10,12 @@ class IProj:
     """
     def get_proj4_string(self, epsg_code: int) -> str:
         """
-        根据EPSG代码获取PROJ4字符串定义
+        Get PROJ4 string definition by EPSG code
         
-        参数:
-            epsg_code (int): EPSG坐标系代码
+        Parameters:
+            epsg_code (int): EPSG coordinate system code
             
         Returns:
-            str: PROJ4字符串定义
+            str: PROJ4 string definition
         """
         ...

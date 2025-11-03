@@ -2,7 +2,6 @@ from pathlib import Path
 
 def MOUNT(node_key: str, params: dict | None) -> dict | None:
     name = node_key.split('.')[-1]
-    # 修复路径以匹配项目结构
     resource_space = Path.cwd() / 'resource' / 'topo' / 'schemas' / name / 'names.json'
     if not resource_space.exists():
         resource_space.parent.mkdir(parents=True, exist_ok=True)
@@ -15,7 +14,6 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
 
 def UNMOUNT(node_key: str) -> None:
     name = node_key.split('.')[-1]
-    # 修复路径以匹配项目结构
     resource_space = Path.cwd() / 'resource' / 'topo' / 'schemas' / name / 'names.json'
     if resource_space.exists():
         resource_space.unlink()

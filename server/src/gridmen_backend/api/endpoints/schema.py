@@ -35,7 +35,6 @@ def get_schema(name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to read schema: {str(e)}')
     
-    # 不再从CRM获取proj4_defs，仅返回存储的schema数据
     return ResponseWithGridSchema(
         grid_schema=GridSchema(**data)
     )
@@ -62,24 +61,14 @@ def register_schema(data: GridSchema):
         
         with open(grid_schema_path, 'w') as f:
             f.write(data.model_dump_json(indent=4))
-            
-        # Create resoruce folder for patches and grids
-        patches_path = grid_schema_path.parent / 'patches'
-        grids_path = grid_schema_path.parent / 'grids'
-        patches_path.mkdir(exist_ok=True)
-        grids_path.mkdir(exist_ok=True)
         
-        # Mount scene nodes using pynoodle directly
-        # 确保父节点存在
         try:
             noodle.mount('root.topo.schemas', 'schema')
         except Exception:
-            pass  # 父节点可能已经存在
+            pass
             
-        # 挂载schema节点
+        # Mount schem
         noodle.mount(f'root.topo.schemas.{data.name}', 'schema')
-        noodle.mount(f'root.topo.schemas.{data.name}.patches', 'patches')
-        noodle.mount(f'root.topo.schemas.{data.name}.grids', 'grids')
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to save grid schema: {str(e)}')
@@ -129,29 +118,7 @@ def delete_schema(name: str):
         raise HTTPException(status_code=404, detail='Grid schema not found')
     
     try:
-        # TODO: Delete all patches and grids under this schema and unmount them
-        patches_path = grid_schema_path.parent / 'patches'
-        grids_path = grid_schema_path.parent / 'grids'
-        if patches_path.exists():
-            for patch in patches_path.glob('*'):
-                if patch.is_dir():
-                    patch.rmdir()
-                    noodle.unmount(f'root.topo.schemas.{name}.patches.{patch.name}')
-                    
-            patches_path.rmdir()
-            noodle.unmount(f'root.topo.schemas.{name}.patches')
-
-        if grids_path.exists():
-            for grid in grids_path.glob('*'):
-                if grid.is_dir():
-                    grid.rmdir()
-                    noodle.unmount(f'root.topo.schemas.{name}.grids.{grid.name}')
-                    
-            grids_path.rmdir()
-            noodle.unmount(f'root.topo.schemas.{name}.grids')
-                    
-        grid_schema_path.unlink()
-        grid_schema_path.parent.rmdir()
+        # Only unmount the node, the UNMOUNT hook will handle file deletion
         noodle.unmount(node_key)
         
     except Exception as e:
