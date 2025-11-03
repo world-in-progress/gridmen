@@ -1,8 +1,35 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Crosshair, MapPin, MapPinPlus, Save, SquaresIntersect, X } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 import { SchemaData } from '../schema/types'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { IViewContext } from '../views/IViewContext'
+import { Separator } from '@/components/ui/separator'
+import { Save, SquaresIntersect } from 'lucide-react'
+import { MapViewContext } from '../views/mapView/mapView'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { addMapMarker, addMapPatchBounds, clearMapMarkers, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+
+interface PatchCreationProps {
+    context: IViewContext
+}
+
+interface PageContext {
+    name: string
+    schema: SchemaData | null
+    originBounds: [number, number, number, number] | null       // EPSG: 4326
+    adjustedBounds: [number, number, number, number] | null     // EPSG: 4326
+    inputBounds: [number, number, number, number] | null        // EPSG: schema
+    hasBounds: boolean
+}
+
+interface RectangleCoordinates {
+    northEast: [number, number];
+    southEast: [number, number];
+    southWest: [number, number];
+    northWest: [number, number];
+    center: [number, number];
+}
 
 const patchTips = [
     { tip1: 'Fill in the name of the Schema and the EPSG code.' },
@@ -11,29 +38,59 @@ const patchTips = [
     { tip4: 'Set the grid size for each level.' },
 ]
 
-interface PageContext {
-    name: string
-    schema: SchemaData | null
-    epsg: number | null
-}
+export default function PatchCreation({ context }: PatchCreationProps) {
 
+    const mapContext = context as MapViewContext
+    const map = mapContext.map!
+    const drawInstance = mapContext.drawInstance!
 
-export default function PatchCreation() {
-
+    const [isDrawingBounds, setIsDrawingBounds] = useState(false)
+    const [generalMessage, setGeneralMessage] = useState<string | null>(null)
+    const [convertCoordinate, setConvertCoordinate] = useState<[number, number, number, number] | null>(null)
+    const [adjustedCoordinate, setAdjustedCoordinate] = useState<[number, number, number, number] | null>(null)
     const [formErrors, setFormErrors] = useState<{
         name: boolean
+        schema: boolean
         bounds: boolean
     }>({
         name: false,
+        schema: false,
         bounds: false,
     })
+
+    const schemaMarkerPoint = useRef<[number, number]>([0, 0])
+    const drawCoordinates = useRef<RectangleCoordinates | null>(null)
     const pageContext = useRef<PageContext>({
         name: '',
         schema: null,
-        epsg: null,
+        originBounds: null,
+        adjustedBounds: null,
+        inputBounds: null,
+        hasBounds: false,
     })
 
+    let bgColor = 'bg-red-50'
+    let textColor = 'text-red-700'
+    let borderColor = 'border-red-200'
+    if (generalMessage?.includes('Submitting data')) {
+        bgColor = 'bg-orange-50'
+        textColor = 'text-orange-700'
+        borderColor = 'border-orange-200'
+    }
+    else if (generalMessage?.includes('Created successfully')) {
+        bgColor = 'bg-green-50'
+        textColor = 'text-green-700'
+        borderColor = 'border-green-200'
+    }
+
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
+
+    const formatSingleValue = (value: number): string => value.toFixed(6)
+
+    const handleSetName = (e: React.ChangeEvent<HTMLInputElement>) => {
+        pageContext.current.name = e.target.value
+        triggerRepaint()
+    }
 
     const handleSchemaNodeDragOver = (e: React.DragEvent) => {
         e.preventDefault()
@@ -51,6 +108,114 @@ export default function PatchCreation() {
         }
     }
 
+    const handleSetEPSG = (e: React.ChangeEvent<HTMLInputElement>) => {
+        pageContext.current.schema!.epsg = parseInt(e.target.value)
+        updateCoords()
+        triggerRepaint()
+    }
+
+    const updateCoords = async () => {
+        console.log('updateCoords')
+    }
+
+    const handleDrawBounds = () => {
+        if (isDrawingBounds) {
+            setIsDrawingBounds(false)
+            stopDrawRectangle(map, drawInstance)
+            document.removeEventListener('rectangle-draw-complete', onDrawComplete)
+            return
+        } else {
+            setIsDrawingBounds(true)
+            startDrawRectangle(map, drawInstance)
+            document.addEventListener('rectangle-draw-complete', onDrawComplete)
+        }
+    }
+
+    const onDrawComplete = (event: Event) => {
+        const customEvent = event as CustomEvent<{ coordinates: RectangleCoordinates | null }>
+        if (customEvent.detail.coordinates) {
+            drawCoordinates.current = customEvent.detail.coordinates
+            adjustCoords()
+            addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], '4326')
+        }
+        document.removeEventListener('rectangle-draw-complete', onDrawComplete)
+        setIsDrawingBounds(false)
+        stopDrawRectangle(map, drawInstance)
+        triggerRepaint()
+    }
+
+    /////////////////////////////////////////////////////
+
+    const adjustCoords = () => {
+        console.log('adjustCoords')
+    }
+
+    const clearDrawPatchBounds = () => {
+        console.log('clearDrawPatchBounds')
+    }
+
+    const clearGridLines = () => {
+        console.log('clearGridLines')
+    }
+
+    /////////////////////////////////////////////////////
+
+    const covertBoundsTo4326 = async (bounds: [number, number, number, number], fromEPSG: number): Promise<[number, number, number, number] | null> => {
+        const SW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, 4326)
+        const NE = await convertPointCoordinate([bounds[2], bounds[3]], fromEPSG, 4326)
+        if (!SW || !NE) return null
+        return [SW[0], SW[1], NE[0], NE[1]]
+    }
+
+    const handleSetInputBounds = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
+        if (!pageContext.current.inputBounds) {
+            pageContext.current.inputBounds = [0, 0, 0, 0]
+        }
+        const value = parseFloat(e.target.value) || 0
+        pageContext.current.inputBounds[index] = value
+        pageContext.current.hasBounds = false // reset adjusted bounds flag because input bounds have changed
+        triggerRepaint()
+    }
+
+    const drawBoundsByParams = async () => {
+        const inputBounds = pageContext.current.inputBounds
+        if (pageContext.current.hasBounds) {
+            toast.info('Map bounds have been adjusted')
+            return
+        }
+
+        if (inputBounds && inputBounds.length === 4) {
+            clearMapMarkers()
+            addMapMarker(map, schemaMarkerPoint.current)
+            clearDrawPatchBounds()
+            clearGridLines()
+            const inputBoundsOn4326 = await covertBoundsTo4326(inputBounds!, pageContext.current.schema!.epsg)
+
+            if (!inputBoundsOn4326) {
+                toast.error('Failed to convert bounds to EPSG:4326')
+                return
+            }
+
+            drawCoordinates.current = {
+                southWest: [inputBoundsOn4326[0], inputBoundsOn4326[1]],
+                southEast: [inputBoundsOn4326[2], inputBoundsOn4326[1]],
+                northEast: [inputBoundsOn4326[2], inputBoundsOn4326[3]],
+                northWest: [inputBoundsOn4326[0], inputBoundsOn4326[3]],
+                center: [(inputBoundsOn4326[0] + inputBoundsOn4326[2]) / 2, (inputBoundsOn4326[1] + inputBoundsOn4326[3]) / 2],
+            }
+            adjustCoords()
+            addMapPatchBounds(map, inputBoundsOn4326, '4326')
+        }
+    }
+
+    const formatCoordinate = (coord: [number, number] | undefined) => {
+        if (!coord) return '---'
+        return `[${coord[0].toFixed(6)}, ${coord[1].toFixed(6)}]`
+    }
+
+    const handleSubmit = () => {
+        console.log('handleSubmit')
+    }
 
     return (
         <div className='w-full h-full flex flex-col'>
@@ -100,10 +265,7 @@ export default function PatchCreation() {
                             <Input
                                 id='name'
                                 value={pageContext.current.name}
-                                onChange={(e) => {
-                                    pageContext.current.name = e.target.value
-                                    triggerRepaint()
-                                }}
+                                onChange={handleSetName}
                                 placeholder={'Enter new patch name'}
                                 className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''
                                     }`}
@@ -127,12 +289,11 @@ export default function PatchCreation() {
                                 {pageContext.current.schema?.name ? (
                                     <div className='text-black'>
                                         <div className='font-medium'>{pageContext.current.schema.name}</div>
-                                        <div className='text-sm text-gray-500 mt-1'>Click or drag to change</div>
+                                        <div className='text-sm text-gray-500 mt-1'>Drag to change</div>
                                     </div>
                                 ) : (
                                     <div className='text-gray-500'>
                                         <div className='font-medium'>Drag a schema here</div>
-                                        <div className='text-sm mt-1'>or click to select</div>
                                     </div>
                                 )}
                             </div>
@@ -149,206 +310,262 @@ export default function PatchCreation() {
                             <Input
                                 id='epsg'
                                 placeholder={'Enter EPSG code (e.g. 4326)'}
-                                className={`text-black w-full border-gray-300 ${formErrors.epsg ? 'border-red-500 focus:ring-red-500' : ''}`}
-                                value={pageContext.current.epsg ? pageContext.current.epsg.toString() : ''}
+                                className={`text-black w-full border-gray-300 ${formErrors.schema ? 'border-red-500 focus:ring-red-500' : ''}`}
+                                value={pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''}
                                 onChange={handleSetEPSG}
                             />
                         </div>
                     </div>
-                    {/* ----------------------- */}
-                    {/* Coordinates (EPSG:4326) */}
-                    {/* ----------------------- */}
+                    {/* --------- */}
+                    {/* Patch Bounds */}
+                    {/* --------- */}
                     <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
-                        <h2 className='text-black text-lg font-semibold mb-2'>
-                            Coordinates (EPSG:4326)
+                        <h2 className='text-lg font-semibold mb-2'>
+                            Patch Bounds
                         </h2>
-                        <div className='flex flex-col lg:flex-row items-stretch gap-4'>
-                            <div className='flex-1 flex flex-col text-black gap-3'>
-                                <div className='flex flex-col gap-1'>
-                                    <Label htmlFor='lon' className='text-sm font-medium'>
-                                        Longitude:
-                                    </Label>
-                                    <Input
-                                        id='lon'
-                                        type='number'
-                                        step='0.000001'
-                                        value={pageContext.current.alignmentOrigin[0] || ''}
-                                        onChange={handleSetAlignmentOriginLon}
-                                        placeholder={'Enter longitude'}
-                                        className={`border-gray-300 ${formErrors.coordinates ? 'border-red-500 focus:ring-red-500' : ''
-                                            }`}
-                                    />
+                        <div className='space-y-2'>
+                            <div className='p-2 bg-white rounded-md shadow-sm border border-gray-200'>
+                                <div className='font-bold text-md mb-2'>
+                                    Method One: Draw to generate
                                 </div>
-                                <div className='flex flex-col gap-1'>
-                                    <Label htmlFor='lat' className='text-sm font-medium'>
-                                        Latitude:
-                                    </Label>
-                                    <Input
-                                        id='lat'
-                                        type='number'
-                                        step='0.000001'
-                                        value={pageContext.current.alignmentOrigin[1] || ''}
-                                        onChange={handleSetAlignmentOriginLat}
-                                        placeholder={'Enter latitude'}
-                                        className={`border-gray-300 ${formErrors.coordinates ? 'border-red-500 focus:ring-red-500' : ''
-                                            }`}
-                                    />
-                                </div>
-                            </div>
-                            <div className='flex flex-col items-center justify-center gap-2'>
-                                {/* ---------------------- */}
-                                {/* Alignment Origin Map Drawing */}
-                                {/* ---------------------- */}
-                                <Button
+                                <button
                                     type='button'
-                                    onClick={handleDrawAlignmentOrigin}
-                                    disabled={!pageContext.current.alignmentOrigin[0] || !pageContext.current.alignmentOrigin[1]}
-                                    className={`w-20 h-15 shadow-sm bg-sky-500 hover:bg-sky-600 text-white cursor-pointer`}
+                                    onClick={handleDrawBounds}
+                                    className={`w-full py-2 px-4 rounded-md font-medium transition-colors cursor-pointer ${isDrawingBounds
+                                        ? 'bg-red-500 text-white hover:bg-red-600'
+                                        : 'bg-blue-500 text-white hover:bg-blue-600'}`}
                                 >
-                                    <div className='flex flex-row gap-1 items-center'>
-                                        <MapPin className='h-5 w-5 lg:h-6 lg:w-6 stroke-2' />
-                                        <span className='text-sm'>Draw</span>
+                                    {isDrawingBounds
+                                        ? 'Click to cancel rectangle drawing'
+                                        : 'Click to draw rectangle'}
+                                </button>
+                                {isDrawingBounds && (
+                                    <div className='mt-2 p-2 bg-yellow-50 rounded-md border border-yellow-200 text-xs text-yellow-800'>
+                                        <p>Drawing method:</p>
+                                        <ul className='list-disc pl-4 mt-1'>
+                                            <li>
+                                                Click on the map to set starting point
+                                            </li>
+                                            <li>
+                                                Move the mouse to desired location
+                                            </li>
+                                            <li>
+                                                Click again to complete drawing
+                                            </li>
+                                        </ul>
                                     </div>
-                                </Button>
-                                {/* ---------------------- */}
-                                {/* Alignment Origin Map Picking */}
-                                {/* ---------------------- */}
-                                <Button
-                                    type='button'
-                                    onClick={handlePickAlignmentOrigin}
-                                    className={`w-20 h-15 shadow-sm ${isSelectingPoint
-                                        ? 'bg-red-500 hover:bg-red-600'
-                                        : 'bg-blue-500 hover:bg-blue-600'
-                                        } text-white cursor-pointer`}
-                                >
-                                    <div className='flex flex-row gap-1 items-center'>
-                                        {isSelectingPoint ? (
-                                            <X className='h-5 w-5 lg:h-6 lg:w-6 font-bold stroke-6' />
-                                        ) : (
-                                            <Crosshair className='h-5 w-5 lg:h-6 lg:w-6 stroke-2' />
-                                        )}
-                                        <span className='text-sm'>
-                                            {isSelectingPoint
-                                                ? 'Cancel'
-                                                : 'Pick'
-                                            }
+                                )}
+                            </div>
+                            <Separator className='h-px mb-2 bg-gray-300' />
+                            <div className=' p-2 bg-white rounded-md shadow-sm border border-gray-200'>
+                                <div className='mb-2 font-bold text-md'>
+                                    Method Two: Input parameters to generate
+                                </div>
+                                <div className='grid grid-cols-3 mb-2 gap-1 text-xs'>
+                                    {/* Top Left Corner */}
+                                    <div className='relative h-12 flex items-center justify-center'>
+                                        <div className='absolute top-0 left-1/4 w-3/4 h-1/2 border-t-2 border-l-2 border-gray-300 rounded-tl'></div>
+                                    </div>
+                                    {/* North/Top - northEast[1] */}
+                                    <div className='text-center -mt-2'>
+                                        <span className='font-bold text-blue-600 text-xl'>
+                                            N
                                         </span>
+                                        {/* Input for North */}
+                                        <input
+                                            type='number'
+                                            value={pageContext.current.inputBounds?.[3] ?? ''}
+                                            onChange={(e) => handleSetInputBounds(e, 3)}
+                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            placeholder='Enter max Y'
+                                            step='any'
+                                        />
                                     </div>
-                                </Button>
+                                    {/* Top Right Corner */}
+                                    <div className='relative h-12 flex items-center justify-center'>
+                                        <div className='absolute top-0 right-1/4 w-3/4 h-1/2 border-t-2 border-r-2 border-gray-300 rounded-tr'></div>
+                                    </div>
+                                    {/* West/Left - southWest[0] */}
+                                    <div className='text-center'>
+                                        <span className='font-bold text-green-600 text-xl'>
+                                            W
+                                        </span>
+                                        {/* Input for West */}
+                                        <input
+                                            type='number'
+                                            value={pageContext.current.inputBounds?.[0] ?? ''}
+                                            onChange={(e) => handleSetInputBounds(e, 0)}
+                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            placeholder='Enter min X'
+                                            step='any'
+                                        />
+                                    </div>
+                                    {/* Center */}
+                                    <div className='text-center'>
+                                        <span className='font-bold text-[#FF8F2E] text-xl'>Center</span>
+                                        <div
+                                            className='text-[10px] mt-1'
+                                        >
+                                            {pageContext.current.inputBounds
+                                                ? `${formatSingleValue(
+                                                    (pageContext.current.inputBounds[0] + pageContext.current.inputBounds[2]) / 2
+                                                )}, ${formatSingleValue(
+                                                    (pageContext.current.inputBounds[1] + pageContext.current.inputBounds[3]) / 2
+                                                )}`
+                                                : 'Enter bounds'}
+                                        </div>
+                                    </div>
+                                    {/* East/Right - southEast[0] */}
+                                    <div className='text-center'>
+                                        <span className='font-bold text-red-600 text-xl'>
+                                            E
+                                        </span>
+                                        {/* Input for East */}
+                                        <input
+                                            type='number'
+                                            value={pageContext.current.inputBounds?.[2] ?? ''}
+                                            onChange={(e) => handleSetInputBounds(e, 2)}
+                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            placeholder='Enter max X'
+                                            step='any'
+                                        />
+                                    </div>
+                                    {/* Bottom Left Corner */}
+                                    <div className='relative h-12 flex items-center justify-center'>
+                                        <div className='absolute bottom-0 left-1/4 w-3/4 h-1/2 border-b-2 border-l-2 border-gray-300 rounded-bl'></div>
+                                    </div>
+                                    {/* South/Bottom - southWest[1] */}
+                                    <div className='text-center mt-2'>
+                                        <span className='font-bold text-purple-600 text-xl'>
+                                            S
+                                        </span>
+                                        {/* Input for South */}
+                                        <input
+                                            type='number'
+                                            value={pageContext.current.inputBounds?.[1] ?? ''}
+                                            onChange={(e) => handleSetInputBounds(e, 1)}
+                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            placeholder='Enter min Y'
+                                            step='any'
+                                        />
+                                    </div>
+                                    {/* Bottom Right Corner */}
+                                    <div className='relative h-12 flex items-center justify-center'>
+                                        <div className='absolute bottom-0 right-1/4 w-3/4 h-1/2 border-b-2 border-r-2 border-gray-300 rounded-br'></div>
+                                    </div>
+                                </div>
+                                <button
+                                    type='button'
+                                    className='w-full py-2 px-4 rounded-md font-medium transition-colors cursor-pointer bg-blue-500 text-white hover:bg-blue-600'
+                                    onClick={drawBoundsByParams}
+                                >
+                                    Click to adjust and draw bounds
+                                </button>
                             </div>
                         </div>
                     </div>
-                    {/* --------------------- */}
-                    {/* Converted Coordinates */}
-                    {/* --------------------- */}
-                    {convertedCoord && pageContext.current.epsg !== 4326 &&
-                        <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200 text-black'>
-                            <h2 className='text-lg font-semibold mb-2'>
-                                Converted Coordinate (EPSG:{pageContext.current.epsg ? pageContext.current.epsg.toString() : ''}
-                                )
-                            </h2>
-                            <div className='flex-1 flex flex-col justify-between'>
-                                <div className='flex items-center gap-2 mb-2 '>
-                                    <Label className='text-sm font-medium w-1/4'>X</Label>
-                                    <div className='w-3/4 p-2 bg-gray-100 rounded border border-gray-300'>
-                                        {convertedCoord[0]}
-                                    </div>
+                    {/* --------------- */}
+                    {/* Original Coordinates */}
+                    {/* --------------- */}
+                    {convertCoordinate &&
+                        <div className='mt-4 p-3 bg-white rounded-md shadow-sm border border-gray-200'>
+                            <h3 className='font-semibold text-lg mb-2'>Original Bounds (EPSG:{pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''})</h3>
+                            <div className='grid grid-cols-3 gap-1 text-xs'>
+                                {/* Top Left Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute top-0 left-1/4 w-3/4 h-1/2 border-t-2 border-l-2 border-gray-300 rounded-tl'></div>
                                 </div>
-
-                                <div className='flex items-center gap-2'>
-                                    <Label className='text-sm font-medium w-1/4'>Y</Label>
-                                    <div className='w-3/4 p-2 bg-gray-100 rounded border border-gray-300'>
-                                        {convertedCoord[1]}
-                                    </div>
+                                {/* North/Top - northEast[1] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-blue-600 text-xl'>N</span>
+                                    <div>[{formatSingleValue(convertCoordinate[3])}]</div>
+                                </div>
+                                {/* Top Right Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute top-0 right-1/4 w-3/4 h-1/2 border-t-2 border-r-2 border-gray-300 rounded-tr'></div>
+                                </div>
+                                {/* West/Left - southWest[0] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-green-600 text-xl'>W</span>
+                                    <div>[{formatSingleValue(convertCoordinate[0])}]</div>
+                                </div>
+                                {/* Center */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-xl'>Center</span>
+                                    <div>{formatCoordinate([(convertCoordinate[0] + convertCoordinate[2]) / 2, (convertCoordinate[1] + convertCoordinate[3]) / 2])}</div>
+                                </div>
+                                {/* East/Right - southEast[0] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-red-600 text-xl'>E</span>
+                                    <div>[{formatSingleValue(convertCoordinate[2])}]</div>
+                                </div>
+                                {/* Bottom Left Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute bottom-0 left-1/4 w-3/4 h-1/2 border-b-2 border-l-2 border-gray-300 rounded-bl'></div>
+                                </div>
+                                {/* South/Bottom - southWest[1] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-purple-600 text-xl'>S</span>
+                                    <div>[{formatSingleValue(convertCoordinate[1])}]</div>
+                                </div>
+                                {/* Bottom Right Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute bottom-0 right-1/4 w-3/4 h-1/2 border-b-2 border-r-2 border-gray-300 rounded-br'></div>
                                 </div>
                             </div>
-                        </div>}
-                    {/* ----------- */}
-                    {/* Grid Layers */}
-                    {/* ----------- */}
-                    <div className='p-3 bg-white text-black rounded-md shadow-sm border border-gray-200'>
-                        <div className='flex justify-between items-center mb-2'>
-                            <h3 className='text-lg font-semibold'>{gridLevelText.title}</h3>
-                            <Button
-                                type='button'
-                                className='px-2 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors text-sm shadow-sm cursor-pointer'
-                                onClick={handleAddGridLayer}
-                            >
-                                <span className='text-lg'>+</span> {gridLevelText.addButton}
-                            </Button>
                         </div>
-                        {/* ---------- */}
-                        {/* Grid Layer */}
-                        {/* ---------- */}
-                        {pageContext.current.gridLayers.length > 0 ? (
-                            <div className='space-y-3'>
-                                {pageContext.current.gridLayers.map(layer => (
-                                    <div key={layer.id} className='p-2 bg-gray-50 rounded border border-gray-200'>
-                                        <div className='flex justify-between items-center mb-2'>
-                                            <h4 className='text-sm font-medium'>{gridItemText.level} {layer.id + 1}</h4>
-                                            <Button
-                                                type='button'
-                                                className='px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs cursor-pointer'
-                                                onClick={() => handleRemoveLayer(layer.id)}
-                                            >
-                                                {gridItemText.remove}
-                                            </Button>
-                                        </div>
-                                        <div className='grid grid-cols-2 gap-2'>
-                                            <div>
-                                                <label className='block text-xs mb-1'>{gridItemText.width}</label>
-                                                <input
-                                                    type='number'
-                                                    className='w-full px-2 py-1 text-sm border border-gray-300 rounded'
-                                                    value={layer.width}
-                                                    onChange={(e) => handleUpdateGridSize(layer.id, e.target.value, layer.height)}
-                                                    placeholder={gridItemText.widthPlaceholder}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className='block text-xs mb-1'>{gridItemText.height}</label>
-                                                <input
-                                                    type='number'
-                                                    className='w-full px-2 py-1 text-sm border border-gray-300 rounded'
-                                                    value={layer.height}
-                                                    onChange={(e) => handleUpdateGridSize(layer.id, layer.width, e.target.value)}
-                                                    placeholder={gridItemText.heightPlaceholder}
-                                                />
-                                            </div>
-                                        </div>
-                                        {layerErrors[layer.id] && (
-                                            <div className='mt-2 p-1 bg-red-50 text-red-700 text-xs rounded-md border border-red-200'>
-                                                {layerErrors[layer.id]}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
+                    }
+                    {/* --------------- */}
+                    {/* Adjusted Coordinates */}
+                    {/* --------------- */}
+                    {adjustedCoordinate &&
+                        <div className='mt-4 p-3 bg-white rounded-md shadow-sm border border-gray-200'>
+                            <h3 className='font-semibold text-lg mb-2'>Adjusted Coordinates (EPSG:{pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''})</h3>
+                            <div className='grid grid-cols-3 gap-1 text-xs'>
+                                {/* Top Left Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute top-0 left-1/4 w-3/4 h-1/2 border-t-2 border-l-2 border-gray-300 rounded-tl'></div>
+                                </div>
+                                {/* North/Top - northEast[1] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-blue-600 text-xl'>N</span>
+                                    <div>[{formatSingleValue(adjustedCoordinate[3])}]</div>
+                                </div>
+                                {/* Top Right Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute top-0 right-1/4 w-3/4 h-1/2 border-t-2 border-r-2 border-gray-300 rounded-tr'></div>
+                                </div>
+                                {/* West/Left - southWest[0] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-green-600 text-xl'>W</span>
+                                    <div>[{formatSingleValue(adjustedCoordinate[0])}]</div>
+                                </div>
+                                {/* Center */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-xl'>Center</span>
+                                    <div>{formatCoordinate([(adjustedCoordinate[0] + adjustedCoordinate[2]) / 2, (adjustedCoordinate[1] + adjustedCoordinate[3]) / 2])}</div>
+                                </div>
+                                {/* East/Right - southEast[0] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-red-600 text-xl'>E</span>
+                                    <div>[{formatSingleValue(adjustedCoordinate[2])}]</div>
+                                </div>
+                                {/* Bottom Left Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute bottom-0 left-1/4 w-3/4 h-1/2 border-b-2 border-l-2 border-gray-300 rounded-bl'></div>
+                                </div>
+                                {/* South/Bottom - southWest[1] */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-purple-600 text-xl'>S</span>
+                                    <div>[{formatSingleValue(adjustedCoordinate[1])}]</div>
+                                </div>
+                                {/* Bottom Right Corner */}
+                                <div className='relative h-12 flex items-center justify-center'>
+                                    <div className='absolute bottom-0 right-1/4 w-3/4 h-1/2 border-b-2 border-r-2 border-gray-300 rounded-br'></div>
+                                </div>
                             </div>
-                        ) : (
-                            <div className='text-sm text-gray-500 text-center py-2'>
-                                {gridLevelText.noLayers}
-                            </div>
-                        )}
-                        {/* ----------------------- */}
-                        {/* Grid Layer Adding Rules */}
-                        {/* ----------------------- */}
-                        {pageContext.current.gridLayers.length > 0 && (
-                            <div className='mt-2 p-2 bg-yellow-50 text-yellow-800 text-xs rounded-md border border-yellow-200'>
-                                <p>{gridLevelText.rulesTitle}</p>
-                                <ul className='list-disc pl-4 mt-1'>
-                                    <li>
-                                        {gridLevelText.rule1}
-                                    </li>
-                                    <li>
-                                        {gridLevelText.rule2}
-                                    </li>
-                                    <li>
-                                        {gridLevelText.rule3}
-                                    </li>
-                                </ul>
-                            </div>
-                        )}
-                    </div>
+                        </div>
+                    }
                     {/* --------------- */}
                     {/* General Message */}
                     {/* --------------- */}
@@ -356,7 +573,7 @@ export default function PatchCreation() {
                         <div
                             className={`p-2 ${bgColor} ${textColor} text-sm rounded-md border ${borderColor}`}
                         >
-                            {generalMessage || ''}
+                            {generalMessage}
                         </div>
                     }
                     {/* ------ */}

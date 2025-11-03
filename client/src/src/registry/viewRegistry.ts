@@ -6,6 +6,8 @@ import { IViewContext } from "@/template/views/IViewContext"
 import DefaultView from "@/template/views/defaultView/defaultView"
 import MapViewComponent from "@/template/views/mapView/mapViewComponent"
 import TableViewComponent from "@/template/views/tableView/tableViewComponent"
+import PatchTemplate from "@/template/patch/patch"
+import GridTemplate from "@/template/grid/grid"
 
 export interface NodeTemplateFunctionSet {
     check: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
@@ -29,9 +31,19 @@ const _VIEW_REGISTRY: Record<string, ViewContent> = {
         component: MapViewComponent,
         viewModels: {
             [SchemaTemplate.templateName]: {
-                check: SchemaTemplate.checkViewModel,
-                create: SchemaTemplate.creationViewModel,
-                edit: SchemaTemplate.editViewModel
+                check: SchemaTemplate.checkMapView,
+                create: SchemaTemplate.creationMapView,
+                edit: SchemaTemplate.editMapView
+            },
+            [PatchTemplate.templateName]: {
+                check: PatchTemplate.checkMapView,
+                create: PatchTemplate.creationMapView,
+                edit: PatchTemplate.editMapView
+            },
+            [GridTemplate.templateName]: {
+                check: GridTemplate.checkMapView,
+                create: GridTemplate.creationMapView,
+                edit: GridTemplate.editMapView
             }
         }
     },

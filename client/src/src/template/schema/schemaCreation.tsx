@@ -8,7 +8,7 @@ import { IViewContext } from '../views/IViewContext'
 import { MapViewContext } from '../views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
-import { addMapMarker, clearMapMarkers, convertCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { addMapMarker, clearMapMarkers, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
 
 interface SchemaCreationProps {
     context: IViewContext
@@ -286,7 +286,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
 
             else if (epsg.toString().length < 4) converted = null
 
-            else converted = await convertCoordinate(alignmentOrigin, 4326, epsg)
+            else converted = await convertPointCoordinate(alignmentOrigin, 4326, epsg)
         }
         setConvertedCoord(converted)
     }
@@ -459,7 +459,6 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                     </div>
                 </div>
             </div>
-            {/* 功能部分 - 可滚动 */}
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
                 <div className='w-2/3 mx-auto mt-4 mb-4 space-y-4 pb-4'>
                     {/* ----------- */}

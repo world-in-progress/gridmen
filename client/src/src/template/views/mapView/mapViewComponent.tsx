@@ -40,7 +40,9 @@ const mapCanvasDebounce = (map: mapboxgl.Map, delay: number, mapRef: HTMLDivElem
 
 const useMapStore = create<MapViewContext>((set) => ({
     map: null,
+    drawInstance: null,
     setMap: (map: mapboxgl.Map) => set({ map }),
+    setDrawInstance: (drawInstance: MapboxDraw) => set({ drawInstance }),
 }))
 
 const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad }, ref) => {
@@ -117,9 +119,6 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
         </div>
     )
 })
-
-
-
 
 export default function MapViewComponent() {
 
