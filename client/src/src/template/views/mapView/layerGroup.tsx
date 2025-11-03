@@ -54,9 +54,19 @@ export default function LayerGroup() {
                 { id: "4-3", name: "Airports", visible: true, type: "vector", opacity: 100 },
             ],
         },
+        {
+            id: "5",
+            name: "Resource Node",
+            visible: true,
+            type: "group",
+            children: [],
+        },
     ])
 
-    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["1", "2", "4"]))
+    const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null)
+    const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null)
+    const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside' | null>(null)
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["1", "2", "4", "5"]))
 
     const toggleExpanded = (id: string) => {
         setExpandedGroups((prev) => {
@@ -87,18 +97,214 @@ export default function LayerGroup() {
         })
     }
 
+    const findAndRemoveLayer = (layers: Layer[], layerId: string): { layers: Layer[], removedLayer: Layer | null } => {
+        let removedLayer: Layer | null = null
+        const newLayers = layers.filter(layer => {
+            if (layer.id === layerId) {
+                removedLayer = layer
+                return false
+            }
+            return true
+        }).map(layer => {
+            if (layer.children) {
+                const result = findAndRemoveLayer(layer.children, layerId)
+                if (result.removedLayer) {
+                    removedLayer = result.removedLayer
+                }
+                return { ...layer, children: result.layers }
+            }
+            return layer
+        })
+        return { layers: newLayers, removedLayer }
+    }
+
+    const insertLayer = (layers: Layer[], targetId: string, newLayer: Layer, position: 'before' | 'after' | 'inside'): Layer[] => {
+        return layers.map(layer => {
+            if (layer.id === targetId) {
+                if (position === 'inside') {
+                    return {
+                        ...layer,
+                        children: [...(layer.children || []), newLayer]
+                    }
+                }
+            }
+            if (layer.children) {
+                return { ...layer, children: insertLayer(layer.children, targetId, newLayer, position) }
+            }
+            return layer
+        }).flatMap((layer, index, arr) => {
+            if (layer.id === targetId) {
+                if (position === 'before') {
+                    return [newLayer, layer]
+                } else if (position === 'after') {
+                    return [layer, newLayer]
+                }
+            }
+            return [layer]
+        })
+    }
+
+    const handleLayerDragStart = (e: React.DragEvent, layerId: string) => {
+        e.stopPropagation()
+        setDraggedLayerId(layerId)
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('application/layer-id', layerId)
+    }
+
+    const handleDrop = (e: React.DragEvent, targetLayerId: string) => {
+        e.preventDefault()
+        e.stopPropagation()
+
+        const layerId = e.dataTransfer.getData('application/layer-id')
+        const externalNodeName = e.dataTransfer.getData('text/plain')
+
+        if (layerId && draggedLayerId) {
+            if (layerId === targetLayerId) {
+                setDragOverLayerId(null)
+                setDraggedLayerId(null)
+                setDropPosition(null)
+                return
+            }
+
+            setLayers(prev => {
+                const { layers: layersAfterRemove, removedLayer } = findAndRemoveLayer(prev, layerId)
+                if (!removedLayer) return prev
+
+                const position = dropPosition || 'inside'
+                const newLayers = insertLayer(layersAfterRemove, targetLayerId, removedLayer, position)
+                return newLayers
+            })
+
+            if (dropPosition === 'inside') {
+                setExpandedGroups(prev => new Set(prev).add(targetLayerId))
+            }
+        }
+        else if (externalNodeName) {
+            const checkDuplicateName = (layers: Layer[], name: string): boolean => {
+                for (const layer of layers) {
+                    if (layer.name === name) return true
+                    if (layer.children && checkDuplicateName(layer.children, name)) return true
+                }
+                return false
+            }
+
+            if (checkDuplicateName(layers, externalNodeName)) {
+                console.warn(`Layer "${externalNodeName}" already exists`)
+                setDragOverLayerId(null)
+                return
+            }
+
+            const newLayer: Layer = {
+                id: `resource-${Date.now()}`,
+                name: externalNodeName,
+                visible: true,
+                type: "vector",
+                opacity: 100
+            }
+
+            setLayers(prev => {
+                const addToChildren = (layers: Layer[]): Layer[] => {
+                    return layers.map(layer => {
+                        if (layer.id === targetLayerId) {
+                            return {
+                                ...layer,
+                                children: [...(layer.children || []), newLayer]
+                            }
+                        }
+                        if (layer.children) {
+                            return { ...layer, children: addToChildren(layer.children) }
+                        }
+                        return layer
+                    })
+                }
+                return addToChildren(prev)
+            })
+
+            setExpandedGroups(prev => new Set(prev).add(targetLayerId))
+        }
+
+        setDragOverLayerId(null)
+        setDraggedLayerId(null)
+        setDropPosition(null)
+    }
+
+    const handleDragOver = (e: React.DragEvent, layerId: string, isGroup: boolean) => {
+        e.preventDefault()
+        e.stopPropagation()
+
+        const layerDragData = e.dataTransfer.types.includes('application/layer-id')
+        const externalDragData = e.dataTransfer.types.includes('text/plain')
+
+        if (layerDragData) {
+            e.dataTransfer.dropEffect = 'move'
+        } else if (externalDragData) {
+            e.dataTransfer.dropEffect = 'copy'
+        }
+
+        setDragOverLayerId(layerId)
+
+        const rect = e.currentTarget.getBoundingClientRect()
+        const y = e.clientY - rect.top
+        const height = rect.height
+
+        if (isGroup) {
+            setDropPosition('inside')
+        } else {
+            if (y < height * 0.33) {
+                setDropPosition('before')
+            } else if (y > height * 0.67) {
+                setDropPosition('after')
+            } else {
+                setDropPosition('inside')
+            }
+        }
+    }
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragOverLayerId(null)
+        setDropPosition(null)
+    }
+
+    const handleDragEnd = () => {
+        setDraggedLayerId(null)
+        setDragOverLayerId(null)
+        setDropPosition(null)
+    }
+
     const renderLayer = (layer: Layer, depth = 0) => {
         const isExpanded = expandedGroups.has(layer.id)
         const hasChildren = layer.children && layer.children.length > 0
+        const isResourceNode = layer.name === "Resource Node"
+        const isDragOver = dragOverLayerId === layer.id
+        const isDragging = draggedLayerId === layer.id
+        const isGroup = layer.type === "group"
 
         return (
-            <div key={layer.id} className="select-none">
+            <div key={layer.id} className="select-none relative">
+                {/* Drop position indicator */}
+                {isDragOver && dropPosition === 'before' && (
+                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-400 z-10" />
+                )}
+                {isDragOver && dropPosition === 'after' && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400 z-10" />
+                )}
+
                 <div
+                    draggable={!isResourceNode}
+                    onDragStart={(e) => !isResourceNode && handleLayerDragStart(e, layer.id)}
+                    onDragEnd={handleDragEnd}
                     className={cn(
-                        "group flex items-center gap-1 px-2 py-1.5 hover:bg-white/5 cursor-pointer transition-colors",
+                        "group flex items-center gap-1 px-2 py-1.5 hover:bg-white/5 cursor-pointer transition-colors relative",
                         depth > 0 && "ml-4",
+                        isDragOver && dropPosition === 'inside' && "bg-blue-500/20 border border-blue-400 border-dashed",
+                        isDragging && "opacity-50"
                     )}
                     style={{ paddingLeft: `${depth * 16 + 8}px` }}
+                    onDrop={(e) => handleDrop(e, layer.id)}
+                    onDragOver={(e) => handleDragOver(e, layer.id, isGroup || isResourceNode)}
+                    onDragLeave={handleDragLeave}
                 >
                     {/* Expand/Collapse Icon */}
                     <div className="w-4 h-4 flex items-center justify-center">
@@ -132,9 +338,11 @@ export default function LayerGroup() {
                     </span>
 
                     {/* Drag Handle */}
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                        <GripVertical className="w-4 h-4 text-gray-500" />
-                    </div>
+                    {!isResourceNode && (
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                            <GripVertical className="w-4 h-4 text-gray-500 cursor-grab active:cursor-grabbing" />
+                        </div>
+                    )}
                 </div>
 
                 {/* Render Children */}
@@ -151,14 +359,6 @@ export default function LayerGroup() {
                     <Layers className="w-4 h-4 text-gray-400" />
                     <h2 className="text-sm font-semibold text-gray-200">Layers</h2>
                 </div>
-                <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-200 hover:bg-white/10">
-                        <Plus className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-200 hover:bg-white/10">
-                        <Settings className="w-4 h-4" />
-                    </Button>
-                </div>
             </div>
 
             {/* Toolbar */}
@@ -166,15 +366,15 @@ export default function LayerGroup() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10"
+                    className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
                 >
-                    <Plus className="w-3.5 h-3.5 mr-1" />
-                    Add Layer
+                    <Eye className="w-3.5 h-3.5 mr-1" />
+                    Show All
                 </Button>
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10"
+                    className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
                 >
                     <Trash2 className="w-3.5 h-3.5 mr-1" />
                     Remove

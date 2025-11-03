@@ -2,7 +2,7 @@ import proj4 from 'proj4'
 import mapboxgl from 'mapbox-gl'
 import { twMerge } from "tailwind-merge"
 import { clsx, type ClassValue } from "clsx"
-import { getProj4Defs } from '@/template/noodle/proj'
+import * as apis from '@/template/noodle/apis'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -12,8 +12,8 @@ export const convertCoordinate = async (originPoint: [number, number], fromEPSG:
     const lon = originPoint[0]
     const lat = originPoint[1]
 
-    const fromEPSGDefs = await getProj4Defs(fromEPSG)
-    const toEPSGDefs = await getProj4Defs(toEPSG)
+    const fromEPSGDefs = await apis.proj.getProj4Defs(fromEPSG)
+    const toEPSGDefs = await apis.proj.getProj4Defs(toEPSG)
 
     if (!lon || !lat || !fromEPSG || !toEPSG) return null
 
