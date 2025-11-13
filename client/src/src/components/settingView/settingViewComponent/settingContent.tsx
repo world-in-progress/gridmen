@@ -14,9 +14,9 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
 
     const renderPublicSetting = () => (
         <div className="space-y-0">
-            <SettingItem title="Lead IP" description="Control the lead IP.">
+            <SettingItem title="Lead IP" description="Control the lead IP. e.g: http://127.0.0.1:8000">
                 <Input
-                    defaultValue="127.0.0.1"
+                    defaultValue="http://127.0.0.1:8000"
                     className="w-64 bg-gray-700 border-gray-600 text-white"
                     onChange={(e) => setLeadIP(e.target.value)}
                 />

@@ -8,6 +8,8 @@ import {
     FilePlus,
     FolderPlus,
     RefreshCcw,
+    MapPin,
+    Square,
 } from 'lucide-react'
 import { cn } from '@/utils/utils'
 import { Separator } from "@/components/ui/separator"
@@ -15,6 +17,8 @@ import { IResourceNode } from '@/template/scene/iscene'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { useState } from 'react'
 import { Button } from '../ui/button'
+import store from '@/store'
+import { toast } from 'sonner'
 
 
 interface NodeRendererProps {
@@ -59,11 +63,34 @@ interface TreeRendererProps {
 //     )
 // }
 
+interface NodeData {
+    id: string
+    label: string
+    icon: 'MapPin' | 'Square'
+    sourceTitle: string
+}
+
 const TreeRenderer = ({ title }: TreeRendererProps) => {
 
     const depth = 0
 
     const [isSelected, setIsSelected] = useState(false)
+    const [nodes, setNodes] = useState<NodeData[]>(() => {
+        // 初始化节点数据
+        if (title === 'WorkSpace') {
+            return [
+                { id: 'ws-1', label: '111', icon: 'MapPin', sourceTitle: 'WorkSpace' },
+                { id: 'ws-2', label: '222', icon: 'MapPin', sourceTitle: 'WorkSpace' }
+            ]
+        } else {
+            return [
+                { id: 'pub-1', label: 'schema lead', icon: 'MapPin', sourceTitle: 'Public' },
+                { id: 'pub-2', label: 'test', icon: 'MapPin', sourceTitle: 'Public' },
+                { id: 'pub-3', label: 'patch lead', icon: 'Square', sourceTitle: 'Public' }
+            ]
+        }
+    })
+    const [isDragOver, setIsDragOver] = useState(false)
 
     const handleNodeClick = () => {
         setIsSelected(true)
@@ -73,8 +100,89 @@ const TreeRenderer = ({ title }: TreeRendererProps) => {
         console.log('double click node')
     }
 
+    const handleDragStart = (e: React.DragEvent, node: NodeData) => {
+        const nodeData: NodeData = {
+            ...node,
+            sourceTitle: title
+        }
+        e.dataTransfer.setData('application/json', JSON.stringify(nodeData))
+        e.dataTransfer.effectAllowed = 'move'
+    }
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        setIsDragOver(true)
+    }
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault()
+        setIsDragOver(false)
+    }
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault()
+        setIsDragOver(false)
+
+        try {
+            const nodeDataStr = e.dataTransfer.getData('application/json')
+            if (!nodeDataStr) return
+
+            const nodeData: NodeData = JSON.parse(nodeDataStr)
+
+            // 如果是从同一个 TreeRenderer 拖放，不处理
+            if (nodeData.sourceTitle === title) {
+                return
+            }
+
+            // 如果目标树中已存在同名节点，则不重复添加
+            if (nodes.some(existing => existing.label === nodeData.label)) {
+                return
+            }
+
+            // 触发 loading
+            const isLoading = store.get<{ on: Function, off: Function }>('isLoading')
+            if (isLoading) {
+                isLoading.on()
+            }
+
+            // 添加节点到目标 TreeRenderer（创建新节点，避免引用问题）
+            const newNode: NodeData = {
+                id: `${title.toLowerCase()}-${Date.now()}`,
+                label: nodeData.label,
+                icon: nodeData.icon,
+                sourceTitle: title
+            }
+
+
+            // 4秒后关闭 loading
+            setTimeout(() => {
+                if (isLoading) {
+                    isLoading.off()
+                    setNodes(prev => [...prev, newNode])
+                    toast.success('Node added successfully')
+                }
+            }, 4000)
+
+        } catch (error) {
+            console.error('Error handling drop:', error)
+            const isLoading = store.get<{ on: Function, off: Function }>('isLoading')
+            if (isLoading) {
+                isLoading.off()
+            }
+        }
+    }
+
     const renderNodeItemsMenu = () => {
         return null
+    }
+
+    const renderIcon = (icon: 'MapPin' | 'Square') => {
+        if (icon === 'MapPin') {
+            return <MapPin className='w-4 h-4 mr-2 ml-3 text-gray-400' />
+        } else {
+            return <Square className='w-4 h-4 mr-2 ml-3 text-gray-400' />
+        }
     }
 
     return (
@@ -98,56 +206,42 @@ const TreeRenderer = ({ title }: TreeRendererProps) => {
                 </div>
             </div>
 
-            {/* <NodeRenderer /> */}
+            <div
+                className={cn(
+                    'min-h-[100px] transition-colors',
+                    isDragOver ? 'bg-gray-800/50' : ''
+                )}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+            >
+                <ContextMenu>
+                    <ContextMenuTrigger>
+                        {nodes.map((node) => (
+                            <div
+                                key={node.id}
+                                className={cn(
+                                    'flex items-center py-0.5 px-2 hover:bg-gray-700 cursor-pointer text-sm w-full select-none',
+                                    isSelected ? 'bg-gray-600 text-white' : 'text-gray-300',
+                                )}
+                                style={{ paddingLeft: `${depth * 16 + 2}px` }}
+                                onClick={handleNodeClick}
+                                onDoubleClick={handleNodeDoubleClick}
+                                draggable={true}
+                                onDragStart={(e) => handleDragStart(e, node)}
+                            >
+                                <div className='ml-2 flex'>
+                                    {renderIcon(node.icon)}
+                                </div>
+                                <span>{node.label}</span>
+                            </div>
+                        ))}
+                    </ContextMenuTrigger>
 
-            <ContextMenu>
-                <ContextMenuTrigger>
-                    <div
-
-                        className={cn(
-                            'flex items-center py-0.5 px-2 hover:bg-gray-700 cursor-pointer text-sm w-full select-none',
-                            isSelected ? 'bg-gray-600 text-white' : 'text-gray-300',
-                        )}
-                        style={{ paddingLeft: `${depth * 16 + 2}px` }}
-                        onClick={handleNodeClick}
-                        onDoubleClick={handleNodeDoubleClick}
-                        draggable={true} // Only allow dragging files, not folders
-                        onDragStart={(e) => {
-                            e.dataTransfer.setData('text/plain', 'schema test');
-                            e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                    >
-                        <div className='ml-2 flex'>
-                            <FileText className='w-4 h-4 mr-2 ml-3 text-gray-400' />
-                        </div>
-                        <span>schema test</span>
-                    </div>
-                    <div
-
-                        className={cn(
-                            'flex items-center py-0.5 px-2 hover:bg-gray-700 cursor-pointer text-sm w-full select-none',
-                            isSelected ? 'bg-gray-600 text-white' : 'text-gray-300',
-                        )}
-                        style={{ paddingLeft: `${depth * 16 + 2}px` }}
-                        onClick={handleNodeClick}
-                        onDoubleClick={handleNodeDoubleClick}
-                        draggable={true} // Only allow dragging files, not folders
-                        onDragStart={(e) => {
-                            e.dataTransfer.setData('text/plain', 'patch test');
-                            e.dataTransfer.effectAllowed = 'copy';
-                        }}
-                    >
-                        <div className='ml-2 flex'>
-                            <FileText className='w-4 h-4 mr-2 ml-3 text-gray-400' />
-                        </div>
-                        <span>patch test</span>
-                    </div>
-                </ContextMenuTrigger>
-
-                {/* Node Context Items Menu */}
-
-                {renderNodeItemsMenu()}
-            </ContextMenu>
+                    {/* Node Context Items Menu */}
+                    {renderNodeItemsMenu()}
+                </ContextMenu>
+            </div>
         </>
     )
 }
