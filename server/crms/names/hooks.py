@@ -6,12 +6,11 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'py-noodle', 'src'))
-from pynoodle.node.treeger import Treeger
 from pynoodle.noodle import noodle
 
 def MOUNT(node_key: str, params: dict | None) -> dict | None:
     name = node_key.split('.')[-1]
-    resource_space = Path.cwd() / 'resource' / 'topo' / 'schemas' / name / 'names.json'
+    resource_space = Path.cwd() / 'resource' / name / 'names.json'
     if not resource_space.exists():
         resource_space.parent.mkdir(parents=True, exist_ok=True)
         with open(resource_space, 'w') as f:
@@ -23,7 +22,7 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
 
 def UNMOUNT(node_key: str) -> None:
     name = node_key.split('.')[-1]
-    resource_space = Path.cwd() / 'resource' / 'topo' / 'schemas' / name / 'names.json'
+    resource_space = Path.cwd() / 'resource' /  name / 'names.json'
     if resource_space.exists():
         resource_space.unlink()
         
@@ -48,7 +47,7 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
         node_name = node_key.split('.')[-1]
         
         # Generate node-specific resource space path
-        resource_space = Path.cwd() / 'resource' / 'topo' / 'schemas' / node_name / 'names.json'
+        resource_space = Path.cwd() / 'resource'  / node_name / 'names.json'
         
         # Ensure the directory exists
         resource_space.parent.mkdir(parents=True, exist_ok=True)
@@ -71,23 +70,13 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
         raise Exception(f"Error generating privatized parameters for node {node_key}: {e}")
 
 def PACK(node_key: str, tar_path: str) -> tuple[str, int]:
-    """
-    Generic pack implementation that compresses resource data into a tar file.
-    
-    Args:
-        node_key: The node key being packed
-        
-    Returns:
-        Path to the compressed tar file
-    """
-
     try:
-        treeger = Treeger()
-        node_record = treeger._load_node_record(node_key, is_cascade=False)
+        
+        node_record = noodle._load_node_record(node_key, is_cascade=False)
         launch_params_str = node_record.launch_params
         launch_params = json.loads(launch_params_str)
         target_resource_path = launch_params.get('resource_space')
-        resource_path = target_resource_path
+        resource_path = Path(target_resource_path)
         
         with tarfile.open(tar_path, 'w:gz') as tarf:
             if resource_path.is_file():
@@ -100,7 +89,7 @@ def PACK(node_key: str, tar_path: str) -> tuple[str, int]:
                         arcname = file_path.relative_to(resource_path.parent)
                         tarf.add(file_path, arcname=arcname)
         
-        file_size = tar_path.stat().st_size
+        file_size = Path(tar_path).stat().st_size
 
         return str(tar_path), file_size
         
@@ -115,14 +104,26 @@ def UNPACK(target_node_key: str, tar_path: str, template_name: str, mount_params
         tar_path: Path to the compressed tar file
     """
     try:
-        node_info = noodle.get_node_info(target_node_key)
-        launch_params_str = getattr(node_info, 'launch_params', None)
-        launch_params = json.loads(launch_params_str)
-        target_node_path = launch_params.get('resource_space')
+        node_record = noodle._load_node_record(target_node_key, False)
+        if node_record is None:
+            raise Exception(f"Node {target_node_key} not found in local resource tree")
         
+        launch_params_str = node_record.launch_params
+        launch_params = json.loads(launch_params_str) if launch_params_str else {}
+        target_node_path = launch_params.get('resource_space')
+    
         Path(target_node_path).mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(tar_path, 'r:gz') as tarf:
+            target_path = Path(target_node_path)
+            if target_path.exists() and target_path.is_dir():
+                for item in target_path.iterdir():
+                    if item.is_file():
+                        item.unlink()
+                    elif item.is_dir():
+                        import shutil
+                        shutil.rmtree(item)
+            
             tarf.extractall(target_node_path)
         
         noodle.mount(target_node_key, node_template_name=template_name, mount_params=mount_params)
