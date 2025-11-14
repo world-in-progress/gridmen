@@ -1,2 +1,2 @@
-export * as scene from './scene'
+export * as node from './node'
 export * as proj from './proj'

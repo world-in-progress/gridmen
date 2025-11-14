@@ -18,7 +18,11 @@ export default defineConfig(({ command, mode }) => {
                 allow: ['..', '../src/'],
             },
             proxy: {
-                '/local': {
+                '/api': {
+                    target: env.VITE_LOCAL_API_URL,
+                    changeOrigin: true,
+                },
+                '/noodle': {
                     target: env.VITE_LOCAL_API_URL,
                     changeOrigin: true,
                 },

@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { createSchema } from './schemaAPI'
+import * as api from '../noodle/apis'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -9,6 +10,7 @@ import { MapViewContext } from '../views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
 import { addMapMarker, clearMapMarkers, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { toast } from 'sonner'
 
 interface SchemaCreationProps {
     context: IViewContext
@@ -413,12 +415,19 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
         }
 
         setGeneralMessage('Submitting data...')
-
-        const res = await createSchema(schemaData)
-        if (res.success) {
+        console.log(JSON.stringify(schemaData))
+        try {
+            await api.node.mountNode({
+                node_key: 'test111',
+                template_name: 'schema',
+                mount_params_string: JSON.stringify(schemaData)
+            })
+            console.log(JSON.stringify(schemaData))
             setGeneralMessage('Created successfully')
-        } else {
-            setGeneralMessage(res.message)
+            toast.success('Created successfully')
+        } catch (error) {
+            setGeneralMessage(`Failed to create schema: ${error}`)
+            toast.error(`Failed to create schema: ${error}`)
         }
 
         resetForm()
