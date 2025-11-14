@@ -415,7 +415,6 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
         }
 
         setGeneralMessage('Submitting data...')
-        console.log(JSON.stringify(schemaData))
         try {
             await api.node.mountNode({
                 node_key: 'test111',
