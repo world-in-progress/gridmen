@@ -41,8 +41,12 @@ export default function ToolPanel({ viewModels, mapContainer }: ToolPanelProps) 
     // 创建 MapViewContext
     const context: MapViewContext = {
         map: mapContainer,
+        drawInstance: null,
         setMap: (map: mapboxgl.Map) => {
             console.log('setMap', map)
+        },
+        setDrawInstance: (drawInstance: MapboxDraw) => {
+            console.log('setDrawInstance', drawInstance)
         }
     }
 

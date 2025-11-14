@@ -18,8 +18,8 @@ export default defineConfig(({ command, mode }) => {
                 allow: ['..', '../src/'],
             },
             proxy: {
-                '/api': {
-                    target: env.VITE_API_URL,
+                '/local': {
+                    target: env.VITE_LOCAL_API_URL,
                     changeOrigin: true,
                 },
             },

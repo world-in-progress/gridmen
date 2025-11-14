@@ -8,7 +8,7 @@ import { IViewContext } from '../views/IViewContext'
 import { MapViewContext } from '../views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
-import { addMapMarker, clearMapMarkers, convertCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { addMapMarker, clearMapMarkers, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
 
 interface SchemaCreationProps {
     context: IViewContext
@@ -41,9 +41,8 @@ interface ValidationResult {
 
 const schemaTips = [
     { tip1: 'Fill in the name of the Schema and the EPSG code.' },
-    { tip2: 'Description is optional.' },
-    { tip3: 'Click the button to draw and obtain or manually fill in the coordinates of the reference point.' },
-    { tip4: 'Set the grid size for each level.' },
+    { tip2: 'Click the button to draw and obtain or manually fill in the coordinates of the reference point.' },
+    { tip3: 'Set the grid size for each level.' },
 ]
 
 const gridLevelText = {
@@ -287,7 +286,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
 
             else if (epsg.toString().length < 4) converted = null
 
-            else converted = await convertCoordinate(alignmentOrigin, 4326, epsg)
+            else converted = await convertPointCoordinate(alignmentOrigin, 4326, epsg)
         }
         setConvertedCoord(converted)
     }
@@ -427,7 +426,6 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
 
     return (
         <div className='w-full h-full flex flex-col'>
-            {/* 介绍部分 - 固定不滚动 */}
             <div className='flex-none w-full border-b border-gray-700 flex flex-col'>
                 {/* ------------*/}
                 {/* Page Avatar */}
@@ -461,8 +459,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                     </div>
                 </div>
             </div>
-            {/* 功能部分 - 可滚动 */}
-            <div className='flex-1 overflow-y-auto min-h-0'>
+            <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
                 <div className='w-2/3 mx-auto mt-4 mb-4 space-y-4 pb-4'>
                     {/* ----------- */}
                     {/* Schema Name */}
@@ -551,7 +548,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                                 >
                                     <div className='flex flex-row gap-1 items-center'>
                                         <MapPin className='h-5 w-5 lg:h-6 lg:w-6 stroke-2' />
-                                        <span className='text-xs'>Draw</span>
+                                        <span className='text-sm'>Draw</span>
                                     </div>
                                 </Button>
                                 {/* ---------------------- */}
@@ -571,7 +568,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                                         ) : (
                                             <Crosshair className='h-5 w-5 lg:h-6 lg:w-6 stroke-2' />
                                         )}
-                                        <span className='text-xs'>
+                                        <span className='text-sm'>
                                             {isSelectingPoint
                                                 ? 'Cancel'
                                                 : 'Pick'
@@ -585,7 +582,7 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
                     {/* --------------------- */}
                     {/* Converted Coordinates */}
                     {/* --------------------- */}
-                    {convertedCoord &&
+                    {convertedCoord && pageContext.current.epsg !== 4326 &&
                         <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200 text-black'>
                             <h2 className='text-lg font-semibold mb-2'>
                                 Converted Coordinate (EPSG:{pageContext.current.epsg ? pageContext.current.epsg.toString() : ''}

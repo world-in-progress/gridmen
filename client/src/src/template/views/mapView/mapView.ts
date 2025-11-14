@@ -1,5 +1,4 @@
 import { IView } from "../defaultView/iViewNode"
-import { IResourceNode } from "@/template/scene/iscene"
 import { IViewContext } from "../IViewContext"
 
 export default class MapView implements IView {
@@ -16,5 +15,7 @@ export default class MapView implements IView {
 
 export interface MapViewContext extends IViewContext {
     map: mapboxgl.Map | null
+    drawInstance: MapboxDraw | null
     setMap: (map: mapboxgl.Map) => void
+    setDrawInstance: (drawInstance: MapboxDraw) => void
 }

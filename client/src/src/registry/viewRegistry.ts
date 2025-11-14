@@ -1,13 +1,15 @@
-import Schema from "@/template/schema/schema"
+import SchemaTemplate from "@/template/schema/schema"
 import MapView from "@/template/views/mapView/mapView"
+import { IResourceNode } from "@/template/scene/iscene"
 import TableView from "@/template/views/tableView/tableView"
+import { IViewContext } from "@/template/views/IViewContext"
 import DefaultView from "@/template/views/defaultView/defaultView"
 import MapViewComponent from "@/template/views/mapView/mapViewComponent"
 import TableViewComponent from "@/template/views/tableView/tableViewComponent"
-import { IViewContext } from "@/template/views/IViewContext"
-import { IResourceNode } from "@/template/scene/iscene"
+import PatchTemplate from "@/template/patch/patch"
+import GridTemplate from "@/template/grid/grid"
 
-interface NodeTemplateFunctionSet {
+export interface NodeTemplateFunctionSet {
     check: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
     create: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
     edit: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
@@ -28,10 +30,20 @@ const _VIEW_REGISTRY: Record<string, ViewContent> = {
     [MapView.classKey]: {
         component: MapViewComponent,
         viewModels: {
-            [Schema.viewModelName]: {
-                check: Schema.checkViewModel,
-                create: Schema.creationViewModel,
-                edit: Schema.editViewModel
+            [SchemaTemplate.templateName]: {
+                check: SchemaTemplate.checkMapView,
+                create: SchemaTemplate.creationMapView,
+                edit: SchemaTemplate.editMapView
+            },
+            [PatchTemplate.templateName]: {
+                check: PatchTemplate.checkMapView,
+                create: PatchTemplate.creationMapView,
+                edit: PatchTemplate.editMapView
+            },
+            [GridTemplate.templateName]: {
+                check: GridTemplate.checkMapView,
+                create: GridTemplate.creationMapView,
+                edit: GridTemplate.editMapView
             }
         }
     },

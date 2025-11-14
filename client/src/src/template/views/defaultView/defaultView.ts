@@ -10,7 +10,7 @@ export default class DefaultView implements IView {
         return this.semanticPath.split('.').pop() || ''
     }
 
-    viewModelFactory(nodeSelf: IResourceNode): Function {
+    viewModelFactory(): Function {
         return null as any
     }
 }

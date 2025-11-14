@@ -40,7 +40,9 @@ const mapCanvasDebounce = (map: mapboxgl.Map, delay: number, mapRef: HTMLDivElem
 
 const useMapStore = create<MapViewContext>((set) => ({
     map: null,
+    drawInstance: null,
     setMap: (map: mapboxgl.Map) => set({ map }),
+    setDrawInstance: (drawInstance: MapboxDraw) => set({ drawInstance }),
 }))
 
 const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad }, ref) => {
@@ -118,9 +120,6 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
     )
 })
 
-
-
-
 export default function MapViewComponent() {
 
     const [mapInstance, setMapInstance] = useState<mapboxgl.Map | null>(null)
@@ -137,11 +136,11 @@ export default function MapViewComponent() {
             direction="horizontal"
             className="h-full w-full text-white "
         >
-            <ResizablePanel defaultSize={13}>
+            <ResizablePanel defaultSize={14}>
                 <LayerGroup />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={63}>
+            <ResizablePanel defaultSize={62}>
                 <MapContainer onMapLoad={handleMapLoad} />
             </ResizablePanel>
             <ResizableHandle withHandle />
