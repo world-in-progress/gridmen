@@ -21,3 +21,9 @@ export interface MountNodeParams {
     template_name: string
     mount_params_string: string
 }
+
+export interface PullResponse {
+    success: boolean
+    message: string
+    target_node_key: string
+}

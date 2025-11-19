@@ -1,5 +1,4 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { createSchema } from './schemaAPI'
 import * as api from '../noodle/apis'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
