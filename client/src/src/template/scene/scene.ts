@@ -3,7 +3,6 @@ import DefaultPageContext from "../context/default"
 import ContextStorage from "../context/contextStorage"
 import { IResourceNode, IResourceTree } from "./iscene"
 import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
-import DefaultTemplate from '../default'
 import { INodeTemplate } from '../itemplate'
 
 export class ResourceNode implements IResourceNode {
@@ -45,6 +44,8 @@ export class ResourceTree implements IResourceTree {
     root!: IResourceNode
     scene: Map<string, IResourceNode> = new Map()
 
+    private leadIP?: string
+
     cs: ContextStorage = ContextStorage.getInstance()
 
     private handleNodeClick: (node: IResourceNode) => void = () => { }
@@ -56,9 +57,10 @@ export class ResourceTree implements IResourceTree {
     private expandedNodes: Set<string> = new Set()
 
     editingNodeIds: Set<string> = new Set()
+    selectedNode: IResourceNode | null = null
 
-    constructor() {
-
+    constructor(leadIP?: string) {
+        this.leadIP = leadIP
     }
 
     bindHandlers(handlers: ResourceTreeHandlers): void {
@@ -87,7 +89,7 @@ export class ResourceTree implements IResourceTree {
     async alignNodeInfo(node: IResourceNode, force: boolean = false): Promise<void> {
         if (node.aligned && !force) return
 
-        const meta = await api.scene.getTreeNodeInfo({ node_key: node.key })
+        const meta = await api.node.getNodeInfo({ node_key: node.key }, this.leadIP)
 
         const oldChildrenMap = node.children
         node.children = new Map()
@@ -115,6 +117,31 @@ export class ResourceTree implements IResourceTree {
         node.aligned = true
     }
 
+    async expandNode(targetNode: IResourceNode): Promise<boolean> {
+        if (!targetNode) return false
+
+        // Get all parent nodes
+        const path: IResourceNode[] = []
+        let current: IResourceNode | null = targetNode
+        while (current) {
+            path.unshift(current)
+            current = current.parent
+        }
+
+        // Expand all parent nodes
+        for (let i = 0; i < path.length - 1; i++) {
+            const node = path[i]
+            if (!this.expandedNodes.has(node.id)) {
+                await this.alignNodeInfo(node)
+                this.expandedNodes.add(node.id)
+            }
+        }
+
+        // Select the target node
+        this.notifyDomUpdate()
+        return true
+    }
+
     subscribe(callback: TreeUpdateCallback): () => void {
         this.updateCallbacks.add(callback)
         return () => {
@@ -124,6 +151,10 @@ export class ResourceTree implements IResourceTree {
 
     notifyDomUpdate(): void {
         this.updateCallbacks.forEach(callback => callback())
+    }
+
+    stopEditingNode(node: IResourceNode): void {
+
     }
 
     async removeNode(node: IResourceNode): Promise<void> {
@@ -140,11 +171,11 @@ export class ResourceTree implements IResourceTree {
         this.notifyDomUpdate()
     }
 
-    static async create(): Promise<ResourceTree> {
+    static async create(leadIP?: string): Promise<ResourceTree> {
         try {
-            const tree = new ResourceTree()
+            const tree = new ResourceTree(leadIP)
 
-            const rootNodeMeta = await api.scene.getTreeNodeInfo({ node_key: '_' })
+            const rootNodeMeta = await api.node.getNodeInfo({ node_key: '.' }, leadIP)
             const rootNode = new ResourceNode(tree, rootNodeMeta.node_key, null, TEMPLATE_REGISTRY[rootNodeMeta.template_name])
 
             await tree.setRoot(rootNode)

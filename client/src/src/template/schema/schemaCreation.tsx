@@ -416,11 +416,10 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
         setGeneralMessage('Submitting data...')
         try {
             await api.node.mountNode({
-                node_key: 'test111',
+                node_key: '.' + pageContext.current.name, // 判断是不是顶层节点，如果是，则 node_key 为 '.' + pageContext.current.name
                 template_name: 'schema',
                 mount_params_string: JSON.stringify(schemaData)
             })
-            console.log(JSON.stringify(schemaData))
             setGeneralMessage('Created successfully')
             toast.success('Created successfully')
         } catch (error) {

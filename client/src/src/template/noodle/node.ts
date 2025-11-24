@@ -44,6 +44,7 @@ export const mountNode = async ({ node_key, template_name, mount_params_string }
         }
 
         const responseData: string = await response.json()
+        console.log(responseData)
         return responseData
     } catch (error) {
         throw new Error(`Failed to mount node: ${error}`)

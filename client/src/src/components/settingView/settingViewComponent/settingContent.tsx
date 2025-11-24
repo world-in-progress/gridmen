@@ -1,6 +1,6 @@
 import SettingItem from "./settingItem"
 import { Input } from "@/components/ui/input"
-import { useSettingStore } from "../settingStore"
+import { DEFAULT_LEAD_IP, useSettingStore } from "../settingStore"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface SettingContentProps {
@@ -9,14 +9,18 @@ interface SettingContentProps {
 
 export default function SettingContent({ activeCategory }: SettingContentProps) {
 
-    const { highSpeedMode, setHighSpeedMode } = useSettingStore()
-    const { leadIP, setLeadIP } = useSettingStore()
+    const {
+        leadIP,
+        highSpeedMode,
+        setHighSpeedMode,
+        setLeadIP
+    } = useSettingStore()
 
     const renderPublicSetting = () => (
         <div className="space-y-0">
             <SettingItem title="Lead IP" description="Control the lead IP. e.g: http://127.0.0.1:8000">
                 <Input
-                    defaultValue="http://127.0.0.1:8000"
+                    value={leadIP ?? DEFAULT_LEAD_IP}
                     className="w-64 bg-gray-700 border-gray-600 text-white"
                     onChange={(e) => setLeadIP(e.target.value)}
                 />
