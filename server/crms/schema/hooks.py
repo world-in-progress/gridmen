@@ -9,8 +9,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'py-noodle',
 from pynoodle.noodle import noodle
 
 def MOUNT(node_key: str, mount_params: dict | None) -> dict | None:
-        resource_path = '/'.join(node_key.split('.'))
-        grid_schema_path = Path(Path.cwd(),'resource', resource_path, 'schema.json')
+        name = node_key.split('.')[-1]
+        grid_schema_path = Path.cwd() / 'resource' / name / 'schema.json'
         if not grid_schema_path.exists():
             grid_schema_path.parent.mkdir(parents=True, exist_ok=True)
             with open(grid_schema_path, 'w') as f:
@@ -20,8 +20,8 @@ def MOUNT(node_key: str, mount_params: dict | None) -> dict | None:
         }      
 def UNMOUNT(node_key: str, params: dict | None) -> None:
     "Unmount hook for schema resource"
-    resource_path = '/'.join(node_key.split('.'))
-    resource_space = Path(Path.cwd(),'resource', resource_path, 'schema.json')
+    name = node_key.split('.')[-1]
+    resource_space = Path.cwd() / 'resource' / name / 'schema.json'
     if resource_space.exists():
         resource_space.unlink()
     
@@ -33,9 +33,11 @@ def UNMOUNT(node_key: str, params: dict | None) -> None:
 def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
     try:
         # Extract node name from node_key (last part after splitting by '.')
-        node_name = '/'.join(node_key.split('.'))
-        resource_space = Path(Path.cwd(),'resource', node_name, 'schema.json')
+        node_name = node_key.split('.')[-1]
         
+        # Generate node-specific resource space path
+        resource_space = Path.cwd() / 'resource'  / node_name / 'schema.json'
+
         # Ensure the directory exists
         resource_space.parent.mkdir(parents=True, exist_ok=True)
         
