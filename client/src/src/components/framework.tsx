@@ -74,13 +74,13 @@ export default function Framework() {
         const initTree = async () => {
             try {
                 const _privateTree = await ResourceTree.create()
-                const _publicTree = await ResourceTree.create(leadIP!)
+                // const _publicTree = await ResourceTree.create(leadIP!)
 
                 _privateTree.subscribe(triggerRepaint)
-                _publicTree.subscribe(triggerRepaint)
+                // _publicTree.subscribe(triggerRepaint)
 
                 setPrivateTree(_privateTree)
-                setPublicTree(_publicTree)
+                // setPublicTree(_publicTree)
             } catch (error) {
                 console.error('Failed to initialize tree:', error)
             }

@@ -50,7 +50,7 @@ export class ResourceTree implements IResourceTree {
 
     private handleNodeClick: (node: IResourceNode) => void = () => { }
     private handleNodeDoubleClick: (node: IResourceNode) => void = () => { }
-    private handleNodeMenuOpen: (node: IResourceNode) => void = () => { }
+    private handleNodeMenuOpen: (node: IResourceNode, menuItem: any) => void = () => { }
     private handleNodeRemove: (node: IResourceNode) => void = () => { }
 
     private updateCallbacks: Set<TreeUpdateCallback> = new Set()
@@ -70,7 +70,7 @@ export class ResourceTree implements IResourceTree {
         this.handleNodeDoubleClick = handlers.onNodeDoubleClick
     }
 
-    getNodeMenuHandler(): (node: IResourceNode) => void {
+    getNodeMenuHandler(): (node: IResourceNode, menuItem: any) => void {
         return this.handleNodeMenuOpen
     }
 
@@ -105,6 +105,7 @@ export class ResourceTree implements IResourceTree {
                 }
 
                 const childNode = new ResourceNode(this, child.node_key, node, TEMPLATE_REGISTRY[child.template_name])
+                node.children.set(childNode.id, childNode) // Add child to the node's children map
                 this.scene.set(childNode.id, childNode) // add child node to the scene map
             }
         }
@@ -153,6 +154,35 @@ export class ResourceTree implements IResourceTree {
         this.updateCallbacks.forEach(callback => callback())
     }
 
+    async toggleNodeExpansion(node: IResourceNode, forceOpen: boolean = false): Promise<void> {
+        if (forceOpen || !this.expandedNodes.has(node.id)) {
+            this.expandedNodes.add(node.id)
+            if (!node.aligned) await this.alignNodeInfo(node)
+        } else {
+            this.expandedNodes.delete(node.id)
+        }
+    }
+
+    async clickNode(node: IResourceNode): Promise<void> {
+        // If the node is a resource folder, toggle its expansion
+        if (node.template_name === null) {
+            await this.toggleNodeExpansion(node)
+        }
+
+        this.handleNodeClick(node) // notify all trees that the node is currently selected
+        this.notifyDomUpdate()
+    }
+
+    async doubleClickNode(node: IResourceNode): Promise<void> {
+        // If the node is a resource folder, force open its expansion
+        if (node.template_name === null) {
+            await this.toggleNodeExpansion(node, true)
+        }
+
+        this.handleNodeDoubleClick(node) // notify all trees to focus on the node
+        this.notifyDomUpdate()
+    }
+
     stopEditingNode(node: IResourceNode): void {
 
     }
@@ -169,6 +199,10 @@ export class ResourceTree implements IResourceTree {
 
         this.handleNodeRemove(node) // notify all trees that the node has been removed
         this.notifyDomUpdate()
+    }
+
+    isNodeExpanded(nodeId: string): boolean {
+        return this.expandedNodes.has(nodeId)
     }
 
     static async create(leadIP?: string): Promise<ResourceTree> {
