@@ -5,7 +5,7 @@ export interface IResourceNode {
     lockId: string
     aligned: boolean
     tree: IResourceTree
-    template_name: string
+    template_name: string | null
     parent: IResourceNode | null
     children: Map<string, IResourceNode>
 }
