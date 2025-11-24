@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     NOODLE_INIT(app)
-
+    yield
     NOODLE_TERMINATE()
 
 def create_app() -> FastAPI:
