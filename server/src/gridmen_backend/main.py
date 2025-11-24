@@ -22,24 +22,6 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI):
     NOODLE_INIT(app)
 
-    try:
-        # Mount schemaSet node (for test)
-        logging.info('Mounting schemaSet node...')
-        noodle.mount('schemaSet', 'schema')
-        logging.info('schemaSet node mounted successfully')
-
-    except Exception as e:
-        logging.error(f'Failed to mount or initialize schemaSet node: {e}')
-        raise
-
-    yield
-    
-    try:
-        noodle.unmount('schemaSet')
-        logging.info('schemaSet node unmounted successfully')
-    except Exception as e:
-        logging.error(f'Failed to unmount schemaSet node: {e}')
-
     NOODLE_TERMINATE()
 
 def create_app() -> FastAPI:
