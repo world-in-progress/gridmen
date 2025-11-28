@@ -18,8 +18,8 @@ export interface baseResponse {
 
 export interface MountNodeParams {
     node_key: string
-    template_name: string
-    mount_params_string: string
+    template_name: string | null
+    mount_params_string: string | null
 }
 
 export interface PullResponse {

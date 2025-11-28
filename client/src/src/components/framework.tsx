@@ -63,12 +63,26 @@ export default function Framework() {
     }, [focusNode, publicTree, privateTree])
 
     const handleNodeClick = useCallback((node: IResourceNode) => {
-        console.log('click node', node)
-    }, [])
+        const _node = node as ResourceNode
+
+        if (privateTree === null || publicTree === null) return
+        privateTree.selectedNode = null
+        publicTree.selectedNode = null
+        _node.tree.selectedNode = _node
+    }, [privateTree, publicTree])
 
     const handleNodeDoubleClick = useCallback((node: IResourceNode) => {
-        console.log('double click node', node)
-    }, [])
+        const _node = node as ResourceNode
+
+        // Deselect all nodes in the trees
+        if (privateTree === null || publicTree === null) return
+        privateTree.selectedNode = null
+        publicTree.selectedNode = null
+
+        // Set the clicked node as the selected node
+        _node.tree.selectedNode = _node
+
+    }, [privateTree, publicTree])
 
     useEffect(() => {
         const initTree = async () => {

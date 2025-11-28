@@ -164,8 +164,10 @@ export class ResourceTree implements IResourceTree {
     }
 
     async clickNode(node: IResourceNode): Promise<void> {
+        this.selectedNode = node
+
         // If the node is a resource folder, toggle its expansion
-        if (node.template_name === null) {
+        if (node.template_name === 'default') {
             await this.toggleNodeExpansion(node)
         }
 
@@ -175,7 +177,7 @@ export class ResourceTree implements IResourceTree {
 
     async doubleClickNode(node: IResourceNode): Promise<void> {
         // If the node is a resource folder, force open its expansion
-        if (node.template_name === null) {
+        if (node.template_name === 'default') {
             await this.toggleNodeExpansion(node, true)
         }
 
