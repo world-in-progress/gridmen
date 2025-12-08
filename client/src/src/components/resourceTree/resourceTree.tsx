@@ -244,8 +244,34 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
             toast.error('Resource name cannot be empty')
             return
         }
-        // if (resourceTree) {
-        // }
+        if (resourceTree) {
+            try {
+                if (selectedNodeKey !== null) {
+                    newNodeKey = selectedNodeKey + '.' + newFolderName
+                } else {
+                    newNodeKey = '.' + newFolderName
+                }
+
+                //TODO: 根据选择的资源type,激活对应template的CreationViewModel
+                await api.node.mountNode({
+                    node_key: newNodeKey,
+                    template_name: value,
+                    mount_params_string: JSON.stringify({
+                        name: 'not confirm yet',
+                        epsg: null,
+                        alignment_origin: null,
+                        grid_info: null,
+                    })
+                })
+
+                setNewResourceName('')
+                setShowNewResourceInfo(false)
+
+                await resourceTree.refresh()
+            } catch {
+                toast.error('Failed to create new resource')
+            }
+        }
     }
 
     const handleCreateNewFolder = async () => {
@@ -260,6 +286,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                 } else {
                     newNodeKey = '.' + newFolderName
                 }
+
                 await api.node.mountNode({
                     node_key: newNodeKey,
                     template_name: '',
@@ -272,7 +299,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                 await resourceTree.refresh()
             }
             catch {
-                toast.error('Failed to create folder')
+                toast.error('Failed to create new folder')
             }
         }
     }
@@ -325,7 +352,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     const handleNewResourceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
             console.log('new resource key down', value)
-            //TODO: 根据选择的资源type,激活对应template的CreationViewModel
+            handleCreateNewResource()
         } else if (e.key === 'Escape') {
             handleCancelNewResource()
         }

@@ -13,12 +13,12 @@ interface ToolPanelProps {
         [templateName: string]: NodeTemplateFunctionSet
     } | null
     mapContainer: mapboxgl.Map | null
+    templateName?: string
 }
 
-export default function ToolPanel({ viewModels, mapContainer }: ToolPanelProps) {
+export default function ToolPanel({ viewModels, mapContainer, templateName = 'default' }: ToolPanelProps) {
     const [activeTab, setActiveTab] = useState<string>('create')
 
-    // 如果没有 viewModels，显示空状态
     if (!viewModels) {
         return (
             <div className="flex h-full w-full items-center justify-center bg-gray-800 text-white">
@@ -27,18 +27,16 @@ export default function ToolPanel({ viewModels, mapContainer }: ToolPanelProps) 
         )
     }
 
-    // 获取第一个 viewModel (通常是 Schema)
-    const firstViewModel = Object.values(viewModels)[0]
+    const currentViewModel = viewModels[templateName] || viewModels['default']
 
-    if (!firstViewModel) {
+    if (!currentViewModel) {
         return (
             <div className="flex h-full w-full items-center justify-center bg-gray-800 text-white">
-                No View Model Found
+                No View Model Found for template: {templateName}
             </div>
         )
     }
 
-    // 创建 MapViewContext
     const context: MapViewContext = {
         map: mapContainer,
         drawInstance: null,
@@ -50,10 +48,9 @@ export default function ToolPanel({ viewModels, mapContainer }: ToolPanelProps) 
         }
     }
 
-    // 获取各个组件，传入 context
-    const CheckComponent = firstViewModel.check ? firstViewModel.check(null, context) : null
-    const CreateComponent = firstViewModel.create ? firstViewModel.create(null, context) : null
-    const EditComponent = firstViewModel.edit ? firstViewModel.edit(null, context) : null
+    const CheckComponent = currentViewModel.check ? currentViewModel.check(null, context) : null
+    const CreateComponent = currentViewModel.create ? currentViewModel.create(null, context) : null
+    const EditComponent = currentViewModel.edit ? currentViewModel.edit(null, context) : null
 
     return (
         <div className="flex flex-col h-full w-full bg-gray-900">

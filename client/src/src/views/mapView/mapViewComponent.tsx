@@ -111,7 +111,11 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
     )
 })
 
-export default function MapViewComponent() {
+interface MapViewComponentProps {
+    templateName?: string
+}
+
+export default function MapViewComponent({ templateName = 'default' }: MapViewComponentProps) {
 
     const [mapInstance, setMapInstance] = useState<mapboxgl.Map | null>(null)
 
@@ -139,6 +143,7 @@ export default function MapViewComponent() {
                 <ToolPanel
                     viewModels={viewModels}
                     mapContainer={mapInstance}
+                    templateName={templateName}
                 />
             </ResizablePanel>
         </ResizablePanelGroup >

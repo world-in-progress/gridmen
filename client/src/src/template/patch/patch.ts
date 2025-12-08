@@ -1,4 +1,4 @@
-import DefaultTemplate from "../default";
+import DefaultTemplate from "../default/default";
 import { IResourceNode } from "../scene/iscene";
 import { IViewContext } from "../views/IViewContext";
 

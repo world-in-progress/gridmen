@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useReducer, useState } from "react"
-import { ICON_REGISTRY } from "@/registry/iconRegistry"
-import IconBar, { IconBarClickHandlers } from "./iconBar"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import MapViewComponent from "../template/views/mapView/mapViewComponent"
-import TableViewComponent from "../template/views/tableView/tableViewComponent"
 import SettingView from "./settingView/settingView"
+import { ICON_REGISTRY } from "@/registry/iconRegistry"
+import { IResourceNode } from "@/template/scene/iscene"
+import IconBar, { IconBarClickHandlers } from "./iconBar"
+import { useSettingStore } from "./settingView/settingStore"
 import ResourceTreeComponent from "./resourceTree/resourceTree"
 import { ResourceNode, ResourceTree } from "@/template/scene/scene"
-import { IResourceNode } from "@/template/scene/iscene"
-import { useSettingStore } from "./settingView/settingStore"
+import MapViewComponent from "@/views/mapView/mapViewComponent"
+import TableViewComponent from "@/views/tableView/tableViewComponent"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 
 export default function Framework() {
 
@@ -42,7 +42,6 @@ export default function Framework() {
         const _node = node as ResourceNode
         const tree = _node.tree as ResourceTree
 
-        // Reselect:
         publicTree.selectedNode = null
         privateTree.selectedNode = null
 
@@ -74,12 +73,10 @@ export default function Framework() {
     const handleNodeDoubleClick = useCallback((node: IResourceNode) => {
         const _node = node as ResourceNode
 
-        // Deselect all nodes in the trees
         if (privateTree === null || publicTree === null) return
         privateTree.selectedNode = null
         publicTree.selectedNode = null
 
-        // Set the clicked node as the selected node
         _node.tree.selectedNode = _node
 
     }, [privateTree, publicTree])
@@ -104,16 +101,23 @@ export default function Framework() {
         initTree()
     }, [leadIP])
 
+    // 获取当前选中节点的 templateName，默认为 'default'
+    const getCurrentTemplateName = (): string => {
+        const selectedNode = privateTree?.selectedNode || publicTree?.selectedNode
+        return selectedNode?.template_name || 'default'
+    }
+
     const renderActiveView = () => {
+        const currentTemplateName = getCurrentTemplateName()
         switch (activeIconID) {
             case 'map-view':
-                return <MapViewComponent />
+                return <MapViewComponent templateName={currentTemplateName} />
             case 'table-view':
                 return <TableViewComponent />
             case 'settings':
                 return <SettingView />
             default:
-                return <MapViewComponent />
+                return <MapViewComponent templateName={currentTemplateName} />
         }
     }
 

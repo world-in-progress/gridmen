@@ -1,6 +1,6 @@
 import React from 'react'
-import { IViewContext } from '../views/IViewContext'
-import { MapViewContext } from '../views/mapView/mapView'
+import { IViewContext } from '@/views/IViewContext'
+import { MapViewContext } from '@/views/mapView/mapView'
 
 interface SchemaCheckProps {
     context: IViewContext

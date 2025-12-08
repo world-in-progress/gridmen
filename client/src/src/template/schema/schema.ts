@@ -1,14 +1,15 @@
-import DefaultTemplate from "../default"
+import DefaultTemplate from "../default/default"
 import { IResourceNode } from "../scene/iscene"
-import { IViewContext } from "../views/IViewContext"
+import { IViewContext } from "@/views/IViewContext"
 import SchemaCheck from "./schemaCheck"
 import SchemaCreation from "./schemaCreation"
 import SchemaEdit from "./schemaEdit"
+import { ResourceTree } from "../scene/scene"
 
 export default class SchemaTemplate extends DefaultTemplate {
     static templateName: string = 'schema'
 
-    static viewModels = {
+    viewModels = {
         'MapView': {
             check: SchemaTemplate.checkMapView,
             create: SchemaTemplate.creationMapView,
@@ -16,13 +17,13 @@ export default class SchemaTemplate extends DefaultTemplate {
         }
     }
 
-    static checkMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
+    checkMapView(node: IResourceNode, context: IViewContext): Function {
         return () => SchemaCheck({ context })
     }
-    static creationMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
-        return () => SchemaCreation({ context })
+    creationMapView(node: IResourceNode, tree: ResourceTree, context: IViewContext): Function {
+        return () => SchemaCreation({ node, tree, context })
     }
-    static editMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
+    editMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
         return () => SchemaEdit({ context })
     }
 }

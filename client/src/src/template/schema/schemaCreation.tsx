@@ -1,17 +1,21 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import * as api from '../noodle/apis'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { GridLayerInfo, SchemaData } from './types'
-import { IViewContext } from '../views/IViewContext'
-import { MapViewContext } from '../views/mapView/mapView'
+import { IViewContext } from '@/views/IViewContext'
+import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
 import { addMapMarker, clearMapMarkers, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
-import { toast } from 'sonner'
+import { ResourceTree } from '../scene/scene'
+import { IResourceNode } from '../scene/iscene'
 
 interface SchemaCreationProps {
+    node: IResourceNode
+    tree: ResourceTree
     context: IViewContext
 }
 
@@ -211,7 +215,11 @@ const validateSchemaForm = (
     return { isValid: true, errors, generalError }
 }
 
-export default function SchemaCreation({ context }: SchemaCreationProps) {
+export default function SchemaCreation({
+    node,
+    tree,
+    context
+}: SchemaCreationProps) {
     const mapContext = context as MapViewContext
     const map = mapContext.map
 
@@ -413,14 +421,23 @@ export default function SchemaCreation({ context }: SchemaCreationProps) {
             grid_info: pageContext.current.gridLayers.map(layer => [parseFloat(layer.width), parseFloat(layer.height)]),
         }
 
+        // 构造挂载路径，根节点使用单个点，其余节点直接拼接
+        const parentKey = node?.key === '.' ? '.' : node?.key || '.'
+        const mountKey = parentKey === '.' ? `.${pageContext.current.name}` : `${parentKey}.${pageContext.current.name}`
+
         setGeneralMessage('Submitting data...')
         try {
             await api.node.mountNode({
-                node_key: '.' + pageContext.current.name, // 判断是不是顶层节点，如果是，则 node_key 为 '.' + pageContext.current.name
+                // 如果传入的是某个父节点，这里把新节点挂在该父节点下，否则默认挂在根节点
+                node_key: mountKey,
                 template_name: 'schema',
                 mount_params_string: JSON.stringify(schemaData)
             })
             setGeneralMessage('Created successfully')
+            const tree = node?.tree as ResourceTree
+            if (tree?.refresh) {
+                await tree.refresh()
+            }
             toast.success('Created successfully')
         } catch (error) {
             setGeneralMessage(`Failed to create schema: ${error}`)

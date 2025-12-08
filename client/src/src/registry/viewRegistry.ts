@@ -1,13 +1,14 @@
-import SchemaTemplate from "@/template/schema/schema"
-import MapView from "@/template/views/mapView/mapView"
-import { IResourceNode } from "@/template/scene/iscene"
-import TableView from "@/template/views/tableView/tableView"
-import { IViewContext } from "@/template/views/IViewContext"
-import DefaultView from "@/template/views/defaultView/defaultView"
-import MapViewComponent from "@/template/views/mapView/mapViewComponent"
-import TableViewComponent from "@/template/views/tableView/tableViewComponent"
-import PatchTemplate from "@/template/patch/patch"
+import MapView from "@/views/mapView/mapView"
 import GridTemplate from "@/template/grid/grid"
+import PatchTemplate from "@/template/patch/patch"
+import TableView from "@/views/tableView/tableView"
+import { IViewContext } from "@/views/IViewContext"
+import SchemaTemplate from "@/template/schema/schema"
+import { IResourceNode } from "@/template/scene/iscene"
+import DefaultTemplate from "@/template/default/default"
+import DefaultView from "@/views/defaultView/defaultView"
+import MapViewComponent from "@/views/mapView/mapViewComponent"
+import TableViewComponent from "@/views/tableView/tableViewComponent"
 
 export interface NodeTemplateFunctionSet {
     check: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
@@ -30,6 +31,11 @@ const _VIEW_REGISTRY: Record<string, ViewContent> = {
     [MapView.classKey]: {
         component: MapViewComponent,
         viewModels: {
+            [DefaultTemplate.templateName]: {
+                check: DefaultTemplate.checkMapView,
+                create: DefaultTemplate.creationMapView,
+                edit: DefaultTemplate.editMapView
+            },
             [SchemaTemplate.templateName]: {
                 check: SchemaTemplate.checkMapView,
                 create: SchemaTemplate.creationMapView,
