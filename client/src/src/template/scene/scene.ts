@@ -207,6 +207,23 @@ export class ResourceTree implements IResourceTree {
         return this.expandedNodes.has(nodeId)
     }
 
+    async refresh(): Promise<void> {
+        if (!this.root) return
+
+        // Refresh root node and all expanded nodes
+        await this.alignNodeInfo(this.root, true)
+
+        // Refresh all expanded nodes
+        for (const nodeId of this.expandedNodes) {
+            const node = this.scene.get(nodeId)
+            if (node) {
+                await this.alignNodeInfo(node, true)
+            }
+        }
+
+        this.notifyDomUpdate()
+    }
+
     static async create(leadIP?: string): Promise<ResourceTree> {
         try {
             const tree = new ResourceTree(leadIP)

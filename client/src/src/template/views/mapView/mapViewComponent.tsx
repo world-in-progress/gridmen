@@ -7,6 +7,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import MapView, { MapViewContext } from './mapView'
 import { VIEW_REGISTRY } from '@/registry/viewRegistry'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { debounce } from '@/utils/utils'
 
 const initialLongitude = 114.051537
 const initialLatitude = 22.446937
@@ -17,16 +18,6 @@ let resizer: ResizeObserver | null = null
 
 interface MapContainerProps {
     onMapLoad?: (map: mapboxgl.Map) => void
-}
-
-const debounce = (func: (...args: any[]) => void, delay: number) => {
-    let timeoutId: NodeJS.Timeout
-    return (...args: any[]) => {
-        clearTimeout(timeoutId)
-        timeoutId = setTimeout(() => {
-            func(...args)
-        }, delay)
-    }
 }
 
 const mapCanvasDebounce = (map: mapboxgl.Map, delay: number, mapRef: HTMLDivElement) => {
@@ -50,7 +41,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
     const initializedRef = useRef(false)
     const mapWrapperRef = useRef<HTMLDivElement>(null)
 
-    const { map, setMap } = useMapStore()
+    const { setMap } = useMapStore()
 
     useEffect(() => {
         mapboxgl.accessToken = import.meta.env.VITE_MAP_TOKEN

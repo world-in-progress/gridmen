@@ -203,3 +203,24 @@ export const addMapPatchBounds = (
         }, 100)
     }
 }
+
+export const debounce = <F extends (...args: any[]) => any>(
+    func: F,
+    delay: number
+): (...args: Parameters<F>) => Promise<ReturnType<F>> => {
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    return (...args: Parameters<F>) => {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+
+        return new Promise<ReturnType<F>>((resolve) => {
+            timeoutId = setTimeout(() => {
+                const result = func(...args);
+                timeoutId = null;
+                resolve(result);
+            }, delay);
+        });
+    };
+};

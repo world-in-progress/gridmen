@@ -87,14 +87,16 @@ export default function Framework() {
     useEffect(() => {
         const initTree = async () => {
             try {
+                /// PRIVATE ///
                 const _privateTree = await ResourceTree.create()
-                // const _publicTree = await ResourceTree.create(leadIP!)
-
                 _privateTree.subscribe(triggerRepaint)
-                // _publicTree.subscribe(triggerRepaint)
-
                 setPrivateTree(_privateTree)
+
+                /// PUBLIC ///
+                // const _publicTree = await ResourceTree.create(leadIP!)
+                // _publicTree.subscribe(triggerRepaint)
                 // setPublicTree(_publicTree)
+
             } catch (error) {
                 console.error('Failed to initialize tree:', error)
             }
@@ -114,8 +116,6 @@ export default function Framework() {
                 return <MapViewComponent />
         }
     }
-
-
 
     return (
         <div className='w-screen h-screen bg-[#1E1E1E] flex'>

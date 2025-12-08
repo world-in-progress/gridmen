@@ -1,34 +1,30 @@
 import { useState, useEffect, useRef, useCallback, useReducer } from 'react'
 import {
+    File,
+    Check,
+    Folder,
     MapPin,
-    Square,
-    Loader2,
     FilePlus,
+    FolderOpen,
     FolderPlus,
     RefreshCcw,
     ChevronDown,
     ChevronRight,
-    FolderOpen,
-    Folder,
-    FileText,
-    Check,
-    ChevronsUpDown
+    Square,
 } from 'lucide-react'
-import store from '@/store'
 import { toast } from 'sonner'
+import { create } from 'zustand'
 import { cn } from '@/utils/utils'
 import { Button } from '../ui/button'
 import * as api from '@/template/noodle/apis'
 import { Input } from '@/components/ui/input'
 import { Separator } from "@/components/ui/separator"
+import { ResourceTree } from '@/template/scene/scene'
 import { IResourceNode } from '@/template/scene/iscene'
-import { ResourceNode, ResourceTree } from '@/template/scene/scene'
+import { RESOURCE_REGISTRY } from '@/registry/resourceRegistry'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { create } from 'zustand'
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { RESOURCE_REGISTRY } from '@/registry/resourceRegistry'
-
 
 interface NodeRendererProps {
     node: IResourceNode
@@ -61,7 +57,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
     const isExpanded = tree.isNodeExpanded(node.id)
     const isSelected = tree.selectedNode?.id === node.id
 
-    const { selectedNodeKey, setSelectedNodeKey } = useSelectedNodeStore()
+    const { setSelectedNodeKey } = useSelectedNodeStore()
 
     const nodeRef = useRef<HTMLDivElement>(null)
     const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -143,7 +139,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                             isSelected ? 'bg-gray-600 text-white' : 'text-gray-300',
                             !isFolder && 'cursor-grab active:cursor-grabbing',
                         )}
-                        style={{ paddingLeft: `${depth * 16 + 2}px` }}
+                        style={{ paddingLeft: `${depth * 10}px` }}
                         onClick={handleClick}
                         onDoubleClick={handleDoubleClick}
                         draggable={!isFolder} // Only allow dragging files, not folders
@@ -154,18 +150,18 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                             }
                         }}
                     >
-                        <div className='ml-2 flex'>
+                        <div className='ml-1.5 flex'>
                             {isFolder ? (
                                 <>
                                     {isExpanded ? (
                                         <>
-                                            <ChevronDown className='w-4 h-4 mr-1' />
-                                            <FolderOpen className='w-4 h-4 mr-2 text-blue-400' />
+                                            <ChevronDown className='w-4 h-4 mr-0.5' />
+                                            <FolderOpen className='w-4 h-4 mr-2 text-gray-300' />
                                         </>
                                     ) : (
                                         <>
-                                            <ChevronRight className='w-4 h-4 mr-1' />
-                                            <Folder className='w-4 h-4 mr-2 text-blue-400' />
+                                            <ChevronRight className='w-4 h-4 mr-0.5' />
+                                            <Folder className='w-4 h-4 mr-2 text-gray-300' />
                                         </>
                                     )}
                                 </>
@@ -173,9 +169,11 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                                 (() => {
                                     switch (node.template_name) {
                                         case 'schema':
-                                            return <MapPin className='w-4 h-4 mr-2 ml-3 text-red-500' />
+                                            return <MapPin className='w-4 h-4 mr-2 ml-4.5 text-red-500' />
+                                        case 'patch':
+                                            return <Square className='w-4 h-4 mr-2 ml-4.5 text-sky-500' />
                                         default:
-                                            return <Folder className='w-4 h-4 mr-2 ml-3 text-blue-500' />
+                                            return <File className='w-4 h-4 mr-2 ml-4.5 text-blue-500' />
                                     }
                                 })()
                             )}
@@ -214,6 +212,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     const [showNewResourceInfo, setShowNewResourceInfo] = useState<boolean>(false)
     const [showNewFolderInput, setShowNewFolderInput] = useState<boolean>(false)
     const newResourceInputRef = useRef<HTMLInputElement>(null)
+    const newResourceDivRef = useRef<HTMLDivElement>(null)
     const newFolderInputRef = useRef<HTMLInputElement>(null)
     const { selectedNodeKey, setSelectedNodeKey } = useSelectedNodeStore()
 
@@ -229,6 +228,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
         e.preventDefault()
         setShowNewResourceInfo(true)
         setNewResourceName('')
+        handleCancelNewFolder()
     }
 
     const handleFolderPlusClick = (e: React.MouseEvent) => {
@@ -236,6 +236,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
         e.preventDefault()
         setShowNewFolderInput(true)
         setNewFolderName('')
+        handleCancelNewResource()
     }
 
     const handleCreateNewResource = async () => {
@@ -267,6 +268,8 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
 
                 setNewFolderName('')
                 setShowNewFolderInput(false)
+
+                await resourceTree.refresh()
             }
             catch {
                 toast.error('Failed to create folder')
@@ -277,10 +280,51 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     const handleCancelNewResource = () => {
         setNewResourceName('')
         setShowNewResourceInfo(false)
+        setValue('')
+        setOpen(false)
+    }
+
+    const checkFocus = (e: React.FocusEvent<HTMLDivElement>) => {
+        const relatedTarget = e.relatedTarget as HTMLElement | null
+        const isPopoverContent = relatedTarget?.closest('[data-slot="popover-content"]')
+
+        if (open || isPopoverContent) {
+            return
+        }
+
+        if (!newResourceDivRef.current?.contains(relatedTarget as Node)) {
+            setTimeout(() => {
+                if (showNewResourceInfo && !open) {
+                    handleCancelNewResource()
+                }
+            })
+        }
+    }
+
+    const handlePopoverOpenChange = (isOpen: boolean) => {
+        setOpen(isOpen)
+        if (!isOpen && showNewResourceInfo && newResourceInputRef.current) {
+            setTimeout(() => {
+                newResourceInputRef.current?.focus()
+            }, 0)
+        }
+    }
+
+    const handleResourceTypeSelect = () => {
+        const selectedResource = RESOURCE_REGISTRY.find((resource) => resource.value === value)
+
+        if (!selectedResource) {
+            return <File className="w-4 h-4" />
+        }
+
+        const SelectedIcon = selectedResource.icon
+
+        return <SelectedIcon className="w-4 h-4" />
     }
 
     const handleNewResourceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
+            console.log('new resource key down', value)
             //TODO: 根据选择的资源type,激活对应template的CreationViewModel
         } else if (e.key === 'Escape') {
             handleCancelNewResource()
@@ -300,9 +344,11 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
         }
     }
 
-    const handleRefreshClick = (e: React.MouseEvent) => {
+    const handleRefreshClick = async (e: React.MouseEvent) => {
         e.stopPropagation()
-        console.log('refresh click')
+        if (resourceTree) {
+            await resourceTree.refresh()
+        }
     }
 
     useEffect(() => {
@@ -369,19 +415,23 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                         onChange={e => setNewFolderName(e.target.value)}
                         onKeyDown={handleNewFolderKeyDown}
                         onBlur={handleCancelNewFolder}
-                        className="h-6 text-sm bg-gray-800 border-gray-600 focus:border-blue-500"
+                        className="h-6 text-sm rounded-xs bg-[#3C3C3C] border-gray-600"
                         autoFocus
                     />
                 </div>
             )}
             {showNewResourceInfo && (
                 <div
+                    ref={newResourceDivRef}
                     className={cn(
-                        'flex items-center py-0.5 px-2 space-x-1 text-sm w-full select-none',
+                        'flex items-center py-0.5 px-1 gap-0.5 text-sm w-full select-none',
                         `pl-[${0 * 16 + 2}px]`
                     )}
                 >
-                    <Popover open={open} onOpenChange={setOpen}>
+                    <Popover
+                        open={open}
+                        onOpenChange={(isOpen) => handlePopoverOpenChange(isOpen)}
+                    >
                         <PopoverTrigger asChild>
                             <Button
                                 variant="outline"
@@ -391,38 +441,40 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                                     e.preventDefault()
                                     e.stopPropagation()
                                 }}
-                                className="h-6 w-24 text-black justify-between cursor-pointer"
+                                className="h-6 w-6 text-black rounded-xs flex items-center justify-center cursor-pointer"
                             >
-                                {value
-                                    ? RESOURCE_REGISTRY.find((resource) => resource.value === value)?.label
-                                    : "Select"}
-                                <ChevronsUpDown className="opacity-50" />
+                                {handleResourceTypeSelect()}
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-24 p-0">
+                        <PopoverContent className="w-36 p-0">
                             <Command>
-                                <CommandInput placeholder="Search framework..." className="h-9" />
+                                <CommandInput placeholder="Search" className="h-6" />
                                 <CommandList>
                                     <CommandEmpty>No Resource found</CommandEmpty>
                                     <CommandGroup>
-                                        {RESOURCE_REGISTRY.map((resource) => (
-                                            <CommandItem
-                                                key={resource.value}
-                                                value={resource.value}
-                                                onSelect={(currentValue) => {
-                                                    setValue(currentValue === value ? "" : currentValue)
-                                                    setOpen(false)
-                                                }}
-                                            >
-                                                {resource.label}
-                                                <Check
-                                                    className={cn(
-                                                        "ml-auto",
-                                                        value === resource.value ? "opacity-100" : "opacity-0"
-                                                    )}
-                                                />
-                                            </CommandItem>
-                                        ))}
+                                        {RESOURCE_REGISTRY.map((resource) => {
+                                            const ResourceIcon = resource.icon
+                                            return (
+                                                <CommandItem
+                                                    key={resource.value}
+                                                    value={resource.value}
+                                                    onSelect={(currentValue) => {
+                                                        setValue(currentValue === value ? "" : currentValue)
+                                                        setOpen(false)
+                                                    }}
+                                                    className='cursor-pointer'
+                                                >
+                                                    <ResourceIcon className="h-4 w-4" />
+                                                    {resource.label}
+                                                    <Check
+                                                        className={cn(
+                                                            "ml-auto",
+                                                            value === resource.value ? "opacity-100" : "opacity-0"
+                                                        )}
+                                                    />
+                                                </CommandItem>
+                                            )
+                                        })}
                                     </CommandGroup>
                                 </CommandList>
                             </Command>
@@ -433,8 +485,8 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                         value={newResourceName}
                         onChange={e => setNewResourceName(e.target.value)}
                         onKeyDown={handleNewResourceKeyDown}
-                        onBlur={handleCancelNewResource}
-                        className="h-6 text-sm bg-gray-800 border-gray-600 focus:border-blue-500"
+                        onBlur={e => checkFocus(e)}
+                        className="h-6 text-sm rounded-xs bg-[#3C3C3C] border-gray-600"
                         autoFocus
                     />
                 </div>

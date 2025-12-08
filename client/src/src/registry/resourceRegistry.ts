@@ -1,27 +1,25 @@
+import { Grid, LucideIcon, MapPin, Square } from "lucide-react"
+
 interface ResourceEntry {
     value: string
     label: string
+    icon: LucideIcon
 }
 
 export const RESOURCE_REGISTRY: ResourceEntry[] = [
     {
-        value: "next.js",
-        label: "Next.js",
+        value: "schema",
+        label: "Schema",
+        icon: MapPin,
     },
     {
-        value: "sveltekit",
-        label: "SvelteKit",
+        value: "patch",
+        label: "Patch",
+        icon: Square,
     },
     {
-        value: "nuxt.js",
-        label: "Nuxt.js",
-    },
-    {
-        value: "remix",
-        label: "Remix",
-    },
-    {
-        value: "astro",
-        label: "Astro",
+        value: "grid",
+        label: "Grid",
+        icon: Grid,
     },
 ]
