@@ -3,14 +3,14 @@ import DefaultPageContext from "../context/default"
 import ContextStorage from "../context/contextStorage"
 import { IResourceNode, IResourceTree } from "./iscene"
 import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
-import { INodeTemplate } from '../itemplate'
+import { ITemplate } from '../itemplate'
 
 export class ResourceNode implements IResourceNode {
     key: string
     lockId: string = ''
     aligned: boolean = false
     tree: ResourceTree
-    template: INodeTemplate | null
+    template: ITemplate | null
     parent: IResourceNode | null
     children: Map<string, IResourceNode> = new Map()
 
@@ -21,7 +21,7 @@ export class ResourceNode implements IResourceNode {
 
     private _pageContext: DefaultPageContext | undefined | null = null
 
-    constructor(tree: ResourceTree, node_key: string, parent: IResourceNode | null, template: INodeTemplate | null) {
+    constructor(tree: ResourceTree, node_key: string, parent: IResourceNode | null, template: ITemplate | null) {
         this.key = node_key
         this.tree = tree
         this.parent = parent
@@ -34,7 +34,7 @@ interface TreeUpdateCallback {
 }
 
 interface ResourceTreeHandlers {
-    onNodeMenuOpen: (node: IResourceNode) => void
+    onNodeMenuOpen: (node: IResourceNode, menuItem: any) => void
     onNodeRemove: (node: IResourceNode) => void
     onNodeClick: (node: IResourceNode) => void
     onNodeDoubleClick: (node: IResourceNode) => void

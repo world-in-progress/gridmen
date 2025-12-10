@@ -5,7 +5,7 @@ import { Search, Settings } from "lucide-react"
 import { Input } from "@/components/ui/input"
 
 export default function SettingView() {
-    const [activeCategory, setActiveCategory] = useState("general")
+    const [activeCategory, setActiveCategory] = useState("lead-ip")
     const [searchQuery, setSearchQuery] = useState("")
 
     return (

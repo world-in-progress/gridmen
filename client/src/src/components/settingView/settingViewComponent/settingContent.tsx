@@ -10,7 +10,7 @@ interface SettingContentProps {
 export default function SettingContent({ activeCategory }: SettingContentProps) {
 
     const {
-        leadIP,
+        publicIP: leadIP,
         highSpeedMode,
         setHighSpeedMode,
         setLeadIP
@@ -18,7 +18,7 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
 
     const renderPublicSetting = () => (
         <div className="space-y-0">
-            <SettingItem title="Lead IP" description="Control the lead IP. e.g: http://127.0.0.1:8000">
+            <SettingItem title="Public IP" description="Control the Public IP. e.g: http://127.0.0.1:8000">
                 <Input
                     value={leadIP ?? DEFAULT_LEAD_IP}
                     className="w-64 bg-gray-700 border-gray-600 text-white"

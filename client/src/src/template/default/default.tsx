@@ -1,11 +1,13 @@
 import DefaultEdit from "./defaultEdit"
+import { ITemplate } from "../itemplate"
 import DefaultCheck from "./defaultCheck"
 import DefaultCreation from "./defaultCreation"
 import { IResourceNode } from "../scene/iscene"
 import { IViewContext } from "@/views/IViewContext"
 
-export default class DefaultTemplate {
+export default class DefaultTemplate implements ITemplate {
     static templateName: string = 'default'
+    templateName: string = DefaultTemplate.templateName
 
     static viewModels = {
         'MapView': {
@@ -43,4 +45,10 @@ export default class DefaultTemplate {
     static editTableView(nodeSelf: IResourceNode, context: IViewContext): Function {
         return () => null
     }
+
+    renderMenu(nodeSelf: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element | null {
+        return null
+    }
+
+    handleMenuOpen(nodeSelf: IResourceNode, menuItem: any): void { }
 }

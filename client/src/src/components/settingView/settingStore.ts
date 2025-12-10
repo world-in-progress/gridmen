@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 interface SettingState {
-    leadIP: string | null
+    publicIP: string | null
     highSpeedMode: boolean
 }
 
@@ -16,8 +16,8 @@ type SettingStore = SettingState & SettingActions
 export const DEFAULT_LEAD_IP = 'http://127.0.0.1:8000'
 
 export const useSettingStore = create<SettingStore>((set) => ({
-    leadIP: DEFAULT_LEAD_IP,
+    publicIP: DEFAULT_LEAD_IP,
     highSpeedMode: false,
-    setLeadIP: (leadIP: string) => set({ leadIP }),
+    setLeadIP: (leadIP: string) => set({ publicIP: leadIP }),
     setHighSpeedMode: (highSpeedMode: boolean) => set({ highSpeedMode }),
 }))

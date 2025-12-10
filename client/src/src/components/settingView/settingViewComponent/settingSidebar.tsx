@@ -31,7 +31,7 @@ interface SettingSidebarProps {
 }
 
 export default function SettingSidebar({ activeCategory, onCategoryChange }: SettingSidebarProps) {
-    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["topology-editor"]))
+    const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["public-tree"]))
 
     const toggleCategory = (categoryId: string) => {
         const newExpanded = new Set(expandedCategories)

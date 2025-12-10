@@ -2,18 +2,16 @@ import MapView from "@/views/mapView/mapView"
 import GridTemplate from "@/template/grid/grid"
 import PatchTemplate from "@/template/patch/patch"
 import TableView from "@/views/tableView/tableView"
-import { IViewContext } from "@/views/IViewContext"
 import SchemaTemplate from "@/template/schema/schema"
-import { IResourceNode } from "@/template/scene/iscene"
 import DefaultTemplate from "@/template/default/default"
 import DefaultView from "@/views/defaultView/defaultView"
 import MapViewComponent from "@/views/mapView/mapViewComponent"
 import TableViewComponent from "@/views/tableView/tableViewComponent"
 
 export interface NodeTemplateFunctionSet {
-    check: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
-    create: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
-    edit: ((nodeSelf: IResourceNode, context: IViewContext) => Function) | null
+    check: Function | null
+    create: Function | null
+    edit: Function | null
 }
 
 interface ViewContent {

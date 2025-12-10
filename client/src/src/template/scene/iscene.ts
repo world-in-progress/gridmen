@@ -1,3 +1,5 @@
+import { ITemplate } from "../itemplate"
+
 export interface IResourceNode {
     id: string
     key: string
@@ -5,6 +7,7 @@ export interface IResourceNode {
     lockId: string
     aligned: boolean
     tree: IResourceTree
+    template: ITemplate | null
     template_name: string | null
     parent: IResourceNode | null
     children: Map<string, IResourceNode>

@@ -107,9 +107,9 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
     }, [])
 
     // TODO: 渲染node右键菜单
-    // const renderNodeMenu = useCallback(() => {
-    //     return node.scenarioNode.renderMenu(node, handleNodeMenu)
-    // }, [node, handleNodeMenu])
+    const renderNodeMenu = useCallback(() => {
+        return node.template!.renderMenu(node, handleNodeMenu)
+    }, [node, handleNodeMenu])
 
     useEffect(() => {
         if (isSelected && nodeRef.current) {
@@ -181,7 +181,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                         <span>{node.name}</span>
                     </div>
                 </ContextMenuTrigger>
-                {/* {renderNodeMenu()} */}
+                {renderNodeMenu()}
             </ContextMenu>
 
             {/* Render child nodes */}
@@ -527,7 +527,7 @@ interface ResourceTreeComponentProps {
     publicTree: ResourceTree | null
     focusNode: IResourceNode | null
     triggerFocus: number
-    onNodeMenuOpen: (node: IResourceNode) => void
+    onNodeMenuOpen: (node: IResourceNode, menuItem: any) => void
     onNodeRemove: (node: IResourceNode) => void
     onNodeClick: (node: IResourceNode) => void
     onNodeDoubleClick: (node: IResourceNode) => void

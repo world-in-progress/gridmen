@@ -19,7 +19,7 @@ export default function Framework() {
 
     const [publicTree, setPublicTree] = useState<ResourceTree | null>(null)
     const [privateTree, setPrivateTree] = useState<ResourceTree | null>(null)
-    const leadIP = useSettingStore(state => state.leadIP)
+    const publicIP = useSettingStore(state => state.publicIP)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
@@ -30,9 +30,19 @@ export default function Framework() {
         }
     })
 
-    const handleNodeMenuOpen = useCallback((node: IResourceNode) => {
-        console.log('menu open node', node)
-    }, [])
+    const handleNodeMenuOpen = useCallback((node: IResourceNode, menuItem: any) => {
+        console.log('menu open node', node, menuItem)
+
+        if (privateTree === null || publicTree === null) return
+
+        const treeOfNode = node.tree as ResourceTree
+
+        if (privateTree) privateTree.selectedNode = null
+        if (publicTree) publicTree.selectedNode = null
+        treeOfNode.selectedNode = node
+
+        node.template?.handleMenuOpen(node, menuItem)
+    }, [privateTree, publicTree])
 
     const handleNodeRemove = useCallback((node: IResourceNode) => {
         console.log('remove node', node)
@@ -90,7 +100,7 @@ export default function Framework() {
                 setPrivateTree(_privateTree)
 
                 /// PUBLIC ///
-                // const _publicTree = await ResourceTree.create(leadIP!)
+                // const _publicTree = await ResourceTree.create(publicIP!)
                 // _publicTree.subscribe(triggerRepaint)
                 // setPublicTree(_publicTree)
 
@@ -99,7 +109,7 @@ export default function Framework() {
             }
         }
         initTree()
-    }, [leadIP])
+    }, [publicIP])
 
     // 获取当前选中节点的 templateName，默认为 'default'
     const getCurrentTemplateName = (): string => {
