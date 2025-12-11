@@ -3,7 +3,7 @@ import DefaultPageContext from "../context/default"
 import ContextStorage from "../context/contextStorage"
 import { IResourceNode, IResourceTree } from "./iscene"
 import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
-import { ITemplate } from '../itemplate'
+import { ITemplate } from '../iTemplate'
 
 export class ResourceNode implements IResourceNode {
     key: string

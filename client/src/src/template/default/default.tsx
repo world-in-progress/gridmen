@@ -1,5 +1,5 @@
 import DefaultEdit from "./defaultEdit"
-import { ITemplate } from "../itemplate"
+import { ITemplate } from "../iTemplate"
 import DefaultCheck from "./defaultCheck"
 import DefaultCreation from "./defaultCreation"
 import { IResourceNode } from "../scene/iscene"

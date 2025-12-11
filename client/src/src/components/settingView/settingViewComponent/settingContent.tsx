@@ -1,6 +1,6 @@
 import SettingItem from "./settingItem"
 import { Input } from "@/components/ui/input"
-import { DEFAULT_LEAD_IP, useSettingStore } from "../settingStore"
+import { DEFAULT_LEAD_IP, useSettingStore } from "@/store/storeSet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface SettingContentProps {

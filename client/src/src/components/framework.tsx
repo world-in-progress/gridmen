@@ -3,22 +3,21 @@ import SettingView from "./settingView/settingView"
 import { ICON_REGISTRY } from "@/registry/iconRegistry"
 import { IResourceNode } from "@/template/scene/iscene"
 import IconBar, { IconBarClickHandlers } from "./iconBar"
-import { useSettingStore } from "./settingView/settingStore"
 import ResourceTreeComponent from "./resourceTree/resourceTree"
 import { ResourceNode, ResourceTree } from "@/template/scene/scene"
 import MapViewComponent from "@/views/mapView/mapViewComponent"
 import TableViewComponent from "@/views/tableView/tableViewComponent"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { useSettingStore } from "@/store/storeSet"
 
 export default function Framework() {
 
     const [triggerFocus, setTriggerFocus] = useState(0)
     const [activeIconID, setActiveIconID] = useState('map-view')
 
-    const [focusNode, setFocusNode] = useState<IResourceNode | null>(null)
-
-    const [publicTree, setPublicTree] = useState<ResourceTree | null>(null)
     const [privateTree, setPrivateTree] = useState<ResourceTree | null>(null)
+    const [publicTree, setPublicTree] = useState<ResourceTree | null>(null)
+    const [focusNode, setFocusNode] = useState<IResourceNode | null>(null)
     const publicIP = useSettingStore(state => state.publicIP)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)

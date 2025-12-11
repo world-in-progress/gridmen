@@ -1,4 +1,4 @@
-import { ITemplate } from "../itemplate"
+import { ITemplate } from "../iTemplate"
 
 export interface IResourceNode {
     id: string

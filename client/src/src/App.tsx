@@ -2,7 +2,7 @@ import { useState } from 'react'
 import './App.css'
 import Framework from './components/framework'
 import { Toaster } from './components/ui/sonner'
-import store from './store'
+import store from './store/store'
 import Loader from './components/ui/loader'
 
 function App() {

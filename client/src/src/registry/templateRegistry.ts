@@ -1,6 +1,6 @@
 import DefaultTemplate from "@/template/default/default"
 import SchemaTemplate from "@/template/schema/schema"
-import { ITemplate } from "@/template/itemplate"
+import { ITemplate } from "@/template/iTemplate"
 
 const defaultTemplate = new DefaultTemplate()
 const schemaTemplate = new SchemaTemplate()

@@ -11,9 +11,9 @@ import {
     ChevronDown,
     ChevronRight,
     Square,
+    Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { create } from 'zustand'
 import { cn } from '@/utils/utils'
 import { Button } from '../ui/button'
 import * as api from '@/template/noodle/apis'
@@ -25,6 +25,7 @@ import { RESOURCE_REGISTRY } from '@/registry/resourceRegistry'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { useSelectedNodeStore } from '@/store/storeSet'
 
 interface NodeRendererProps {
     node: IResourceNode
@@ -38,16 +39,6 @@ interface TreeRendererProps {
     resourceTree: ResourceTree | null
     triggerFocus: number
 }
-
-interface SelectedNodeStore {
-    selectedNodeKey: string | null;
-    setSelectedNodeKey: (key: string | null) => void;
-}
-
-const useSelectedNodeStore = create<SelectedNodeStore>((set) => ({
-    selectedNodeKey: null,
-    setSelectedNodeKey: (key: string | null) => set({ selectedNodeKey: key }),
-}))
 
 const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererProps) => {
 
@@ -156,12 +147,12 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                                     {isExpanded ? (
                                         <>
                                             <ChevronDown className='w-4 h-4 mr-0.5' />
-                                            <FolderOpen className='w-4 h-4 mr-2 text-gray-300' />
+                                            <FolderOpen className='w-4 h-4 mr-2 text-gray-400' />
                                         </>
                                     ) : (
                                         <>
                                             <ChevronRight className='w-4 h-4 mr-0.5' />
-                                            <Folder className='w-4 h-4 mr-2 text-gray-300' />
+                                            <Folder className='w-4 h-4 mr-2 text-gray-400' />
                                         </>
                                     )}
                                 </>
@@ -240,16 +231,19 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     }
 
     const handleCreateNewResource = async () => {
+        const tempNodeName = 'not confirm yet'
+
         if (newResourceName.trim() === '') {
             toast.error('Resource name cannot be empty')
             return
         }
         if (resourceTree) {
+            console.log('nihao')
             try {
                 if (selectedNodeKey !== null) {
-                    newNodeKey = selectedNodeKey + '.' + newFolderName
+                    newNodeKey = selectedNodeKey + '.' + tempNodeName
                 } else {
-                    newNodeKey = '.' + newFolderName
+                    newNodeKey = '.' + tempNodeName
                 }
 
                 //TODO: 根据选择的资源type,激活对应template的CreationViewModel
@@ -257,10 +251,10 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                     node_key: newNodeKey,
                     template_name: value,
                     mount_params_string: JSON.stringify({
-                        name: 'not confirm yet',
-                        epsg: null,
-                        alignment_origin: null,
-                        grid_info: null,
+                        name: tempNodeName,
+                        epsg: 4326,
+                        alignment_origin: [0, 0],
+                        grid_info: [1, 1],
                     })
                 })
 
@@ -268,6 +262,8 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                 setShowNewResourceInfo(false)
 
                 await resourceTree.refresh()
+
+                // resourceTree.selectedNode = 
             } catch {
                 toast.error('Failed to create new resource')
             }
@@ -387,7 +383,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     return (
         <>
             <div
-                className='z-10 bg-[#2A2C33] hover:bg-[#373942] py-1 pl-1 text-sm font-semibold flex items-center text-gray-200 cursor-pointer'
+                className='z-10 bg-[#2A2C33] py-1 pl-1 text-sm font-semibold flex items-center text-gray-200 cursor-pointer'
                 onClick={handleClickTreeTitle}
             >
                 <span className='ml-2'>{title}</span>
@@ -426,15 +422,10 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                 />
             ))}
             {showNewFolderInput && (
-                <div
-                    className={cn(
-                        'flex items-center py-0.5 px-2 text-sm w-full select-none',
-                        `pl-[${0 * 16 + 2}px]`
-                    )}
-                >
-                    <div className='ml-2 flex'>
-                        <ChevronRight className='w-4 h-4 mr-1' />
-                        <Folder className='w-4 h-4 mr-2 text-blue-400' />
+                <div className={cn('flex items-center py-0.5 px-2 text-sm w-full select-none')}>
+                    <div className='flex'>
+                        <Plus className='w-4 h-4 mr-0.5' />
+                        <Folder className='w-4 h-4 mr-2 text-gray-400' />
                     </div>
                     <Input
                         ref={newFolderInputRef}

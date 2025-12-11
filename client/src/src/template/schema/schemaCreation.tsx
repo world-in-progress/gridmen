@@ -15,7 +15,7 @@ import { IResourceNode } from '../scene/iscene'
 
 interface SchemaCreationProps {
     node: IResourceNode
-    tree: ResourceTree
+    // tree: ResourceTree
     context: IViewContext
 }
 
@@ -217,7 +217,7 @@ const validateSchemaForm = (
 
 export default function SchemaCreation({
     node,
-    tree,
+    // tree,
     context
 }: SchemaCreationProps) {
     const mapContext = context as MapViewContext

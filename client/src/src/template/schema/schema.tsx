@@ -1,7 +1,7 @@
 import * as api from '../noodle/apis'
 import SchemaEdit from "./schemaEdit"
 import SchemaCheck from "./schemaCheck"
-import { ITemplate } from "../itemplate"
+import { ITemplate } from "../iTemplate"
 import SchemaCreation from "./schemaCreation"
 import { IResourceNode } from "../scene/iscene"
 import { IViewContext } from "@/views/IViewContext"
@@ -31,8 +31,9 @@ export default class SchemaTemplate implements ITemplate {
     static checkMapView(node: IResourceNode, context: IViewContext): Function {
         return () => SchemaCheck({ context })
     }
-    static creationMapView(node: IResourceNode, tree: ResourceTree, context: IViewContext): Function {
-        return () => SchemaCreation({ node, tree, context })
+    static creationMapView(node: IResourceNode, context: IViewContext): Function {
+        // const tree = node.tree as ResourceTree
+        return () => SchemaCreation({ node, context })
     }
     static editMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
         return () => SchemaEdit({ context })
