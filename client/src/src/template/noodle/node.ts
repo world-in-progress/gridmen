@@ -59,7 +59,7 @@ export const unmountNode = async (node_key: string, leadIP?: string) => {
         node_key = `${leadIP}::${node_key}`
     }
 
-    const url = `${API_PREFIX}/unmount`
+    const url = `${API_PREFIX}/unmount?node_key=${node_key}`
 
     try {
         const response = await fetch(url, {
@@ -67,7 +67,6 @@ export const unmountNode = async (node_key: string, leadIP?: string) => {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ node_key }),
         })
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`)

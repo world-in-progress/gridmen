@@ -59,6 +59,7 @@ export default class SchemaTemplate implements ITemplate {
     }
 
     async handleMenuOpen(nodeSelf: IResourceNode, menuItem: any): Promise<void> {
+        console.log('hello 123')
         switch (menuItem) {
             case SchemaMenuItem.CHECK_SCHEMA:
                 console.log('hello 1')

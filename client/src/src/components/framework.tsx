@@ -32,7 +32,8 @@ export default function Framework() {
     const handleNodeMenuOpen = useCallback((node: IResourceNode, menuItem: any) => {
         console.log('menu open node', node, menuItem)
 
-        if (privateTree === null || publicTree === null) return
+        // 只要 privateTree 或 publicTree 中有一个不为 null 就可以继续
+        if (privateTree === null && publicTree === null) return
 
         const treeOfNode = node.tree as ResourceTree
 
@@ -40,6 +41,7 @@ export default function Framework() {
         if (publicTree) publicTree.selectedNode = null
         treeOfNode.selectedNode = node
 
+        console.log('calling node.template?.handleMenuOpen', node.template, menuItem)
         node.template?.handleMenuOpen(node, menuItem)
     }, [privateTree, publicTree])
 

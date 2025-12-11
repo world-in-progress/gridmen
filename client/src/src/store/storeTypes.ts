@@ -9,3 +9,8 @@ export interface SettingsProps {
     setHighSpeedMode: (highSpeedMode: boolean) => void
     setLeadIP: (leadIP: string) => void
 }
+
+export interface TempNewNodeProps {
+    tempNewNodeKey: string | null
+    setTempNewNodeKey: (tempNewNodeKey: string) => void
+}
