@@ -59,7 +59,6 @@ export default class SchemaTemplate implements ITemplate {
     }
 
     async handleMenuOpen(nodeSelf: IResourceNode, menuItem: any): Promise<void> {
-        console.log('hello 123')
         switch (menuItem) {
             case SchemaMenuItem.CHECK_SCHEMA:
                 console.log('hello 1')
@@ -71,14 +70,9 @@ export default class SchemaTemplate implements ITemplate {
                 break
             case SchemaMenuItem.DELETE_SCHEMA:
                 {
-                    console.log('delete schema', nodeSelf.key)
-                    const response = await api.node.unmountNode(nodeSelf.key)
-                    if (response) {
-                        toast.success(`Schema ${nodeSelf.name} deleted successfully`)
-                        await (nodeSelf.tree as ResourceTree).refresh()
-                    } else {
-                        toast.error(`Failed to delete schema ${nodeSelf.name}`)
-                    }
+                    await api.node.unmountNode(nodeSelf.key)
+                    toast.success(`Schema ${nodeSelf.name} deleted successfully`)
+                    await (nodeSelf.tree as ResourceTree).refresh()
                 }
                 break
         }

@@ -378,9 +378,6 @@ export default function SchemaCreation({
 
     const resetForm = async () => {
 
-        // await (node as ResourceNode).deletePageContext()
-        // pageContext.current = new SchemasPageContext()
-
         picking.current.marker?.remove()
 
         setFormErrors({
@@ -421,14 +418,12 @@ export default function SchemaCreation({
             grid_info: pageContext.current.gridLayers.map(layer => [parseFloat(layer.width), parseFloat(layer.height)]),
         }
 
-        // 构造挂载路径，根节点使用单个点，其余节点直接拼接
         const parentKey = node?.key === '.' ? '.' : node?.key || '.'
         const mountKey = parentKey === '.' ? `.${pageContext.current.name}` : `${parentKey}.${pageContext.current.name}`
 
         setGeneralMessage('Submitting data...')
         try {
             await api.node.mountNode({
-                // 如果传入的是某个父节点，这里把新节点挂在该父节点下，否则默认挂在根节点
                 node_key: mountKey,
                 template_name: 'schema',
                 mount_params_string: JSON.stringify(schemaData)

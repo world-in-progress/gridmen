@@ -58,6 +58,8 @@ export class ResourceTree implements IResourceTree {
 
     editingNodeIds: Set<string> = new Set()
     selectedNode: IResourceNode | null = null
+    tempNodeExist: boolean = false
+
 
     constructor(leadIP?: string) {
         this.leadIP = leadIP

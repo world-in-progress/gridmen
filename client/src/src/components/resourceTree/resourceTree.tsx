@@ -61,18 +61,17 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
             return
         }
 
-        // Set selected node key
+
         if (isFolder) {
             setSelectedNodeKey(node.key)
+            clickTimeoutRef.current = setTimeout(() => {
+                (node.tree as ResourceTree).clickNode(node)
+                clickTimeoutRef.current = null
+            }, 150)
         } else {
+            // 清除高亮，仅右键菜单作为入口
             setSelectedNodeKey(null)
         }
-
-        // Delay single click execution to allow double click detection
-        clickTimeoutRef.current = setTimeout(() => {
-            (node.tree as ResourceTree).clickNode(node)
-            clickTimeoutRef.current = null
-        }, 150)
     }, [node, isFolder, setSelectedNodeKey])
 
 
@@ -97,7 +96,6 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
         return (node.tree as ResourceTree).getNodeMenuHandler()(node, menuItem)
     }, [])
 
-    // TODO: 渲染node右键菜单
     const renderNodeMenu = useCallback(() => {
         return node.template!.renderMenu(node, handleNodeMenu)
     }, [node, handleNodeMenu])
@@ -215,6 +213,10 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     }
 
     const handleFilePlusClick = (e: React.MouseEvent) => {
+        if (resourceTree && resourceTree.tempNodeExist === true) {
+            toast.error('Please delete the previously created temporary node or complete the formal creation of the node.')
+            return
+        }
         e.stopPropagation()
         e.preventDefault()
         setShowNewResourceInfo(true)
@@ -231,39 +233,41 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     }
 
     const handleCreateNewResource = async () => {
-        const tempNodeName = 'not confirm yet'
+        const tempNodeName = ' (not confirm yet)'
 
         if (newResourceName.trim() === '') {
             toast.error('Resource name cannot be empty')
             return
         }
         if (resourceTree) {
-            console.log('nihao')
             try {
                 if (selectedNodeKey !== null) {
-                    newNodeKey = selectedNodeKey + '.' + tempNodeName
+                    newNodeKey = selectedNodeKey + '.' + newResourceName + tempNodeName
                 } else {
-                    newNodeKey = '.' + tempNodeName
+                    newNodeKey = '.' + newResourceName + tempNodeName
                 }
 
-                //TODO: 根据选择的资源type,激活对应template的CreationViewModel
+
                 await api.node.mountNode({
                     node_key: newNodeKey,
                     template_name: value,
-                    mount_params_string: JSON.stringify({
-                        name: tempNodeName,
-                        epsg: 4326,
-                        alignment_origin: [0, 0],
-                        grid_info: [1, 1],
-                    })
+                    mount_params_string: JSON.stringify({})
                 })
+
+                // 标记新建的临时节点，便于后续 creation 激活
+                setSelectedNodeKey(newNodeKey)
 
                 setNewResourceName('')
                 setShowNewResourceInfo(false)
 
                 await resourceTree.refresh()
 
-                // resourceTree.selectedNode = 
+                const createdNode = resourceTree.scene.get(newNodeKey)
+                if (createdNode) {
+                    await resourceTree.clickNode(createdNode)
+                }
+
+                resourceTree.tempNodeExist = true
             } catch {
                 toast.error('Failed to create new resource')
             }
@@ -347,7 +351,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
 
     const handleNewResourceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
-            console.log('new resource key down', value)
             handleCreateNewResource()
         } else if (e.key === 'Escape') {
             handleCancelNewResource()
