@@ -1,7 +1,7 @@
 import { IResourceNode } from "./scene/iscene"
 
 export interface ITemplate {
-    templateName: string
+    templateName: string | null
 
     renderMenu(nodeSelf: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element | null
 

@@ -37,7 +37,9 @@ export default function Framework() {
 
         if (privateTree) privateTree.selectedNode = null
         if (publicTree) publicTree.selectedNode = null
+
         treeOfNode.selectedNode = node
+        treeOfNode.notifyDomUpdate()
 
         node.template?.handleMenuOpen(node, menuItem)
     }, [privateTree, publicTree])
@@ -116,15 +118,16 @@ export default function Framework() {
 
     const renderActiveView = () => {
         const currentTemplateName = getCurrentTemplateName()
+        const selectedNode = privateTree?.selectedNode || publicTree?.selectedNode
         switch (activeIconID) {
             case 'map-view':
-                return <MapViewComponent templateName={currentTemplateName} />
+                return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} />
             case 'table-view':
                 return <TableViewComponent />
             case 'settings':
                 return <SettingView />
             default:
-                return <MapViewComponent templateName={currentTemplateName} />
+                return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} />
         }
     }
 

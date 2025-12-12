@@ -8,6 +8,7 @@ import MapView, { MapViewContext } from './mapView'
 import { VIEW_REGISTRY } from '@/registry/viewRegistry'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { debounce } from '@/utils/utils'
+import { IResourceNode } from '@/template/scene/iscene'
 
 const initialLongitude = 114.051537
 const initialLatitude = 22.446937
@@ -113,9 +114,10 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
 
 interface MapViewComponentProps {
     templateName?: string
+    selectedNode?: IResourceNode | null
 }
 
-export default function MapViewComponent({ templateName = 'default' }: MapViewComponentProps) {
+export default function MapViewComponent({ templateName = 'default', selectedNode = null }: MapViewComponentProps) {
 
     const [mapInstance, setMapInstance] = useState<mapboxgl.Map | null>(null)
 
@@ -144,6 +146,7 @@ export default function MapViewComponent({ templateName = 'default' }: MapViewCo
                     viewModels={viewModels}
                     mapContainer={mapInstance}
                     templateName={templateName}
+                    selectedNode={selectedNode}
                 />
             </ResizablePanel>
         </ResizablePanelGroup >

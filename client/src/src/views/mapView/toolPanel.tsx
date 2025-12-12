@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { MapViewContext } from './mapView'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { IResourceNode } from '@/template/scene/iscene'
 
 interface NodeTemplateFunctionSet {
     check: Function | null
@@ -14,9 +15,10 @@ interface ToolPanelProps {
     } | null
     mapContainer: mapboxgl.Map | null
     templateName?: string
+    selectedNode?: IResourceNode | null
 }
 
-export default function ToolPanel({ viewModels, mapContainer, templateName = 'default' }: ToolPanelProps) {
+export default function ToolPanel({ viewModels, mapContainer, templateName = 'default', selectedNode = null }: ToolPanelProps) {
     const [activeTab, setActiveTab] = useState<string>('create')
 
     if (!viewModels) {
@@ -48,9 +50,9 @@ export default function ToolPanel({ viewModels, mapContainer, templateName = 'de
         }
     }
 
-    const CheckComponent = currentViewModel.check ? currentViewModel.check(null, context) : null
-    const CreateComponent = currentViewModel.create ? currentViewModel.create(null, context) : null
-    const EditComponent = currentViewModel.edit ? currentViewModel.edit(null, context) : null
+    const CheckComponent = currentViewModel.check ? currentViewModel.check(selectedNode || null, context) : null
+    const CreateComponent = currentViewModel.create ? currentViewModel.create(selectedNode || null, context) : null
+    const EditComponent = currentViewModel.edit ? currentViewModel.edit(selectedNode || null, context) : null
 
     return (
         <div className="flex flex-col h-full w-full bg-gray-900">

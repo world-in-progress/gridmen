@@ -247,7 +247,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                     newNodeKey = '.' + newResourceName + tempNodeName
                 }
 
-
                 await api.node.mountNode({
                     node_key: newNodeKey,
                     template_name: value,
@@ -351,7 +350,12 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
 
     const handleNewResourceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
-            handleCreateNewResource()
+            if (value === '') {
+                toast.info('Please select new resource type.')
+                return
+            } else {
+                handleCreateNewResource()
+            }
         } else if (e.key === 'Escape') {
             handleCancelNewResource()
         }
