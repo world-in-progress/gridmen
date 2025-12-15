@@ -18,7 +18,7 @@ def MOUNT(node_key: str, mount_params: dict | None) -> dict | None:
         return {
             'resource_space': str(grid_schema_path)
         }      
-def UNMOUNT(node_key: str, params: dict | None) -> None:
+def UNMOUNT(node_key: str) -> None:
     "Unmount hook for schema resource"
     name = node_key.split('.')[-1]
     resource_space = Path.cwd() / 'resource' / name / 'schema.json'
