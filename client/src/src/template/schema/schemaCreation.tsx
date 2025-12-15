@@ -242,6 +242,8 @@ export default function SchemaCreation({
         coordinates: false,
     })
 
+    const newSchemaName = node.name.split(' ')[0]
+
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
     let borderColor = 'border-red-200'
@@ -267,6 +269,7 @@ export default function SchemaCreation({
     }, [])
 
     const loadContext = async () => {
+        console.log(node.name.split(' ')[0])
         triggerRepaint()
     }
 
@@ -489,7 +492,7 @@ export default function SchemaCreation({
                         <div className='space-y-2'>
                             <Input
                                 id='name'
-                                value={pageContext.current.name}
+                                value={newSchemaName}
                                 onChange={handleSetName}
                                 placeholder={'Enter new schema name'}
                                 className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''

@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef, useCallback, useReducer } from 'react'
 import {
     File,
+    Plus,
     Check,
     Folder,
     MapPin,
+    Square,
     FilePlus,
     FolderOpen,
     FolderPlus,
     RefreshCcw,
     ChevronDown,
     ChevronRight,
-    Square,
-    Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/utils/utils'
@@ -21,17 +21,18 @@ import { Input } from '@/components/ui/input'
 import { Separator } from "@/components/ui/separator"
 import { ResourceTree } from '@/template/scene/scene'
 import { IResourceNode } from '@/template/scene/iscene'
+import { useSelectedNodeStore } from '@/store/storeSet'
 import { RESOURCE_REGISTRY } from '@/registry/resourceRegistry'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { useSelectedNodeStore } from '@/store/storeSet'
 
 interface NodeRendererProps {
     node: IResourceNode
     resourceTree: ResourceTree
     depth: number
     triggerFocus: number
+    dragSourceTreeTitle?: string
 }
 
 interface TreeRendererProps {
@@ -40,7 +41,7 @@ interface TreeRendererProps {
     triggerFocus: number
 }
 
-const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererProps) => {
+const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeTitle: sourceTreeTitle }: NodeRendererProps) => {
 
     const tree = node.tree as ResourceTree
 
@@ -52,6 +53,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
 
     const nodeRef = useRef<HTMLDivElement>(null)
     const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    const [isDragOver, setIsDragOver] = useState(false)
 
     const handleClick = useCallback((e: React.MouseEvent) => {
         // Clear any existing timeout to prevent single click when double clicking
@@ -100,6 +102,124 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
         return node.template!.renderMenu(node, handleNodeMenu)
     }, [node, handleNodeMenu])
 
+    const handleDragStart = useCallback((e: React.DragEvent) => {
+        if (!isFolder) {
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                nodeKey: node.key,
+                templateName: node.template_name,
+                sourceTreeTitle: sourceTreeTitle || ''
+            }))
+            e.dataTransfer.effectAllowed = 'copy'
+        }
+    }, [node, isFolder, sourceTreeTitle])
+
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        if (isFolder) {
+            e.preventDefault()
+            e.stopPropagation() // 阻止冒泡到根目录
+            e.dataTransfer.dropEffect = 'copy'
+            setIsDragOver(true)
+        } else {
+            // 如果不是文件夹，允许事件继续冒泡到根目录
+            // 不阻止传播，让根目录可以接收拖放
+        }
+    }, [isFolder])
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        if (!isFolder) return
+        // 检查是否真的离开了节点区域
+        const rect = e.currentTarget.getBoundingClientRect()
+        const x = e.clientX
+        const y = e.clientY
+        // 如果鼠标离开了这个元素，清除高亮
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+            setIsDragOver(false)
+        }
+    }, [isFolder])
+
+    const handleDrop = useCallback(async (e: React.DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDragOver(false)
+
+        if (!isFolder || !resourceTree) return
+
+        try {
+            const data = e.dataTransfer.getData('text/plain')
+            if (!data) return
+
+            const dragData = JSON.parse(data)
+            const { nodeKey: sourceNodeKey, templateName, sourceTreeTitle: sourceTitle } = dragData
+            const targetTitle = sourceTreeTitle || ''
+
+            // 如果源节点是文件夹，不允许拖放
+            if (templateName === 'default') {
+                toast.error('Cannot drag folders')
+                return
+            }
+
+            // 构建目标节点 key
+            const targetNodeKey = node.key === '.'
+                ? `.${sourceNodeKey.split('.').pop()}`
+                : `${node.key}.${sourceNodeKey.split('.').pop()}`
+
+            // 同一棵树内部
+            if (sourceTitle === targetTitle) {
+                if (targetTitle === 'Public') {
+                    // Public 内部禁止
+                    return
+                } else if (targetTitle === 'WorkSpace') {
+                    // Private 内部：预留逻辑占位
+                    console.debug('TODO: handle private-to-private move', sourceNodeKey, targetNodeKey)
+                    return
+                }
+            }
+
+            // private -> public
+            if (sourceTitle === 'WorkSpace' && targetTitle === 'Public') {
+                console.log('push行为', {
+                    template_name: templateName,
+                    source_node_key: sourceNodeKey,
+                    target_node_key: targetNodeKey
+                })
+                await api.node.pushNode({
+                    template_name: templateName,
+                    source_node_key: sourceNodeKey,
+                    target_node_key: targetNodeKey
+                })
+                await resourceTree.refresh()
+                toast.success(`Pushed node to ${node.name}`)
+                return
+            }
+
+            // public -> private
+            if (sourceTitle === 'Public' && targetTitle === 'WorkSpace') {
+                await api.node.pullNode({
+                    template_name: templateName,
+                    source_node_key: sourceNodeKey,
+                    target_node_key: targetNodeKey,
+                    mount_params: ''
+                })
+                await resourceTree.refresh()
+                toast.success(`Pulled node to ${node.name}`)
+                return
+            }
+
+            // // 其他情况：默认挂载
+            // await api.node.mountNode({
+            //     node_key: targetNodeKey,
+            //     template_name: templateName,
+            //     mount_params_string: JSON.stringify({})
+            // })
+
+            await resourceTree.refresh()
+            toast.success(`Node added to ${node.name}`)
+        } catch (error) {
+            console.error('Drop error:', error)
+            toast.error('Failed to add node')
+        }
+    }, [isFolder, resourceTree, node.key, node.name, sourceTreeTitle])
+
     useEffect(() => {
         if (isSelected && nodeRef.current) {
             nodeRef.current.scrollIntoView({
@@ -127,17 +247,17 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                             'flex items-center py-0.5 px-2 hover:bg-gray-700 cursor-pointer text-sm w-full select-none',
                             isSelected ? 'bg-gray-600 text-white' : 'text-gray-300',
                             !isFolder && 'cursor-grab active:cursor-grabbing',
+                            isFolder && isDragOver && 'bg-gray-500/50',
                         )}
+                        data-node-type={isFolder ? 'folder' : 'file'}
                         style={{ paddingLeft: `${depth * 10}px` }}
                         onClick={handleClick}
                         onDoubleClick={handleDoubleClick}
-                        draggable={!isFolder} // Only allow dragging files, not folders
-                        onDragStart={(e) => {
-                            if (!isFolder) {
-                                e.dataTransfer.setData('text/plain', node.key);
-                                e.dataTransfer.effectAllowed = 'copy';
-                            }
-                        }}
+                        draggable={!isFolder}
+                        onDragStart={(e) => { handleDragStart(e) }}
+                        onDragOver={(e) => { handleDragOver(e) }}
+                        onDragLeave={(e) => { handleDragLeave(e) }}
+                        onDrop={(e) => { handleDrop(e) }}
                     >
                         <div className='ml-1.5 flex'>
                             {isFolder ? (
@@ -183,6 +303,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus }: NodeRendererP
                             resourceTree={resourceTree}
                             depth={depth + 1}
                             triggerFocus={triggerFocus}
+                            dragSourceTreeTitle={sourceTreeTitle}
                         />
                     ))}
                 </div>
@@ -387,8 +508,106 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
         }
     }, [showNewFolderInput])
 
+
+    const handleRootDragOver = (e: React.DragEvent) => {
+        // 允许在根目录放置，但不显示高亮
+        // 检查是否拖拽到了子节点（文件夹），如果是则不处理，让子节点处理
+        const target = e.target as HTMLElement
+        const isDraggingOverChild = target.closest('[data-node-type="folder"]')
+
+        if (!isDraggingOverChild) {
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'copy'
+        }
+    }
+
+    const handleRootDrop = async (e: React.DragEvent) => {
+        // 如果拖放到了子节点（文件夹），让子节点处理
+        const target = e.target as HTMLElement
+        const isDroppingOnChild = target.closest('[data-node-type="folder"]')
+        if (isDroppingOnChild) {
+            return
+        }
+
+        e.preventDefault()
+        e.stopPropagation()
+
+        if (!resourceTree) return
+
+        try {
+            const data = e.dataTransfer.getData('text/plain')
+            if (!data) return
+
+            const dragData = JSON.parse(data)
+            const { nodeKey: sourceNodeKey, templateName, sourceTreeTitle: sourceTitle } = dragData
+
+            // 如果源节点是文件夹，不允许拖放
+            if (templateName === 'default') {
+                toast.error('Cannot drag folders')
+                return
+            }
+
+            // 构建目标节点 key（添加到根目录）
+            const targetNodeKey = `.${sourceNodeKey.split('.').pop()}`
+
+            // 同一棵树内部
+            if (sourceTitle === title) {
+                if (title === 'Public') {
+                    // Public 内部禁止
+                    return
+                } else if (title === 'WorkSpace') {
+                    // Private 内部：预留逻辑占位
+                    console.debug('TODO: handle private-to-private move at root', sourceNodeKey, targetNodeKey)
+                    return
+                }
+            }
+
+            // private -> public
+            if (sourceTitle === 'WorkSpace' && title === 'Public') {
+                await api.node.pushNode({
+                    template_name: templateName,
+                    source_node_key: sourceNodeKey,
+                    target_node_key: targetNodeKey
+                })
+                await resourceTree.refresh()
+                toast.success(`Pushed node to ${title}`)
+                return
+            }
+
+            // public -> private
+            if (sourceTitle === 'Public' && title === 'WorkSpace') {
+                await api.node.pullNode({
+                    template_name: templateName,
+                    source_node_key: sourceNodeKey,
+                    target_node_key: targetNodeKey,
+                    mount_params: ''
+                })
+                await resourceTree.refresh()
+                toast.success(`Pulled node to ${title}`)
+                return
+            }
+
+            // // 其他情况：默认挂载到根
+            // await api.node.mountNode({
+            //     node_key: targetNodeKey,
+            //     template_name: templateName,
+            //     mount_params_string: JSON.stringify({})
+            // })
+
+            await resourceTree.refresh()
+            toast.success(`Node added to ${title}`)
+        } catch (error) {
+            console.error('Drop error:', error)
+            toast.error('Failed to add node')
+        }
+    }
+
     return (
-        <>
+        <div
+            onDragOver={handleRootDragOver}
+            onDrop={handleRootDrop}
+        >
             <div
                 className='z-10 bg-[#2A2C33] py-1 pl-1 text-sm font-semibold flex items-center text-gray-200 cursor-pointer'
                 onClick={handleClickTreeTitle}
@@ -426,6 +645,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                     resourceTree={resourceTree}
                     depth={0}
                     triggerFocus={triggerFocus}
+                    dragSourceTreeTitle={title}
                 />
             ))}
             {showNewFolderInput && (
@@ -516,7 +736,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                     />
                 </div>
             )}
-        </>
+        </div>
     )
 }
 

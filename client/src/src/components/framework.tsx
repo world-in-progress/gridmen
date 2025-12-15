@@ -99,9 +99,9 @@ export default function Framework() {
                 setPrivateTree(_privateTree)
 
                 /// PUBLIC ///
-                // const _publicTree = await ResourceTree.create(publicIP!)
-                // _publicTree.subscribe(triggerRepaint)
-                // setPublicTree(_publicTree)
+                const _publicTree = await ResourceTree.create(publicIP!)
+                _publicTree.subscribe(triggerRepaint)
+                setPublicTree(_publicTree)
 
             } catch (error) {
                 console.error('Failed to initialize tree:', error)

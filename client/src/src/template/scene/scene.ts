@@ -91,7 +91,7 @@ export class ResourceTree implements IResourceTree {
     async alignNodeInfo(node: IResourceNode, force: boolean = false): Promise<void> {
         if (node.aligned && !force) return
 
-        const meta = await api.node.getNodeInfo({ node_key: node.key }, this.leadIP)
+        const meta = await api.node.getNodeInfo({ node_key: node.key }, this.leadIP ? true : false)
 
         const oldChildrenMap = node.children
         node.children = new Map()
@@ -230,7 +230,7 @@ export class ResourceTree implements IResourceTree {
         try {
             const tree = new ResourceTree(leadIP)
 
-            const rootNodeMeta = await api.node.getNodeInfo({ node_key: '.' }, leadIP)
+            const rootNodeMeta = await api.node.getNodeInfo({ node_key: '.' }, leadIP ? true : false)
             const rootNode = new ResourceNode(tree, rootNodeMeta.node_key, null, TEMPLATE_REGISTRY[rootNodeMeta.template_name])
 
             await tree.setRoot(rootNode)
