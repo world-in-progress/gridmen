@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { SelectedNodeStore, SettingsProps, TempNewNodeProps } from "./storeTypes"
 
-export const DEFAULT_LEAD_IP = 'http://127.0.0.1:8000'
+export const DEFAULT_LEAD_IP = 'http://127.0.0.1:8001'
 
 export const useSettingStore = create<SettingsProps>((set) => ({
     publicIP: DEFAULT_LEAD_IP,

@@ -39,14 +39,14 @@ function getApiBaseUrl(useRemoteIP: boolean = false): string {
             return envUrl
         }
 
-        return 'http://127.0.0.1:8000'
+        return 'http://127.0.0.1:8001'
     }
 
     if (import.meta.env.DEV) {
         return ''
     }
 
-    return 'http://127.0.0.1:8000'
+    return 'http://127.0.0.1:8001'
 }
 
 export const getNodeInfo = async ({ node_key, child_start_index, child_end_index }: GetNodeInfoParams, leadIP?: boolean) => {
