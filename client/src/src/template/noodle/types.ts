@@ -22,27 +22,14 @@ export interface MountNodeParams {
     mount_params_string: string | null
 }
 
-export interface PushNodeParams {
+export interface PushPullNodeParams {
     template_name: string
     source_node_key: string
     target_node_key: string
-}
-
-export interface PullNodeParams extends PushNodeParams {
-    mount_params: string
 }
 
 export interface PullResponse extends baseResponse {
     target_node_key: string
-}
-
-export interface PullNodeFromParams {
-    template_name: string
-    target_node_key: string
-    source_node_key: string
-    chunk_data: string
-    chunk_index: number
-    is_last_chunk: boolean
 }
 
 export interface LinkNodeParams {

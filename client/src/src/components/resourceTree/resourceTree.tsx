@@ -177,40 +177,48 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
 
             // private -> public
             if (sourceTitle === 'WorkSpace' && targetTitle === 'Public') {
+                const publicTargetNodeKey = 'http://127.0.0.1:8000::' + targetNodeKey
+
                 console.log('push行为', {
                     template_name: templateName,
                     source_node_key: sourceNodeKey,
-                    target_node_key: targetNodeKey
+                    target_node_key: publicTargetNodeKey
                 })
+
                 await api.node.pushNode({
                     template_name: templateName,
                     source_node_key: sourceNodeKey,
-                    target_node_key: targetNodeKey
+                    target_node_key: publicTargetNodeKey
                 })
+
                 await resourceTree.refresh()
                 toast.success(`Pushed node to ${node.name}`)
+
                 return
             }
 
             // public -> private
             if (sourceTitle === 'Public' && targetTitle === 'WorkSpace') {
+
+                const privateSourceNodeKey = 'http://127.0.0.1:8000::' + sourceNodeKey
+
+                console.log('pull行为', {
+                    template_name: templateName,
+                    source_node_key: privateSourceNodeKey,
+                    target_node_key: targetNodeKey
+                })
+
                 await api.node.pullNode({
                     template_name: templateName,
-                    source_node_key: sourceNodeKey,
+                    source_node_key: privateSourceNodeKey,
                     target_node_key: targetNodeKey,
-                    mount_params: ''
                 })
+
                 await resourceTree.refresh()
                 toast.success(`Pulled node to ${node.name}`)
+
                 return
             }
-
-            // // 其他情况：默认挂载
-            // await api.node.mountNode({
-            //     node_key: targetNodeKey,
-            //     template_name: templateName,
-            //     mount_params_string: JSON.stringify({})
-            // })
 
             await resourceTree.refresh()
             toast.success(`Node added to ${node.name}`)
@@ -354,7 +362,8 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
     }
 
     const handleCreateNewResource = async () => {
-        const tempNodeName = ' (not confirm yet)'
+        const tempNodeName = ''
+        // ' (not confirm yet)'
 
         if (newResourceName.trim() === '') {
             toast.error('Resource name cannot be empty')
@@ -580,20 +589,12 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                 await api.node.pullNode({
                     template_name: templateName,
                     source_node_key: sourceNodeKey,
-                    target_node_key: targetNodeKey,
-                    mount_params: ''
+                    target_node_key: targetNodeKey
                 })
                 await resourceTree.refresh()
                 toast.success(`Pulled node to ${title}`)
                 return
             }
-
-            // // 其他情况：默认挂载到根
-            // await api.node.mountNode({
-            //     node_key: targetNodeKey,
-            //     template_name: templateName,
-            //     mount_params_string: JSON.stringify({})
-            // })
 
             await resourceTree.refresh()
             toast.success(`Node added to ${title}`)

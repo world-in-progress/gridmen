@@ -244,6 +244,8 @@ export default function SchemaCreation({
 
     const newSchemaName = node.name.split(' ')[0]
 
+    const isFolder = node.template_name === 'default'
+
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
     let borderColor = 'border-red-200'
@@ -423,6 +425,7 @@ export default function SchemaCreation({
 
         const parentKey = node?.key === '.' ? '.' : node?.key || '.'
         const mountKey = parentKey === '.' ? `.${pageContext.current.name}` : `${parentKey}.${pageContext.current.name}`
+        // const mountKey = `.${pageContext.current.name}`
 
         setGeneralMessage('Submitting data...')
         try {
@@ -431,11 +434,12 @@ export default function SchemaCreation({
                 template_name: 'schema',
                 mount_params_string: JSON.stringify(schemaData)
             })
+
             setGeneralMessage('Created successfully')
+
             const tree = node?.tree as ResourceTree
-            if (tree?.refresh) {
-                await tree.refresh()
-            }
+            await tree.refresh()
+
             toast.success('Created successfully')
         } catch (error) {
             setGeneralMessage(`Failed to create schema: ${error}`)
@@ -492,7 +496,7 @@ export default function SchemaCreation({
                         <div className='space-y-2'>
                             <Input
                                 id='name'
-                                value={newSchemaName}
+                                value={pageContext.current.name}
                                 onChange={handleSetName}
                                 placeholder={'Enter new schema name'}
                                 className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''

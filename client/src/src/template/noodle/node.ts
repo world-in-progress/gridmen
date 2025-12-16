@@ -5,10 +5,8 @@ import {
     LinkNodeResponse,
     MountNodeParams,
     NodeMeta,
-    PullNodeFromParams,
-    PullNodeParams,
+    PushPullNodeParams,
     PullResponse,
-    PushNodeParams,
     UnlinkNodeParams
 } from './types'
 import { useSettingStore } from '@/store/storeSet'
@@ -136,7 +134,7 @@ export const unmountNode = async (node_key: string, leadIP?: boolean) => {
     }
 }
 
-export const pushNode = async ({ template_name, source_node_key, target_node_key }: PushNodeParams) => {
+export const pushNode = async ({ template_name, source_node_key, target_node_key }: PushPullNodeParams) => {
     const baseUrl = getApiBaseUrl(true)
     const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${target_node_key}`
 
@@ -156,9 +154,9 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
     }
 }
 
-export const pullNode = async ({ template_name, target_node_key, source_node_key, mount_params }: PullNodeParams) => {
+export const pullNode = async ({ template_name, target_node_key, source_node_key }: PushPullNodeParams) => {
     const baseUrl = getApiBaseUrl(false)
-    const url = `${baseUrl}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${source_node_key}&mount_params=${mount_params}`
+    const url = `${baseUrl}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${source_node_key}`
 
     try {
         const response = await fetch(url, {
@@ -166,7 +164,7 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ template_name, target_node_key, source_node_key, mount_params }),
+            body: JSON.stringify({ template_name, target_node_key, source_node_key }),
         })
 
         const responseData: PullResponse = await response.json()
@@ -175,29 +173,6 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
     } catch (error) {
         throw new Error(`Failed to pull node: ${error}`)
 
-    }
-}
-
-export const pullFrom = async ({ template_name, target_node_key, source_node_key, chunk_index, chunk_data, is_last_chunk }: PullNodeFromParams, leadIP?: boolean) => {
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/pull_from?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${source_node_key}&chunk_data=${chunk_data}&chunk_index=${chunk_index}&is_last_chunk=${is_last_chunk}`
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ template_name, target_node_key, source_node_key, chunk_index, chunk_data, is_last_chunk }),
-        })
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`)
-        }
-
-        const responseData: string = await response.json()
-        return responseData
-    } catch (error) {
-        throw new Error(`Failed to pull from: ${error}`)
     }
 }
 
