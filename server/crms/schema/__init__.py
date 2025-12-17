@@ -1,10 +1,13 @@
 from pynoodle import ResourceNodeTemplate
 
 from .schema import Schema
-from .hooks import MOUNT, UNMOUNT
+from .hooks import MOUNT, UNMOUNT, PACK, UNPACK, PRIVATIZATION
 
 template = ResourceNodeTemplate(
     crm=Schema,
     mount=MOUNT,
-    unmount=UNMOUNT
+    unmount=UNMOUNT,
+    pack=PACK,
+    unpack=UNPACK,
+    privatization=PRIVATIZATION
 )

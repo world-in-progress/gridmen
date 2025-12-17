@@ -55,9 +55,23 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
 def PACK(node_key: str, tar_path: str) -> tuple[str, int]:
     try:
         node_record = noodle._load_node_record(node_key, is_cascade=False)
-        launch_params_str = node_record.launch_params
-        launch_params = json.loads(launch_params_str)
+        launch_params_raw = node_record.launch_params
+
+        # Robust parsing: handle None/empty, dict, or JSON string
+        if not launch_params_raw:
+            raise ValueError(f"Empty launch_params for node '{node_key}'")
+
+        if isinstance(launch_params_raw, dict):
+            launch_params = launch_params_raw
+        else:
+            try:
+                launch_params = json.loads(launch_params_raw)
+            except json.JSONDecodeError:
+                raise ValueError(f"Cannot parse launch_params for node '{node_key}': {launch_params_raw!r}")
+
         target_resource_path = launch_params.get('resource_space')
+        if not target_resource_path:
+            raise ValueError(f"'resource_space' missing in launch_params for node '{node_key}'")
         resource_path = Path(target_resource_path)
         
         with tarfile.open(tar_path, 'w:gz') as tarf:
