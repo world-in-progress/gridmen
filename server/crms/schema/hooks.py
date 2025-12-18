@@ -1,77 +1,108 @@
 import os
-import sys
 import json
+import sys
 import tarfile
 from pathlib import Path
-from datetime import datetime
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'py-noodle', 'src'))
 from pynoodle.noodle import noodle
 
-def MOUNT(node_key: str, mount_params: dict | None) -> dict | None:
-        name = node_key.split('.')[-1]
-        grid_schema_path = Path.cwd() / 'resource' / name / 'schema.json'
-        if not grid_schema_path.exists():
-            grid_schema_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(grid_schema_path, 'w') as f:
-                f.write(json.dumps(mount_params, indent=4))
-        return {
-            'resource_space': str(grid_schema_path)
-        }      
+def MOUNT(node_key: str, params: dict | None) -> dict | None:
+    """
+    Mount a schema node.
+    
+    Args:
+        node_key: The node key being mounted
+        params: Mount parameters provided during node mounting
+        
+    Returns:
+        Dictionary containing node-specific launch parameters
+    """
+    name = node_key.split('.')[-1]
+    resource_space = Path.cwd() / 'resource' / name / 'schema.json'
+    if not resource_space.exists():
+        resource_space.parent.mkdir(parents=True, exist_ok=True)
+        default_info = {
+            'name': '',
+            'epsg': '',
+            'alignment_origin': [0.0, 0.0],
+            'grid_info': []
+        }
+        with open(resource_space, 'w') as f:
+            json.dump(default_info, f, indent=4)
+    
+    return {
+        'resource_space': str(resource_space)
+    }
+
 def UNMOUNT(node_key: str) -> None:
-    "Unmount hook for schema resource"
+    """
+    Unmount a schema node.
+    
+    Args:
+        node_key: The node key being unmounted
+    """
     name = node_key.split('.')[-1]
     resource_space = Path.cwd() / 'resource' / name / 'schema.json'
     if resource_space.exists():
         resource_space.unlink()
-    
-    #Remove the directory if it's empty
+        
+    # Remove the directory if empty
     parent_dir = resource_space.parent
     if parent_dir.exists() and not any(parent_dir.iterdir()):
         parent_dir.rmdir()
 
 def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
+    """
+    Generate node-specific launch parameters for the schema resource node.
+    
+    Args:
+        node_key: The node key being mounted
+        mount_params: Mount parameters provided during node mounting
+        
+    Returns:
+        Dictionary containing node-specific launch parameters
+    """
     try:
         # Extract node name from node_key (last part after splitting by '.')
         node_name = node_key.split('.')[-1]
         
         # Generate node-specific resource space path
-        resource_space = Path.cwd() / 'resource'  / node_name / 'schema.json'
-
+        resource_space = Path.cwd() / 'resource' / node_name / 'schema.json'
+        
         # Ensure the directory exists
         resource_space.parent.mkdir(parents=True, exist_ok=True)
         
         # Create default launch parameters
         launch_params = {
-            'resource_space': str(resource_space)
+            'resource_space': str(resource_space),
         }
-                
+        
+        # Merge with provided mount parameters if any
+        if mount_params and isinstance(mount_params, dict):
+            launch_params.update(mount_params)
+        
         return launch_params
         
     except Exception as e:
-        # In a real implementation, you might want to log this error
         raise Exception(f"Error generating privatized parameters for node {node_key}: {e}")
 
 def PACK(node_key: str, tar_path: str) -> tuple[str, int]:
+    """
+    Pack schema node data into a tar.gz file.
+    
+    Args:
+        node_key: The node key being packed
+        tar_path: Path where the compressed tar file should be created
+        
+    Returns:
+        Tuple of (tar_path, file_size)
+    """
     try:
         node_record = noodle._load_node_record(node_key, is_cascade=False)
-        launch_params_raw = node_record.launch_params
-
-        # Robust parsing: handle None/empty, dict, or JSON string
-        if not launch_params_raw:
-            raise ValueError(f"Empty launch_params for node '{node_key}'")
-
-        if isinstance(launch_params_raw, dict):
-            launch_params = launch_params_raw
-        else:
-            try:
-                launch_params = json.loads(launch_params_raw)
-            except json.JSONDecodeError:
-                raise ValueError(f"Cannot parse launch_params for node '{node_key}': {launch_params_raw!r}")
-
+        launch_params_str = node_record.launch_params
+        launch_params = json.loads(launch_params_str)
         target_resource_path = launch_params.get('resource_space')
-        if not target_resource_path:
-            raise ValueError(f"'resource_space' missing in launch_params for node '{node_key}'")
         resource_path = Path(target_resource_path)
         
         with tarfile.open(tar_path, 'w:gz') as tarf:
@@ -86,18 +117,19 @@ def PACK(node_key: str, tar_path: str) -> tuple[str, int]:
                         tarf.add(file_path, arcname=arcname)
         
         file_size = Path(tar_path).stat().st_size
-
         return str(tar_path), file_size
         
     except Exception as e:
         raise Exception(f"Error packing node {node_key}: {e}")
+
 def UNPACK(target_node_key: str, tar_path: str, template_name: str) -> None:
     """
-    Generic unpack implementation that extracts resource data from a tar file.
+    Unpack schema node data from a tar.gz file.
     
     Args:
-        node_key: The node key being unpacked
+        target_node_key: The node key being unpacked
         tar_path: Path to the compressed tar file
+        template_name: Name of the template to use for unpacking
     """
     try:      
         name = target_node_key.split('.')[-1]
@@ -122,9 +154,16 @@ def UNPACK(target_node_key: str, tar_path: str, template_name: str) -> None:
         if parent_key and not noodle._has_node(parent_key):
             raise ValueError(f'Parent node "{parent_key}" not found in scene for node "{target_node_key}"')
 
-        names_json_path = resource_space / 'schema.json'
-        mount_params = json.dumps({'resource_space': str(names_json_path)}, indent=4)
-        noodle._insert_node(target_node_key, parent_key, template_name, mount_params)
+        schema_json_path = resource_space / 'schema.json'
+        mount_params = json.dumps({'resource_space': str(schema_json_path)}, indent=4)
+        
+        # Check if node already exists
+        if noodle._has_node(target_node_key):
+            # Update existing node to handle potential changes in parent_key or params
+            noodle._update_node(target_node_key, parent_key, template_name, mount_params)
+        else:
+            # Insert new node
+            noodle._insert_node(target_node_key, parent_key, template_name, mount_params)
 
     except Exception as e:
         raise Exception(f"Error unpacking node {target_node_key}: {e}")
