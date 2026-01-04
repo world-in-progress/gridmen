@@ -217,18 +217,20 @@ const validateSchemaForm = (
 
 export default function SchemaCreation({
     node,
-    // tree,
     context
 }: SchemaCreationProps) {
+
     const mapContext = context as MapViewContext
     const map = mapContext.map
 
+    ////// TODO:将input内容存入node的_context
     const pageContext = useRef<PageContext>({
         name: '',
         epsg: null,
         alignmentOrigin: [0, 0],
         gridLayers: []
     })
+    //////////////////////////////////////////
 
     const picking = useRef<{ marker: mapboxgl.Marker | null, cancel: () => void }>({ marker: null, cancel: () => { } })
 

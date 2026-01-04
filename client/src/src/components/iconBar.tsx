@@ -6,9 +6,10 @@ export interface IconBarClickHandlers {
     [iconID: string]: (iconID: string) => void
 }
 
-interface IconBarResourceBinding {
+interface IconBarProps {
     currentActiveId: string
     clickHandlers: IconBarClickHandlers
+    isLoggedIn: boolean
 }
 
 export interface IconEntry {
@@ -18,7 +19,7 @@ export interface IconEntry {
     icon: React.ComponentType<LucideProps>
 }
 
-export default function IconBar({ currentActiveId, clickHandlers }: IconBarResourceBinding) {
+export default function IconBar({ currentActiveId, clickHandlers, isLoggedIn = false }: IconBarProps) {
     return (
         <div className='w-[2%] h-full bg-[#333333] flex flex-col items-center py-2'>
             {ICON_REGISTRY.map(item => (
@@ -27,12 +28,18 @@ export default function IconBar({ currentActiveId, clickHandlers }: IconBarResou
                     id={item.id}
                     key={item.id}
                     title={item.label}
-                    onClick={() => clickHandlers[item.id](item.id)}
+                    onClick={() => {
+                        // 禁用未登录时对 map 和 table 的点击
+                        if (!isLoggedIn && (item.id === 'map-view' || item.id === 'table-view')) return
+                        clickHandlers[item.id] && clickHandlers[item.id](item.id)
+                    }}
+                    disabled={!isLoggedIn && (item.id === 'map-view' || item.id === 'table-view')}
                     className={
                         cn(
                             'w-10 h-10 mb-1 cursor-pointer flex items-center justify-center', // default styles
                             item.style && item.style,
                             currentActiveId === item.id && 'border-r-2 border-gray-200',
+                            !isLoggedIn && (item.id === 'map-view' || item.id === 'table-view') && 'opacity-50 cursor-not-allowed',
                         )
                     }
                 >

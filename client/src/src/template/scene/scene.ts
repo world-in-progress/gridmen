@@ -14,19 +14,24 @@ export class ResourceNode implements IResourceNode {
     parent: IResourceNode | null
     children: Map<string, IResourceNode> = new Map()
 
+    private _context: any
+
     get id(): string { return this.key }
     get name(): string { return this.key.split('.').pop() || '' }
     get template_name(): string { return this.template?.templateName || '' }
 
 
-    private _pageContext: DefaultPageContext | undefined | null = null
+    // private _pageContext: DefaultPageContext | undefined | null = null
 
     constructor(tree: ResourceTree, node_key: string, parent: IResourceNode | null, template: ITemplate | null) {
         this.key = node_key
         this.tree = tree
         this.parent = parent
         this.template = template
+        this._context = undefined
     }
+
+
 }
 
 interface TreeUpdateCallback {
@@ -44,7 +49,7 @@ export class ResourceTree implements IResourceTree {
     root!: IResourceNode
     scene: Map<string, IResourceNode> = new Map()
 
-    private leadIP?: string
+    leadIP?: string
 
     cs: ContextStorage = ContextStorage.getInstance()
 

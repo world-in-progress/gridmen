@@ -5,8 +5,8 @@ import { ITemplate } from "../iTemplate"
 import SchemaCreation from "./schemaCreation"
 import { IResourceNode } from "../scene/iscene"
 import { IViewContext } from "@/views/IViewContext"
-import { Check, Delete, Edit, Edit3, Info, MapPinPlus } from "lucide-react"
-import { ResourceTree } from "../scene/scene"
+import { ArrowDownToLine, ArrowUpFromLine, Check, Delete, Edit, Edit3, Info, MapPinPlus } from "lucide-react"
+import { ResourceNode, ResourceTree } from "../scene/scene"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 import { toast } from 'sonner'
 
@@ -15,6 +15,8 @@ enum SchemaMenuItem {
     EDIT_SCHEMA = 'Edit Schema',
     CREATE_SCHEMA = 'Create Schema',
     DELETE_SCHEMA = 'Delete Schema',
+    PUSH_SCHEMA = 'Push Schema',
+    PULL_SCHEMA = 'Pull Schema'
 }
 
 export default class SchemaTemplate implements ITemplate {
@@ -33,7 +35,6 @@ export default class SchemaTemplate implements ITemplate {
         return () => SchemaCheck({ context })
     }
     static creationMapView(node: IResourceNode, context: IViewContext): Function {
-        // const tree = node.tree as ResourceTree
         return () => SchemaCreation({ node, context })
     }
     static editMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
@@ -49,21 +50,34 @@ export default class SchemaTemplate implements ITemplate {
                         <span>Create</span>
                     </ContextMenuItem>
                 ) : (
+                    <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CHECK_SCHEMA) }}>
+                        <Info className='w-4 h-4' />
+                        <span>Check</span>
+                    </ContextMenuItem>
+
+
+                )}
+                {(node as ResourceNode).tree.leadIP === undefined ? (
                     <>
-                        <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CHECK_SCHEMA) }}>
-                            <Info className='w-4 h-4' />
-                            <span>Check</span>
-                        </ContextMenuItem>
                         <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.EDIT_SCHEMA) }}>
                             <Edit3 className='w-4 h-4' />
                             <span>Edit</span>
                         </ContextMenuItem>
+                        <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.PUSH_SCHEMA) }}>
+                            <ArrowUpFromLine className='w-4 h-4' />
+                            <span>Push</span>
+                        </ContextMenuItem>
+                        <ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, SchemaMenuItem.DELETE_SCHEMA) }}>
+                            <Delete className='w-4 h-4 text-white rotate-180' />
+                            <span className='text-white'>Delete</span>
+                        </ContextMenuItem>
                     </>
+                ) : (
+                    <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.PULL_SCHEMA) }}>
+                        <ArrowDownToLine className='w-4 h-4' />
+                        <span>Pull</span>
+                    </ContextMenuItem>
                 )}
-                <ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, SchemaMenuItem.DELETE_SCHEMA) }}>
-                    <Delete className='w-4 h-4 text-white rotate-180' />
-                    <span className='text-white'>Delete</span>
-                </ContextMenuItem>
             </ContextMenuContent>
         )
     }
@@ -71,11 +85,11 @@ export default class SchemaTemplate implements ITemplate {
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
             case SchemaMenuItem.CHECK_SCHEMA:
-                console.log('hello 1')
+                console.log('Check')
                 // (nodeSelf.tree as ResourceTree).startEditingNode(nodeSelf as ResourceNode)
                 break
             case SchemaMenuItem.EDIT_SCHEMA:
-                console.log('hello 2')
+                console.log('Edit')
                 // (nodeSelf.tree as ResourceTree).startEditingNode(nodeSelf as ResourceNode)
                 break
             case SchemaMenuItem.CREATE_SCHEMA:
@@ -91,6 +105,16 @@ export default class SchemaTemplate implements ITemplate {
                     await api.node.unmountNode(node.key)
                     toast.success(`Schema ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()
+                }
+                break
+            case SchemaMenuItem.PUSH_SCHEMA:
+                {
+                    console.log('PUSH')
+                }
+                break
+            case SchemaMenuItem.PULL_SCHEMA:
+                {
+                    console.log('PULL')
                 }
                 break
         }

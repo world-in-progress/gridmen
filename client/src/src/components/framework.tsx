@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react"
+import LoginPage from "./loginPage/loginPage"
+import { useSettingStore } from "@/store/storeSet"
 import SettingView from "./settingView/settingView"
 import { ICON_REGISTRY } from "@/registry/iconRegistry"
 import { IResourceNode } from "@/template/scene/iscene"
@@ -8,12 +10,15 @@ import { ResourceNode, ResourceTree } from "@/template/scene/scene"
 import MapViewComponent from "@/views/mapView/mapViewComponent"
 import TableViewComponent from "@/views/tableView/tableViewComponent"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { useSettingStore } from "@/store/storeSet"
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom"
 
 export default function Framework() {
 
     const [triggerFocus, setTriggerFocus] = useState(0)
     const [activeIconID, setActiveIconID] = useState('map-view')
+    // const [activeIconID, setActiveIconID] = useState('user')
+    // const [isLoggedIn, setIsLoggedIn] = useState(false)
+    const [isLoggedIn, setIsLoggedIn] = useState(true)
 
     const [privateTree, setPrivateTree] = useState<ResourceTree | null>(null)
     const [publicTree, setPublicTree] = useState<ResourceTree | null>(null)
@@ -28,6 +33,16 @@ export default function Framework() {
             setActiveIconID(iconID)
         }
     })
+
+    // Login route wrapper to perform navigation after login
+    function LoginRoute({ onLogin }: { onLogin: () => void }) {
+        const navigate = useNavigate()
+        const handleLogin = () => {
+            onLogin()
+            navigate('/framework')
+        }
+        return <LoginPage onLogin={handleLogin} />
+    }
 
     const handleNodeMenuOpen = useCallback((node: IResourceNode, menuItem: any) => {
 
@@ -136,28 +151,38 @@ export default function Framework() {
             <IconBar
                 currentActiveId={activeIconID}
                 clickHandlers={iconClickHandlers}
+                isLoggedIn={isLoggedIn}
             />
-            <ResizablePanelGroup
-                direction="horizontal"
-                className="h-full w-[98%] text-white"
-            >
-                <ResizablePanel defaultSize={11}>
-                    <ResourceTreeComponent
-                        privateTree={privateTree}
-                        publicTree={publicTree}
-                        focusNode={focusNode}
-                        triggerFocus={triggerFocus}
-                        onNodeMenuOpen={handleNodeMenuOpen}
-                        onNodeRemove={handleNodeRemove}
-                        onNodeClick={handleNodeClick}
-                        onNodeDoubleClick={handleNodeDoubleClick}
-                    />
-                </ResizablePanel>
-                <ResizableHandle className="opacity-0 hover:bg-blue-200" />
-                <ResizablePanel defaultSize={89}>
-                    {renderActiveView()}
-                </ResizablePanel>
-            </ResizablePanelGroup>
+            <Router>
+                <Routes>
+                    {/* <Route path='/' element={<Navigate to="/login" replace />} /> */}
+                    <Route path='/' element={<Navigate to="/framework" replace />} />
+                    <Route path='login' element={<LoginRoute onLogin={() => setIsLoggedIn(true)} />} />
+                    <Route path="framework" element={
+                        <ResizablePanelGroup
+                            direction="horizontal"
+                            className="h-full w-[98%] text-white"
+                        >
+                            <ResizablePanel defaultSize={11}>
+                                <ResourceTreeComponent
+                                    privateTree={privateTree}
+                                    publicTree={publicTree}
+                                    focusNode={focusNode}
+                                    triggerFocus={triggerFocus}
+                                    onNodeMenuOpen={handleNodeMenuOpen}
+                                    onNodeRemove={handleNodeRemove}
+                                    onNodeClick={handleNodeClick}
+                                    onNodeDoubleClick={handleNodeDoubleClick}
+                                />
+                            </ResizablePanel>
+                            <ResizableHandle className="opacity-0 hover:bg-blue-200" />
+                            <ResizablePanel defaultSize={89}>
+                                {renderActiveView()}
+                            </ResizablePanel>
+                        </ResizablePanelGroup>
+                    } />
+                </Routes>
+            </Router>
         </div>
     )
 }

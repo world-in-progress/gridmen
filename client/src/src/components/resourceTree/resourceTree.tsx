@@ -55,14 +55,14 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
     const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null)
     const [isDragOver, setIsDragOver] = useState(false)
 
-    const handleClick = useCallback((e: React.MouseEvent) => {
+    const handleClickNode = useCallback((e: React.MouseEvent) => {
+        console.log(node.template_name)
         // Clear any existing timeout to prevent single click when double clicking
         if (clickTimeoutRef.current) {
             clearTimeout(clickTimeoutRef.current)
             clickTimeoutRef.current = null
             return
         }
-
 
         if (isFolder) {
             setSelectedNodeKey(node.key)
@@ -77,7 +77,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
     }, [node, isFolder, setSelectedNodeKey])
 
 
-    const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    const handleDoubleClickNode = useCallback((e: React.MouseEvent) => {
         e.stopPropagation()
 
         // Clear single click timeout
@@ -116,7 +116,7 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
     const handleDragOver = useCallback((e: React.DragEvent) => {
         if (isFolder) {
             e.preventDefault()
-            e.stopPropagation() // 阻止冒泡到根目录
+            e.stopPropagation()
             e.dataTransfer.dropEffect = 'copy'
             setIsDragOver(true)
         } else {
@@ -127,11 +127,11 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
 
     const handleDragLeave = useCallback((e: React.DragEvent) => {
         if (!isFolder) return
-        // 检查是否真的离开了节点区域
+
         const rect = e.currentTarget.getBoundingClientRect()
         const x = e.clientX
         const y = e.clientY
-        // 如果鼠标离开了这个元素，清除高亮
+
         if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
             setIsDragOver(false)
         }
@@ -259,8 +259,8 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
                         )}
                         data-node-type={isFolder ? 'folder' : 'file'}
                         style={{ paddingLeft: `${depth * 10}px` }}
-                        onClick={handleClick}
-                        onDoubleClick={handleDoubleClick}
+                        onClick={handleClickNode}
+                        onDoubleClick={handleDoubleClickNode}
                         draggable={!isFolder}
                         onDragStart={(e) => { handleDragStart(e) }}
                         onDragOver={(e) => { handleDragOver(e) }}

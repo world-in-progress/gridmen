@@ -46,14 +46,14 @@ function getApiBaseUrl(useRemoteIP: boolean = false): string {
         return ''
     }
 
-    return 'http://127.0.0.1:8001'
+    return 'http://127.0.0.1:8000'
 }
 
 export const getNodeInfo = async ({ node_key, child_start_index, child_end_index }: GetNodeInfoParams, leadIP?: boolean) => {
-    if (leadIP) {
-        const publicIP = useSettingStore.getState().publicIP
-        console.log(publicIP)
-    }
+    // if (leadIP) {
+    //     const publicIP = useSettingStore.getState().publicIP
+    //     console.log(publicIP)
+    // }
 
     try {
         const baseUrl = getApiBaseUrl(leadIP || false)
