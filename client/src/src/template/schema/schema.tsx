@@ -15,8 +15,6 @@ enum SchemaMenuItem {
     EDIT_SCHEMA = 'Edit Schema',
     CREATE_SCHEMA = 'Create Schema',
     DELETE_SCHEMA = 'Delete Schema',
-    PUSH_SCHEMA = 'Push Schema',
-    PULL_SCHEMA = 'Pull Schema'
 }
 
 export default class SchemaTemplate implements ITemplate {
@@ -57,26 +55,17 @@ export default class SchemaTemplate implements ITemplate {
 
 
                 )}
-                {(node as ResourceNode).tree.leadIP === undefined ? (
+                {(node as ResourceNode).tree.leadIP === undefined && (
                     <>
                         <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.EDIT_SCHEMA) }}>
                             <Edit3 className='w-4 h-4' />
                             <span>Edit</span>
-                        </ContextMenuItem>
-                        <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.PUSH_SCHEMA) }}>
-                            <ArrowUpFromLine className='w-4 h-4' />
-                            <span>Push</span>
                         </ContextMenuItem>
                         <ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, SchemaMenuItem.DELETE_SCHEMA) }}>
                             <Delete className='w-4 h-4 text-white rotate-180' />
                             <span className='text-white'>Delete</span>
                         </ContextMenuItem>
                     </>
-                ) : (
-                    <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.PULL_SCHEMA) }}>
-                        <ArrowDownToLine className='w-4 h-4' />
-                        <span>Pull</span>
-                    </ContextMenuItem>
                 )}
             </ContextMenuContent>
         )
@@ -105,16 +94,6 @@ export default class SchemaTemplate implements ITemplate {
                     await api.node.unmountNode(node.key)
                     toast.success(`Schema ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()
-                }
-                break
-            case SchemaMenuItem.PUSH_SCHEMA:
-                {
-                    console.log('PUSH')
-                }
-                break
-            case SchemaMenuItem.PULL_SCHEMA:
-                {
-                    console.log('PULL')
                 }
                 break
         }

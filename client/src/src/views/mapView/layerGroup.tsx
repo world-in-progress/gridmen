@@ -16,46 +16,35 @@ interface Layer {
 export default function LayerGroup() {
 
     const [layers, setLayers] = useState<Layer[]>([
-        {
-            id: "1",
-            name: "Base Maps",
-            visible: true,
-            type: "group",
-            children: [
-                { id: "1-1", name: "OpenStreetMap", visible: true, type: "raster", opacity: 100 },
-                { id: "1-2", name: "Satellite", visible: false, type: "raster", opacity: 100 },
-            ],
-        },
-        {
-            id: "2",
-            name: "Boundaries",
-            visible: true,
-            type: "group",
-            children: [
-                { id: "2-1", name: "Districts", visible: true, type: "vector", opacity: 80 },
-                { id: "2-2", name: "Provinces", visible: true, type: "vector", opacity: 70 },
-            ],
-        },
-        {
-            id: "3",
-            name: "Points of Interest",
-            visible: false,
-            type: "vector",
-            opacity: 100,
-        },
+        // {
+        //     id: "1",
+        //     name: "Base Maps",
+        //     visible: true,
+        //     type: "group",
+        //     children: [
+        //         { id: "1-1", name: "OpenStreetMap", visible: true, type: "raster", opacity: 100 },
+        //         { id: "1-2", name: "Satellite", visible: false, type: "raster", opacity: 100 },
+        //     ],
+        // },
+        // {
+        //     id: "2",
+        //     name: "Boundaries",
+        //     visible: true,
+        //     type: "group",
+        //     children: [
+        //         { id: "2-1", name: "Districts", visible: true, type: "vector", opacity: 80 },
+        //         { id: "2-2", name: "Provinces", visible: true, type: "vector", opacity: 70 },
+        //     ],
+        // },
+        // {
+        //     id: "3",
+        //     name: "Points of Interest",
+        //     visible: false,
+        //     type: "vector",
+        //     opacity: 100,
+        // },
         {
             id: "4",
-            name: "Transportation",
-            visible: true,
-            type: "group",
-            children: [
-                { id: "4-1", name: "Roads", visible: true, type: "vector", opacity: 90 },
-                { id: "4-2", name: "Railways", visible: false, type: "vector", opacity: 85 },
-                { id: "4-3", name: "Airports", visible: true, type: "vector", opacity: 100 },
-            ],
-        },
-        {
-            id: "5",
             name: "Resource Node",
             visible: true,
             type: "group",
