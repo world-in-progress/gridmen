@@ -56,47 +56,7 @@ export default function ToolPanel({ viewModels, mapContainer, templateName = 'de
 
     return (
         <div className="flex flex-col h-full w-full bg-gray-900">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col gap-0">
-                <TabsList className="flex-none w-full bg-gray-800 border-b border-gray-700 rounded-none h-auto 
-                        [&_button]:cursor-pointer 
-                        [&_button]:text-white 
-                        [&_button:not([data-state=active])]:hover:bg-gray-700 
-                        [&_button[data-state=active]]:text-black"
-                >
-                    {CheckComponent && (
-                        <TabsTrigger value="check" className="flex-1">
-                            Check
-                        </TabsTrigger>
-                    )}
-                    {CreateComponent && (
-                        <TabsTrigger value="create" className="flex-1">
-                            Create
-                        </TabsTrigger>
-                    )}
-                    {EditComponent && (
-                        <TabsTrigger value="edit" className="flex-1">
-                            Edit
-                        </TabsTrigger>
-                    )}
-                </TabsList>
-
-
-                {CheckComponent && (
-                    <TabsContent value="check" className="flex-1 m-0 min-h-0 h-full">
-                        <CheckComponent />
-                    </TabsContent>
-                )}
-                {CreateComponent && (
-                    <TabsContent value="create" className="flex-1 m-0 min-h-0 h-full">
-                        <CreateComponent />
-                    </TabsContent>
-                )}
-                {EditComponent && (
-                    <TabsContent value="edit" className="flex-1 m-0 min-h-0 h-full">
-                        <EditComponent />
-                    </TabsContent>
-                )}
-            </Tabs>
+            <CreateComponent />
         </div>
     )
 }

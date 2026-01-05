@@ -137,7 +137,8 @@ export const unmountNode = async (node_key: string, leadIP?: boolean) => {
 export const pushNode = async ({ template_name, source_node_key, target_node_key }: PushPullNodeParams) => {
     const baseUrl = getApiBaseUrl(false)
     const remoteUrl = getApiBaseUrl(true)
-    const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${remoteUrl}::${target_node_key}`
+    const remoteTargetNodeKey = `${remoteUrl}::${target_node_key}`
+    const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${remoteTargetNodeKey}`
     console.log('pushNode url', url)
 
     try {
@@ -146,7 +147,7 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ template_name, source_node_key, target_node_key }),
+            body: JSON.stringify({ template_name, source_node_key, remoteTargetNodeKey }),
         })
 
         const responseData: baseResponse = await response.json()
@@ -176,7 +177,6 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
 
     } catch (error) {
         throw new Error(`Failed to pull node: ${error}`)
-
     }
 }
 

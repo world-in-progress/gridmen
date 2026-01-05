@@ -182,6 +182,32 @@ export class ResourceTree implements IResourceTree {
         this.notifyDomUpdate()
     }
 
+    /**
+     * Create a temporary node purely in memory (no backend call).
+     * NOTE: Any later refresh/align from backend may overwrite the in-memory structure.
+     */
+    addLocalNode(params: { node_key: string, template_name: string, parent_key?: string }): IResourceNode {
+        const parentKey = params.parent_key ?? this.root?.key ?? '.'
+        const parentNode = this.scene.get(parentKey) ?? this.root
+        if (!parentNode) {
+            throw new Error('ResourceTree.addLocalNode: root not initialized')
+        }
+
+        if (this.scene.has(params.node_key)) {
+            return this.scene.get(params.node_key)!
+        }
+
+        const template = TEMPLATE_REGISTRY[params.template_name]
+        const newNode = new ResourceNode(this, params.node_key, parentNode, template ?? null)
+        newNode.aligned = true
+
+        parentNode.children.set(newNode.id, newNode)
+        this.scene.set(newNode.id, newNode)
+
+        this.notifyDomUpdate()
+        return newNode
+    }
+
     async doubleClickNode(node: IResourceNode): Promise<void> {
         // If the node is a resource folder, force open its expansion
         if (node.template_name === 'default') {
