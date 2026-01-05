@@ -135,8 +135,10 @@ export const unmountNode = async (node_key: string, leadIP?: boolean) => {
 }
 
 export const pushNode = async ({ template_name, source_node_key, target_node_key }: PushPullNodeParams) => {
-    const baseUrl = getApiBaseUrl(true)
-    const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${target_node_key}`
+    const baseUrl = getApiBaseUrl(false)
+    const remoteUrl = getApiBaseUrl(true)
+    const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${remoteUrl}::${target_node_key}`
+    console.log('pushNode url', url)
 
     try {
         const response = await fetch(url, {
@@ -156,7 +158,9 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
 
 export const pullNode = async ({ template_name, target_node_key, source_node_key }: PushPullNodeParams) => {
     const baseUrl = getApiBaseUrl(false)
-    const url = `${baseUrl}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${source_node_key}`
+    const remoteUrl = getApiBaseUrl(true)
+    const url = `${baseUrl}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${remoteUrl}::${source_node_key}`
+    console.log('pullNode url:', url)
 
     try {
         const response = await fetch(url, {
