@@ -196,7 +196,6 @@ const NodeRenderer = ({
     const tree = node.tree as ResourceTree
 
     const isFolder = node.template_name === 'default'
-    const isExpanded = tree.isNodeExpanded(node.id)
     const isSelected = tree.selectedNode?.id === node.id
 
     const { setSelectedNodeKey } = useSelectedNodeStore()
@@ -322,10 +321,8 @@ const NodeRenderer = ({
             // 同一棵树内部
             if (sourceTitle === targetTitle) {
                 if (targetTitle === 'Public') {
-                    // Public 内部禁止
                     return
                 } else if (targetTitle === 'WorkSpace') {
-                    // Private 内部：预留逻辑占位
                     console.debug('TODO: handle private-to-private move', sourceNodeKey, targetNodeKey)
                     return
                 }
@@ -422,7 +419,7 @@ const NodeRenderer = ({
                         <div className='ml-1.5 flex'>
                             {isFolder ? (
                                 <>
-                                    {isExpanded ? (
+                                    {tree.isNodeExpanded(node.id) ? (
                                         <>
                                             <ChevronDown className='w-4 h-4 mr-0.5' />
                                             <FolderOpen className='w-4 h-4 mr-2 text-gray-400' />
@@ -438,16 +435,17 @@ const NodeRenderer = ({
                                 (() => {
                                     switch (node.template_name) {
                                         case 'schema':
-                                            return <MapPin className='w-4 h-4 mr-2 ml-4.5 text-red-500' />
+                                            return <MapPin className={cn(node.isTemp ? 'text-white' : 'text-red-500', 'w-4 h-4 mr-2 ml-4.5 ')} />
                                         case 'patch':
-                                            return <Square className='w-4 h-4 mr-2 ml-4.5 text-sky-500' />
+                                            return <Square className={cn(node.isTemp ? 'text-white' : 'text-sky-500', 'w-4 h-4 mr-2 ml-4.5 ')} />
                                         default:
                                             return <File className='w-4 h-4 mr-2 ml-4.5 text-blue-500' />
                                     }
                                 })()
                             )}
                         </div>
-                        <span>{node.name}</span>
+                        <span className={cn(node.isTemp && 'italic')}>{node.name}</span>
+                        {node.isTemp && <span className='ml-2 text-xs font-semibold text-yellow-500'>[temp]</span>}
                     </div>
                 </ContextMenuTrigger>
                 {renderNodeMenu()}
@@ -461,7 +459,7 @@ const NodeRenderer = ({
             )}
 
             {/* Render child nodes */}
-            {isFolder && isExpanded && node.children && (
+            {isFolder && tree.isNodeExpanded(node.id) && node.children && (
                 <div>
                     {Array.from(node.children.values()).map(childNode => (
                         <NodeRenderer

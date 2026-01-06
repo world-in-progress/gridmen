@@ -10,7 +10,7 @@ import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
 import { addMapMarker, clearMapMarkers, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
-import { ResourceTree } from '../scene/scene'
+import { ResourceNode, ResourceTree } from '../scene/scene'
 import { IResourceNode } from '../scene/iscene'
 
 interface SchemaCreationProps {
@@ -28,6 +28,7 @@ interface PageContext {
     name: string
     epsg: number | null
     alignmentOrigin: [number, number]
+    alignmentConverted: [number, number] | null
     gridLayers: GridLayer[]
 }
 
@@ -155,7 +156,6 @@ const validateSchemaForm = (
         lon: string
         lat: string
         gridLayerInfos: GridLayerInfo[]
-        convertedCoord: [number, number] | null
     },
 ): ValidationResult => {
     const errors = {
@@ -206,11 +206,6 @@ const validateSchemaForm = (
         return { isValid: false, errors, generalError }
     }
 
-    if (!data.convertedCoord) {
-        generalError = 'Unable to get converted coordinates'
-        return { isValid: false, errors, generalError }
-    }
-
     return { isValid: true, errors, generalError }
 }
 
@@ -222,30 +217,25 @@ export default function SchemaCreation({
     const mapContext = context as MapViewContext
     const map = mapContext.map
 
-    ////// TODO:将input内容存入node的_context
     const pageContext = useRef<PageContext>({
         name: '',
         epsg: null,
         alignmentOrigin: [0, 0],
+        alignmentConverted: null,
         gridLayers: []
     })
-    //////////////////////////////////////////
 
     const picking = useRef<{ marker: mapboxgl.Marker | null, cancel: () => void }>({ marker: null, cancel: () => { } })
 
     const [isSelectingPoint, setIsSelectingPoint] = useState(false)
     const [generalMessage, setGeneralMessage] = useState<string | null>(null)
     const [layerErrors, setLayerErrors] = useState<Record<number, string>>({})
-    const [convertedCoord, setConvertedCoord] = useState<[number, number] | null>(null)
+    // const [convertedCoord, setConvertedCoord] = useState<[number, number] | null>(null)
     const [formErrors, setFormErrors] = useState<FormErrors>({
         name: false,
         epsg: false,
         coordinates: false,
     })
-
-    const newSchemaName = node.name.split(' ')[0]
-
-    const isFolder = node.template_name === 'default'
 
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
@@ -272,18 +262,24 @@ export default function SchemaCreation({
     }, [])
 
     const loadContext = async () => {
-        console.log(node)
-        pageContext.current.name = node.name.split('.')[0]
+        if ((node as ResourceNode).context !== undefined) {
+            pageContext.current = { ...(node as ResourceNode).context }
+        } else {
+            pageContext.current.name = node.name.split('.')[0]
+        }
+
         triggerRepaint()
     }
 
     const unloadContext = async () => {
+        (node as ResourceNode).context = {
+            name: pageContext.current.name,
+            epsg: pageContext.current.epsg,
+            alignmentOrigin: pageContext.current.alignmentOrigin,
+            alignmentConverted: pageContext.current.alignmentConverted,
+            gridLayers: pageContext.current.gridLayers
+        }
         return
-    }
-
-    const handleSetName = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.name = e.target.value
-        triggerRepaint()
     }
 
     const handleSetEPSG = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -293,18 +289,19 @@ export default function SchemaCreation({
     }
 
     const updateCoords = async () => {
-        const pc = pageContext.current
-        const epsg = pc.epsg
-        const alignmentOrigin = pc.alignmentOrigin
-        let converted: [number, number] | null = null
+        const epsg = pageContext.current.epsg
+        const alignmentOrigin = pageContext.current.alignmentOrigin
+
         if (alignmentOrigin[0] && alignmentOrigin[1] && epsg) {
-            if (epsg < 1000 || epsg > 32767) converted = null
-
-            else if (epsg.toString().length < 4) converted = null
-
-            else converted = await convertPointCoordinate(alignmentOrigin, 4326, epsg)
+            if (epsg.toString().length < 4 || epsg < 1000 || epsg > 32767) {
+                pageContext.current.alignmentConverted = null
+            } else {
+                pageContext.current.alignmentConverted = await convertPointCoordinate(alignmentOrigin, 4326, epsg)
+            }
         }
-        setConvertedCoord(converted)
+
+        console.log('Converted Coord:', pageContext.current.alignmentConverted);
+        triggerRepaint()
     }
 
     const handleSetAlignmentOriginLon = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -383,23 +380,6 @@ export default function SchemaCreation({
         triggerRepaint()
     }
 
-    const resetForm = async () => {
-
-        picking.current.marker?.remove()
-
-        setFormErrors({
-            name: false,
-            epsg: false,
-            coordinates: false,
-        })
-        setLayerErrors({})
-        setGeneralMessage(null)
-        setConvertedCoord(null)
-        setIsSelectingPoint(false)
-
-        triggerRepaint()
-    }
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
@@ -409,7 +389,6 @@ export default function SchemaCreation({
             lon: pageContext.current.alignmentOrigin[0].toString(),
             lat: pageContext.current.alignmentOrigin[1].toString(),
             gridLayerInfos: pageContext.current.gridLayers,
-            convertedCoord
         })
 
         if (!validation.isValid) {
@@ -433,11 +412,13 @@ export default function SchemaCreation({
                 mount_params_string: JSON.stringify(schemaData)
             })
 
+            node.isTemp = false
+
             setGeneralMessage('Created successfully')
+            // TODO：卸载组件
             await (node.tree as ResourceTree).refresh()
             toast.success('Created successfully')
 
-            resetForm()
         } catch (error) {
             setGeneralMessage(`Failed to create schema: ${error}`)
             toast.error(`Failed to create schema: ${error}`)
@@ -492,7 +473,7 @@ export default function SchemaCreation({
                             <Input
                                 id='name'
                                 value={pageContext.current.name}
-                                onChange={handleSetName}
+                                readOnly={true}
                                 placeholder={'Enter new schema name'}
                                 className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''
                                     }`}
@@ -602,7 +583,7 @@ export default function SchemaCreation({
                     {/* --------------------- */}
                     {/* Converted Coordinates */}
                     {/* --------------------- */}
-                    {convertedCoord && pageContext.current.epsg !== 4326 &&
+                    {pageContext.current.alignmentConverted && pageContext.current.epsg !== 4326 &&
                         <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200 text-black'>
                             <h2 className='text-lg font-semibold mb-2'>
                                 Converted Coordinate (EPSG:{pageContext.current.epsg ? pageContext.current.epsg.toString() : ''}
@@ -610,16 +591,16 @@ export default function SchemaCreation({
                             </h2>
                             <div className='flex-1 flex flex-col justify-between'>
                                 <div className='flex items-center gap-2 mb-2 '>
-                                    <Label className='text-sm font-medium w-1/4'>X</Label>
+                                    <Label className='text-sm font-medium w-1/4'>X:</Label>
                                     <div className='w-3/4 p-2 bg-gray-100 rounded border border-gray-300'>
-                                        {convertedCoord[0]}
+                                        {pageContext.current.alignmentConverted[0]}
                                     </div>
                                 </div>
 
                                 <div className='flex items-center gap-2'>
-                                    <Label className='text-sm font-medium w-1/4'>Y</Label>
+                                    <Label className='text-sm font-medium w-1/4'>Y:</Label>
                                     <div className='w-3/4 p-2 bg-gray-100 rounded border border-gray-300'>
-                                        {convertedCoord[1]}
+                                        {pageContext.current.alignmentConverted[1]}
                                     </div>
                                 </div>
                             </div>
