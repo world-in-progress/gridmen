@@ -27,7 +27,7 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
 
     const loadContext = async () => {
         if ((node as ResourceNode).mountParams === undefined) {
-            (node as ResourceNode).mountParams = await api.node.GetNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+            (node as ResourceNode).mountParams = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
             const schemaInfo = (node as ResourceNode).mountParams
             console.log('Schema Info:', schemaInfo)
         }

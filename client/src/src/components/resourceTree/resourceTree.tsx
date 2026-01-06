@@ -6,7 +6,7 @@ import {
     Folder,
     MapPin,
     Square,
-    FilePlus,
+    FilePlusCorner,
     FolderOpen,
     FolderPlus,
     RefreshCcw,
@@ -91,6 +91,12 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
             }
 
             const createdNode = resourceTree.addLocalNode({
+                node_key: newNodeKey,
+                template_name: localValue,
+                parent_key: parentKey,
+            })
+
+            console.log({
                 node_key: newNodeKey,
                 template_name: localValue,
                 parent_key: parentKey,
@@ -540,6 +546,12 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                     mount_params_string: JSON.stringify({})
                 })
 
+                console.log({
+                    node_key: newNodeKey,
+                    template_name: value,
+                    mount_params_string: JSON.stringify({})
+                })
+
                 // 标记新建的临时节点，便于后续 creation 激活
                 setSelectedNodeKey(newNodeKey)
 
@@ -574,6 +586,12 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                 }
 
                 await api.node.mountNode({
+                    node_key: newNodeKey,
+                    template_name: '',
+                    mount_params_string: ''
+                })
+
+                console.log({
                     node_key: newNodeKey,
                     template_name: '',
                     mount_params_string: ''
@@ -767,7 +785,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
             onDrop={handleRootDrop}
         >
             <div
-                className='z-10 bg-[#2A2C33] py-1 pl-1 text-sm font-semibold flex items-center text-gray-200 cursor-pointer'
+                className='z-10 h-8 bg-[#2A2C33] py-1 pl-1 text-sm font-semibold flex items-center text-gray-200 cursor-pointer'
                 onClick={handleClickTreeTitle}
             >
                 <span className='ml-2'>{title}</span>
@@ -778,7 +796,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                                 className='w-6 h-6 rounded-sm bg-[#2A2C33] hover:bg-[#363737] text-[#B8B8B8] cursor-pointer'
                                 onClick={(e) => handleFilePlusClick(e)}
                             >
-                                <FilePlus className='w-4 h-4' />
+                                <FilePlusCorner className='w-4 h-4' />
                             </Button>
                             <Button
                                 className='w-6 h-6 rounded-sm bg-[#2A2C33] hover:bg-[#363737] text-[#B8B8B8] cursor-pointer'

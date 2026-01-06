@@ -7,7 +7,7 @@ import { ResourceNode, ResourceTree } from '../scene/scene'
 import DefaultCreation from "./defaultCreation"
 import { IResourceNode } from "../scene/iscene"
 import { IViewContext } from "@/views/IViewContext"
-import { Check, Delete, Edit, Edit3, FilePlus, FolderPlus, Info, MapPinPlus } from "lucide-react"
+import { Check, Delete, Edit, Edit3, FilePlusCorner, FolderPlus, Info, MapPinPlus } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 
 enum DefaultMenuItem {
@@ -62,7 +62,7 @@ export default class DefaultTemplate implements ITemplate {
             (node as ResourceNode).tree.leadIP === undefined ? (
                 <ContextMenuContent>
                     <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, DefaultMenuItem.NEW_RESOURCE) }}>
-                        <FilePlus className='w-4 h-4' />
+                        <FilePlusCorner className='w-4 h-4' />
                         <span>New Resource</span>
                     </ContextMenuItem>
                     <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, DefaultMenuItem.NEW_FOLDER) }}>

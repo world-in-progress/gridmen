@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin } from "lucide-react"
+import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/utils/utils"
@@ -216,6 +216,8 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             switch (template) {
                 case "schema":
                     return (layer.visible ? <MapPin className="w-4 h-4 text-red-500" /> : <MapPin className="w-4 h-4 text-gray-500" />)
+                case 'patch':
+                    return (layer.visible ? <Square className="w-4 h-4 text-sky-500" /> : <Square className="w-4 h-4 text-gray-500" />)
                 default:
                     return <Layers className="w-4 h-4 text-gray-400" />
             }
@@ -265,12 +267,12 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     </button>
 
                     {/* Layer Icon */}
-                    <div className="w-4 h-4 flex items-center justify-center">
+                    <div className="w-4 h-4 flex items-center justify-center ml-1">
                         {getLayerIcon(layer.template)}
                     </div>
 
                     {/* Layer Name */}
-                    <span className={cn("flex-1 text-sm truncate ml-1", layer.visible ? "text-gray-200" : "text-gray-500")}>
+                    <span className={cn("flex-1 text-sm truncate ml-0.5", layer.visible ? "text-gray-200" : "text-gray-500")}>
                         {layer.name}
                     </span>
 
@@ -291,7 +293,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
     return (
         <div className="w-full h-full bg-[#1e1e1e] border-r border-gray-800 flex flex-col">
             {/* Header */}
-            <div className="px-3 py-2.5 border-b border-gray-800 flex items-center justify-between">
+            <div className="px-3 py-2 border-b border-[#2A2C33] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Layers className="w-4 h-4 text-gray-400" />
                     <h2 className="text-sm font-semibold text-gray-200">Layers</h2>
@@ -299,23 +301,21 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             </div>
 
             {/* Toolbar */}
-            <div className="px-2 py-2 border-b border-gray-800 flex items-center gap-1">
+            <div className="px-0.5 h-8 border-b border-[#2A2C33] flex items-center justify-between gap-0.5">
                 <Button
                     variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
+                    className="h-7 px-2 text-xs rounded-sm text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
                 >
-                    <Eye className="w-3.5 h-3.5 mr-1" />
+                    <Eye className="w-4 h-4" />
                     Show All
                 </Button>
                 <Button
                     variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
+                    className="h-7 px-2 text-xs rounded-sm text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
                     onClick={() => setLayers([])}
                 // TODO: 清空Resource Node内图层
                 >
-                    <Trash2 className="w-3.5 h-3.5 mr-1" />
+                    <Trash2 className="w-4 h-4" />
                     Remove
                 </Button>
             </div>
@@ -326,7 +326,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             </ScrollArea>
 
             {/* Footer Info */}
-            <div className="px-3 py-2 border-t border-gray-800 text-xs text-gray-500">
+            <div className="px-3 py-2 border-t border-[#2A2C33] text-xs text-gray-500">
                 <div className="flex justify-between">
                     <span>Total Layers: {layers.length}</span>
                     <span>CRS: EPSG:4326</span>

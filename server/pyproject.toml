@@ -13,6 +13,9 @@ dependencies = [
     "pyproj>=3.7.1",
     "pyyaml>=6.0.3",
     "py-noodle",
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+    "pyarrow>=22.0.0",
 ]
 
 [dependency-groups]

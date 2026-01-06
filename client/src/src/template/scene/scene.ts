@@ -1,6 +1,4 @@
 import * as api from '../noodle/apis'
-import DefaultPageContext from "../context/default"
-import ContextStorage from "../context/contextStorage"
 import { IResourceNode, IResourceTree } from "./iscene"
 import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
 import { ITemplate } from '../iTemplate'
@@ -51,8 +49,6 @@ export class ResourceTree implements IResourceTree {
     scene: Map<string, IResourceNode> = new Map()
 
     leadIP?: string
-
-    cs: ContextStorage = ContextStorage.getInstance()
 
     private handleNodeClick: (node: IResourceNode) => void = () => { }
     private handleNodeDoubleClick: (node: IResourceNode) => void = () => { }
