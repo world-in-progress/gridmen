@@ -256,11 +256,15 @@ const NodeRenderer = ({
 
     const handleDragStart = useCallback((e: React.DragEvent) => {
         if (!isFolder) {
-            e.dataTransfer.setData('text/plain', JSON.stringify({
+            const payload = {
                 nodeKey: node.key,
                 templateName: node.template_name,
                 sourceTreeTitle: sourceTreeTitle || ''
-            }))
+            }
+
+            e.dataTransfer.setData('text/plain', JSON.stringify(payload))
+            e.dataTransfer.setData('application/gridmen-node', JSON.stringify(payload))
+            e.dataTransfer.setData('application/gridmen-node-key', node.key)
             e.dataTransfer.effectAllowed = 'copy'
         }
     }, [node, isFolder, sourceTreeTitle])

@@ -15,7 +15,6 @@ import { IResourceNode } from '../scene/iscene'
 
 interface SchemaCreationProps {
     node: IResourceNode
-    // tree: ResourceTree
     context: IViewContext
 }
 

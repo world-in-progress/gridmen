@@ -9,8 +9,10 @@ import { Save, SquaresIntersect } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { addMapMarker, addMapPatchBounds, clearMapMarkers, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { IResourceNode } from '../scene/iscene'
 
 interface PatchCreationProps {
+    node: IResourceNode
     context: IViewContext
 }
 
@@ -38,7 +40,10 @@ const patchTips = [
     { tip4: 'Set the grid size for each level.' },
 ]
 
-export default function PatchCreation({ context }: PatchCreationProps) {
+export default function PatchCreation({
+    node,
+    context
+}: PatchCreationProps) {
 
     const mapContext = context as MapViewContext
     const map = mapContext.map!

@@ -1,7 +1,6 @@
-import { useState } from 'react'
 import { MapViewContext } from './mapView'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { IResourceNode } from '@/template/scene/iscene'
+import { useToolPanelStore } from '@/store/storeSet'
 
 interface NodeTemplateFunctionSet {
     check: Function | null
@@ -19,7 +18,7 @@ interface ToolPanelProps {
 }
 
 export default function ToolPanel({ viewModels, mapContainer, templateName = 'default', selectedNode = null }: ToolPanelProps) {
-    const [activeTab, setActiveTab] = useState<string>('create')
+    const activeTab = useToolPanelStore((s) => s.activeTab)
 
     if (!viewModels) {
         return (
@@ -54,9 +53,16 @@ export default function ToolPanel({ viewModels, mapContainer, templateName = 'de
     const CreateComponent = currentViewModel.create ? currentViewModel.create(selectedNode || null, context) : null
     const EditComponent = currentViewModel.edit ? currentViewModel.edit(selectedNode || null, context) : null
 
+    const ActiveComponent =
+        activeTab === 'edit'
+            ? (EditComponent || CreateComponent)
+            : activeTab === 'check'
+                ? (CheckComponent || CreateComponent)
+                : CreateComponent
+
     return (
         <div className="flex flex-col h-full w-full bg-gray-900">
-            <CreateComponent />
+            {ActiveComponent ? <ActiveComponent /> : null}
         </div>
     )
 }

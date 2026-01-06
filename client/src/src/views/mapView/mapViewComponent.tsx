@@ -115,9 +115,10 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
 interface MapViewComponentProps {
     templateName?: string
     selectedNode?: IResourceNode | null
+    getResourceNodeByKey?: (key: string) => IResourceNode | null
 }
 
-export default function MapViewComponent({ templateName = 'default', selectedNode = null }: MapViewComponentProps) {
+export default function MapViewComponent({ templateName = 'default', selectedNode = null, getResourceNodeByKey }: MapViewComponentProps) {
 
     const [mapInstance, setMapInstance] = useState<mapboxgl.Map | null>(null)
 
@@ -134,7 +135,7 @@ export default function MapViewComponent({ templateName = 'default', selectedNod
             className="h-full w-full text-white "
         >
             <ResizablePanel defaultSize={14}>
-                <LayerGroup />
+                <LayerGroup getResourceNodeByKey={getResourceNodeByKey} />
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={62}>
