@@ -50,11 +50,6 @@ function getApiBaseUrl(useRemoteIP: boolean = false): string {
 }
 
 export const getNodeInfo = async ({ node_key, child_start_index, child_end_index }: GetNodeInfoParams, leadIP?: boolean) => {
-    // if (leadIP) {
-    //     const publicIP = useSettingStore.getState().publicIP
-    //     console.log(publicIP)
-    // }
-
     try {
         const baseUrl = getApiBaseUrl(leadIP || false)
         let url = `${baseUrl}${API_PREFIX}?node_key=${node_key}&child_start_index=${child_start_index || 0}`
@@ -139,7 +134,6 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
     const remoteUrl = getApiBaseUrl(true)
     const remoteTargetNodeKey = `${remoteUrl}::${target_node_key}`
     const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${remoteTargetNodeKey}`
-    console.log('pushNode url', url)
 
     try {
         const response = await fetch(url, {
@@ -161,7 +155,6 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
     const baseUrl = getApiBaseUrl(false)
     const remoteUrl = getApiBaseUrl(true)
     const url = `${baseUrl}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${remoteUrl}::${source_node_key}`
-    console.log('pullNode url:', url)
 
     try {
         const response = await fetch(url, {
@@ -180,38 +173,18 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
     }
 }
 
-export const linkNode = async ({ icrm_tag, node_key, access_mode }: LinkNodeParams, leadIP?: boolean) => {
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/link?icrm_tag=${icrm_tag}&node_key=${node_key}&access_mode=${access_mode}`
+export const GetNodeMountParams = async (node_key: string, isRemote: boolean) => {
+    const baseUrl = getApiBaseUrl(isRemote)
+    const url = `${baseUrl}${API_PREFIX}/mount_params?node_key=${node_key}`
 
     try {
-        const response = await fetch(url, { method: 'GET' })
-
+        const response = await fetch(url, { method: "GET" })
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`)
         }
-
-        const responseData: LinkNodeResponse = await response.json()
+        const responseData: any = await response.json()
         return responseData
     } catch (error) {
-        throw new Error(`Failed to link node: ${error}`)
-    }
-}
-
-export const UnlinkNode = async ({ node_key, lock_id }: UnlinkNodeParams, leadIP?: boolean) => {
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/unlink?node_key=${node_key}&lock_id=${encodeURIComponent(lock_id)}`
-
-    try {
-        const response = await fetch(url, { method: 'GET' })
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`)
-        }
-
-        const responseData: { success: boolean } = await response.json()
-        return responseData
-    } catch (error) {
-        throw new Error(`Failed to unlink node: ${error}`)
+        throw new Error(`Failed to get node params: ${error}`)
     }
 }

@@ -30,7 +30,7 @@ export default class SchemaTemplate implements ITemplate {
     }
 
     static checkMapView(node: IResourceNode, context: IViewContext): Function {
-        return () => SchemaCheck({ context })
+        return () => SchemaCheck({ node, context })
     }
     static creationMapView(node: IResourceNode, context: IViewContext): Function {
         return () => SchemaCreation({ node, context })
@@ -64,16 +64,20 @@ export default class SchemaTemplate implements ITemplate {
 
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
-            case SchemaMenuItem.CHECK_SCHEMA:
-                console.log('Check')
-                console.log(node as ResourceNode)
+            case SchemaMenuItem.CHECK_SCHEMA: {
+                const schemaInfo = await api.node.GetNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                    ; (node as ResourceNode).mountParams = schemaInfo
+                console.log((node as ResourceNode).mountParams)
                 useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
-                // (node.tree as ResourceTree).startEditingNode(node as ResourceNode)
+            }
                 break
             case SchemaMenuItem.EDIT_SCHEMA:
-                console.log('Edit')
-                useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
-                // (node.tree as ResourceTree).startEditingNode(node as ResourceNode)
+                {
+                    const schemaInfo = await api.node.GetNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                        ; (node as ResourceNode).mountParams = schemaInfo
+                    console.log((node as ResourceNode).mountParams)
+                    useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
+                }
                 break
             case SchemaMenuItem.DELETE_SCHEMA:
                 {
