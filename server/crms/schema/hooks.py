@@ -150,6 +150,8 @@ def UNPACK(target_node_key: str, tar_path: str, template_name: str) -> None:
             tarf.extractall(resource_space)
         
         parent_key = '.'.join(target_node_key.split('.')[:-1])
+        if not parent_key and target_node_key.startswith('.'):
+            parent_key = '.'
         parent_key = parent_key if parent_key else None
         if parent_key and not noodle._has_node(parent_key):
             raise ValueError(f'Parent node "{parent_key}" not found in scene for node "{target_node_key}"')

@@ -11,8 +11,10 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
     """
     Mount a patch node.
     """
-    name = node_key.split('.')[-1]
-    resource_dir = Path.cwd() / 'resource' / name
+    # Use the full node path structure relative to 'resource'
+    # e.g. ".123.patch1" -> "resource/123/patch1"
+    rel_path = node_key.strip('.').replace('.', os.sep)
+    resource_dir = Path.cwd() / 'resource' / rel_path
     resource_dir.mkdir(parents=True, exist_ok=True)
     
     meta_file = resource_dir / 'patch.meta.json'
@@ -40,8 +42,8 @@ def UNMOUNT(node_key: str) -> None:
     """
     Unmount a patch node.
     """
-    name = node_key.split('.')[-1]
-    resource_dir = Path.cwd() / 'resource' / name
+    rel_path = node_key.strip('.').replace('.', os.sep)
+    resource_dir = Path.cwd() / 'resource' / rel_path
     # In a real environment, we might want to keep the data or delete it
     # For consistency with other hooks shown, we'll skip aggressive deletion 
     # unless it's strictly required.
@@ -52,8 +54,8 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
     Generate node-specific launch parameters for the patch resource node.
     """
     try:
-        node_name = node_key.split('.')[-1]
-        resource_dir = Path.cwd() / 'resource' / node_name
+        rel_path = node_key.strip('.').replace('.', os.sep)
+        resource_dir = Path.cwd() / 'resource' / rel_path
         resource_dir.mkdir(parents=True, exist_ok=True)
         
         launch_params = {
