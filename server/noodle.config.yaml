@@ -1,6 +1,10 @@
 icrms:
   - tag: cc/ISchema/0.1.0
     module_path: icrms.ischema
+  - tag: cc/IPatch/0.1.0
+    module_path: icrms.ipatch
 node_templates:
   - name: schema
     module_path: crms.schema
+  - name: patch
+    module_path: crms.patch
