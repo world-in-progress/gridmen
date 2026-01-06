@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react"
 import LoginPage from "./loginPage/loginPage"
-import { useSettingStore } from "@/store/storeSet"
+import { useSettingStore, useToolPanelStore } from "@/store/storeSet"
 import SettingView from "./settingView/settingView"
 import { ICON_REGISTRY } from "@/registry/iconRegistry"
 import { IResourceNode } from "@/template/scene/iscene"
@@ -55,6 +55,13 @@ export default function Framework() {
 
         treeOfNode.selectedNode = node
         treeOfNode.notifyDomUpdate()
+
+        if (typeof menuItem === 'string') {
+            const key = menuItem.toLowerCase()
+            if (key.includes('edit')) useToolPanelStore.getState().setActiveTab('edit')
+            else if (key.includes('check')) useToolPanelStore.getState().setActiveTab('check')
+            else if (key.includes('create')) useToolPanelStore.getState().setActiveTab('create')
+        }
 
         node.template?.handleMenuOpen(node, menuItem)
     }, [privateTree, publicTree])
@@ -131,18 +138,25 @@ export default function Framework() {
         return selectedNode?.template_name || 'default'
     }
 
+    const getResourceNodeByKey = useCallback((key: string): IResourceNode | null => {
+        const inPrivate = privateTree?.scene.get(key) ?? null
+        if (inPrivate) return inPrivate
+        const inPublic = publicTree?.scene.get(key) ?? null
+        return inPublic
+    }, [privateTree, publicTree])
+
     const renderActiveView = () => {
         const currentTemplateName = getCurrentTemplateName()
         const selectedNode = privateTree?.selectedNode || publicTree?.selectedNode
         switch (activeIconID) {
             case 'map-view':
-                return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} />
+                return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} getResourceNodeByKey={getResourceNodeByKey} />
             case 'table-view':
                 return <TableViewComponent />
             case 'settings':
                 return <SettingView />
             default:
-                return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} />
+                return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} getResourceNodeByKey={getResourceNodeByKey} />
         }
     }
 

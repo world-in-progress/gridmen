@@ -34,7 +34,6 @@ interface NodeRendererProps {
     triggerFocus: number
     dragSourceTreeTitle?: string
     showNewResourceInfo?: boolean
-    focusNode?: IResourceNode | null
     setShowNewResourceInfo?: (v: boolean) => void
 }
 
@@ -68,32 +67,41 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
             toast.error('Resource name cannot be empty')
             return
         }
+        if (localValue === '') {
+            toast.info('Please select new resource type.')
+            return
+        }
         try {
-            let newNodeKey
             const { selectedNodeKey } = useSelectedNodeStore.getState()
-            if (selectedNodeKey !== null) {
-                newNodeKey = selectedNodeKey + '.' + localNewResourceName
-            } else {
-                newNodeKey = '.' + localNewResourceName
+            let parentKey = selectedNodeKey ?? '.'
+
+            // 如果当前选中的是非 folder（资源节点），则在其 parent 下创建
+            const selectedNode = selectedNodeKey ? resourceTree.scene.get(selectedNodeKey) : null
+            if (selectedNode && selectedNode.template_name !== 'default') {
+                parentKey = selectedNode.parent?.key ?? '.'
             }
 
-            await api.node.mountNode({
+            const newNodeKey = parentKey === '.'
+                ? `.${localNewResourceName}`
+                : `${parentKey}.${localNewResourceName}`
+
+            if (resourceTree.scene.has(newNodeKey)) {
+                toast.error('Node already exists')
+                return
+            }
+
+            const createdNode = resourceTree.addLocalNode({
                 node_key: newNodeKey,
                 template_name: localValue,
-                mount_params_string: JSON.stringify({})
+                parent_key: parentKey,
             })
 
             setSelectedNodeKey(newNodeKey)
             setLocalNewResourceName('')
             onCreated && onCreated()
 
-            await resourceTree.refresh()
-
-            const createdNode = resourceTree.scene.get(newNodeKey)
-            if (createdNode) {
-                await resourceTree.clickNode(createdNode)
-            }
-
+            // 选中该临时节点，ToolPanel 会展示对应 template 的 creation view
+            await resourceTree.clickNode(createdNode)
             resourceTree.tempNodeExist = true
         } catch (err) {
             console.error(err)
@@ -103,12 +111,7 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
-            if (localValue === '') {
-                toast.info('Please select new resource type.')
-                return
-            } else {
-                void handleLocalCreate()
-            }
+            void handleLocalCreate()
         } else if (e.key === 'Escape') {
             onCancel && onCancel()
         }
@@ -180,7 +183,15 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
     )
 }
 
-const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeTitle: sourceTreeTitle, showNewResourceInfo, setShowNewResourceInfo, focusNode }: NodeRendererProps) => {
+const NodeRenderer = ({
+    node,
+    resourceTree,
+    depth,
+    triggerFocus,
+    dragSourceTreeTitle: sourceTreeTitle,
+    showNewResourceInfo,
+    setShowNewResourceInfo,
+}: NodeRendererProps) => {
 
     const tree = node.tree as ResourceTree
 
@@ -245,11 +256,15 @@ const NodeRenderer = ({ node, resourceTree, depth, triggerFocus, dragSourceTreeT
 
     const handleDragStart = useCallback((e: React.DragEvent) => {
         if (!isFolder) {
-            e.dataTransfer.setData('text/plain', JSON.stringify({
+            const payload = {
                 nodeKey: node.key,
                 templateName: node.template_name,
                 sourceTreeTitle: sourceTreeTitle || ''
-            }))
+            }
+
+            e.dataTransfer.setData('text/plain', JSON.stringify(payload))
+            e.dataTransfer.setData('application/gridmen-node', JSON.stringify(payload))
+            e.dataTransfer.setData('application/gridmen-node-key', node.key)
             e.dataTransfer.effectAllowed = 'copy'
         }
     }, [node, isFolder, sourceTreeTitle])
@@ -800,7 +815,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                     dragSourceTreeTitle={title}
                     showNewResourceInfo={showNewResourceInfo}
                     setShowNewResourceInfo={setShowNewResourceInfo}
-                    focusNode={focusNode}
                 />
             ))}
             {showNewFolderInput && (

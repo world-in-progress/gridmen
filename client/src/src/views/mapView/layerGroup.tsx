@@ -1,72 +1,25 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Plus, Trash2, Settings, GripVertical } from "lucide-react"
+import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/utils/utils"
+import { useLayerStore } from "@/store/storeSet"
+import type { Layer } from "@/store/storeTypes"
+import type { ResourceNode } from "@/template/scene/scene"
 
-interface Layer {
-    id: string
-    name: string
-    visible: boolean
-    type: "vector" | "raster" | "group"
-    children?: Layer[]
-    opacity?: number
+interface LayerGroupProps {
+    getResourceNodeByKey?: (key: string) => any | null
 }
 
-export default function LayerGroup() {
+export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
 
-    const [layers, setLayers] = useState<Layer[]>([
-        {
-            id: "1",
-            name: "Base Maps",
-            visible: true,
-            type: "group",
-            children: [
-                { id: "1-1", name: "OpenStreetMap", visible: true, type: "raster", opacity: 100 },
-                { id: "1-2", name: "Satellite", visible: false, type: "raster", opacity: 100 },
-            ],
-        },
-        {
-            id: "2",
-            name: "Boundaries",
-            visible: true,
-            type: "group",
-            children: [
-                { id: "2-1", name: "Districts", visible: true, type: "vector", opacity: 80 },
-                { id: "2-2", name: "Provinces", visible: true, type: "vector", opacity: 70 },
-            ],
-        },
-        {
-            id: "3",
-            name: "Points of Interest",
-            visible: false,
-            type: "vector",
-            opacity: 100,
-        },
-        {
-            id: "4",
-            name: "Transportation",
-            visible: true,
-            type: "group",
-            children: [
-                { id: "4-1", name: "Roads", visible: true, type: "vector", opacity: 90 },
-                { id: "4-2", name: "Railways", visible: false, type: "vector", opacity: 85 },
-                { id: "4-3", name: "Airports", visible: true, type: "vector", opacity: 100 },
-            ],
-        },
-        {
-            id: "5",
-            name: "Resource Node",
-            visible: true,
-            type: "group",
-            children: [],
-        },
-    ])
+    const layers = useLayerStore((s) => s.layers)
+    const setLayers = useLayerStore((s) => s.setLayers)
 
     const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null)
     const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null)
     const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside' | null>(null)
-    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["1", "2", "4", "5"]))
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["resource-node"]))
 
     const toggleExpanded = (id: string) => {
         setExpandedGroups((prev) => {
@@ -156,7 +109,23 @@ export default function LayerGroup() {
         e.stopPropagation()
 
         const layerId = e.dataTransfer.getData('application/layer-id')
-        const externalNodeName = e.dataTransfer.getData('text/plain')
+
+        const externalNodeKey = (() => {
+            const raw = e.dataTransfer.getData('application/gridmen-node') || e.dataTransfer.getData('text/plain')
+            if (raw) {
+                const parsed = JSON.parse(raw)
+                if (typeof parsed?.nodeKey === 'string') {
+                    return parsed.nodeKey as string
+                }
+            }
+
+            const nodeKey = e.dataTransfer.getData('application/gridmen-node-key')
+            if (nodeKey) {
+                return nodeKey as string
+            }
+
+            return null
+        })()
 
         if (layerId && draggedLayerId) {
             if (layerId === targetLayerId) {
@@ -179,48 +148,10 @@ export default function LayerGroup() {
                 setExpandedGroups(prev => new Set(prev).add(targetLayerId))
             }
         }
-        else if (externalNodeName) {
-            const checkDuplicateName = (layers: Layer[], name: string): boolean => {
-                for (const layer of layers) {
-                    if (layer.name === name) return true
-                    if (layer.children && checkDuplicateName(layer.children, name)) return true
-                }
-                return false
-            }
-
-            if (checkDuplicateName(layers, externalNodeName)) {
-                console.warn(`Layer "${externalNodeName}" already exists`)
-                setDragOverLayerId(null)
-                return
-            }
-
-            const newLayer: Layer = {
-                id: `resource-${Date.now()}`,
-                name: externalNodeName,
-                visible: true,
-                type: "vector",
-                opacity: 100
-            }
-
-            setLayers(prev => {
-                const addToChildren = (layers: Layer[]): Layer[] => {
-                    return layers.map(layer => {
-                        if (layer.id === targetLayerId) {
-                            return {
-                                ...layer,
-                                children: [...(layer.children || []), newLayer]
-                            }
-                        }
-                        if (layer.children) {
-                            return { ...layer, children: addToChildren(layer.children) }
-                        }
-                        return layer
-                    })
-                }
-                return addToChildren(prev)
-            })
-
-            setExpandedGroups(prev => new Set(prev).add(targetLayerId))
+        else if (externalNodeKey) {
+            const node = getResourceNodeByKey?.(externalNodeKey) as ResourceNode
+            useLayerStore.getState().addSchemaLayerToResourceNode(node)
+            setExpandedGroups(prev => new Set(prev).add('resource-node'))
         }
 
         setDragOverLayerId(null)
@@ -281,6 +212,15 @@ export default function LayerGroup() {
         const isDragging = draggedLayerId === layer.id
         const isGroup = layer.type === "group"
 
+        const getLayerIcon = (template?: string) => {
+            switch (template) {
+                case "schema":
+                    return (layer.visible ? <MapPin className="w-4 h-4 text-red-500" /> : <MapPin className="w-4 h-4 text-gray-500" />)
+                default:
+                    return <Layers className="w-4 h-4 text-gray-400" />
+            }
+        }
+
         return (
             <div key={layer.id} className="select-none relative">
                 {/* Drop position indicator */}
@@ -296,8 +236,8 @@ export default function LayerGroup() {
                     onDragStart={(e) => !isResourceNode && handleLayerDragStart(e, layer.id)}
                     onDragEnd={handleDragEnd}
                     className={cn(
-                        "group flex items-center gap-1 px-2 py-1.5 hover:bg-white/5 cursor-pointer transition-colors relative",
-                        depth > 0 && "ml-4",
+                        "group flex items-center gap-0.5 px-1.5 py-1 hover:bg-white/5 cursor-pointer transition-colors relative",
+                        depth > 0 && "ml-1",
                         isDragOver && dropPosition === 'inside' && "bg-blue-500/20 border border-blue-400 border-dashed",
                         isDragging && "opacity-50"
                     )}
@@ -309,12 +249,8 @@ export default function LayerGroup() {
                     {/* Expand/Collapse Icon */}
                     <div className="w-4 h-4 flex items-center justify-center">
                         {hasChildren && (
-                            <button onClick={() => toggleExpanded(layer.id)} className="hover:bg-white/10 rounded">
-                                {isExpanded ? (
-                                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                ) : (
-                                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
-                                )}
+                            <button onClick={() => toggleExpanded(layer.id)} className="hover:bg-white/10 rounded cursor-pointer">
+                                {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                             </button>
                         )}
                     </div>
@@ -322,14 +258,14 @@ export default function LayerGroup() {
                     {/* Visibility Toggle */}
                     <button
                         onClick={() => toggleVisibility(layer.id)}
-                        className="w-5 h-5 flex items-center justify-center hover:bg-white/10 rounded"
+                        className="w-5 h-5 flex items-center justify-center hover:bg-white/10 rounded cursor-pointer"
                     >
                         {layer.visible ? <Eye className="w-4 h-4 text-blue-400" /> : <EyeOff className="w-4 h-4 text-gray-500" />}
                     </button>
 
                     {/* Layer Icon */}
                     <div className="w-4 h-4 flex items-center justify-center">
-                        <Layers className="w-3.5 h-3.5 text-gray-400" />
+                        {getLayerIcon(layer.template)}
                     </div>
 
                     {/* Layer Name */}
@@ -339,7 +275,7 @@ export default function LayerGroup() {
 
                     {/* Drag Handle */}
                     {!isResourceNode && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity mr-4">
                             <GripVertical className="w-4 h-4 text-gray-500 cursor-grab active:cursor-grabbing" />
                         </div>
                     )}
@@ -375,6 +311,8 @@ export default function LayerGroup() {
                     variant="ghost"
                     size="sm"
                     className="h-7 px-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
+                    onClick={() => setLayers([])}
+                // TODO: 清空Resource Node内图层
                 >
                     <Trash2 className="w-3.5 h-3.5 mr-1" />
                     Remove

@@ -15,7 +15,6 @@ import { IResourceNode } from '../scene/iscene'
 
 interface SchemaCreationProps {
     node: IResourceNode
-    // tree: ResourceTree
     context: IViewContext
 }
 
@@ -273,7 +272,8 @@ export default function SchemaCreation({
     }, [])
 
     const loadContext = async () => {
-        console.log(node.name.split(' ')[0])
+        console.log(node)
+        pageContext.current.name = node.name.split('.')[0]
         triggerRepaint()
     }
 
@@ -425,30 +425,23 @@ export default function SchemaCreation({
             grid_info: pageContext.current.gridLayers.map(layer => [parseFloat(layer.width), parseFloat(layer.height)]),
         }
 
-        const parentKey = node?.key === '.' ? '.' : node?.key || '.'
-        const mountKey = parentKey === '.' ? `.${pageContext.current.name}` : `${parentKey}.${pageContext.current.name}`
-        // const mountKey = `.${pageContext.current.name}`
-
         setGeneralMessage('Submitting data...')
         try {
             await api.node.mountNode({
-                node_key: mountKey,
+                node_key: node.key,
                 template_name: 'schema',
                 mount_params_string: JSON.stringify(schemaData)
             })
 
             setGeneralMessage('Created successfully')
-
-            const tree = node?.tree as ResourceTree
-            await tree.refresh()
-
+            await (node.tree as ResourceTree).refresh()
             toast.success('Created successfully')
+
+            resetForm()
         } catch (error) {
             setGeneralMessage(`Failed to create schema: ${error}`)
             toast.error(`Failed to create schema: ${error}`)
         }
-
-        resetForm()
     }
 
     return (
