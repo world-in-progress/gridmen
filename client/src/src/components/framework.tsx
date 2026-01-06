@@ -93,9 +93,9 @@ export default function Framework() {
     }, [focusNode, publicTree, privateTree])
 
     const handleNodeClick = useCallback((node: IResourceNode) => {
+        if (privateTree === null || publicTree === null) return
         const _node = node as ResourceNode
 
-        if (privateTree === null || publicTree === null) return
         privateTree.selectedNode = null
         publicTree.selectedNode = null
         _node.tree.selectedNode = _node

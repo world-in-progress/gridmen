@@ -237,7 +237,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     onDragEnd={handleDragEnd}
                     className={cn(
                         "group flex items-center gap-0.5 px-1.5 py-1 hover:bg-white/5 cursor-pointer transition-colors relative",
-                        depth > 0 && "ml-1",
+                        depth > 0 && "ml-4",
                         isDragOver && dropPosition === 'inside' && "bg-blue-500/20 border border-blue-400 border-dashed",
                         isDragging && "opacity-50"
                     )}
@@ -247,13 +247,14 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     onDragLeave={handleDragLeave}
                 >
                     {/* Expand/Collapse Icon */}
-                    <div className="w-4 h-4 flex items-center justify-center">
-                        {hasChildren && (
+
+                    {hasChildren && (
+                        <div className="w-4 h-4 flex items-center justify-center">
                             <button onClick={() => toggleExpanded(layer.id)} className="hover:bg-white/10 rounded cursor-pointer">
                                 {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                             </button>
-                        )}
-                    </div>
+                        </div>
+                    )}
 
                     {/* Visibility Toggle */}
                     <button
@@ -269,7 +270,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     </div>
 
                     {/* Layer Name */}
-                    <span className={cn("flex-1 text-sm truncate", layer.visible ? "text-gray-200" : "text-gray-500")}>
+                    <span className={cn("flex-1 text-sm truncate ml-1", layer.visible ? "text-gray-200" : "text-gray-500")}>
                         {layer.name}
                     </span>
 
