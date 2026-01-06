@@ -1,12 +1,14 @@
 import React from 'react'
 import { IViewContext } from '@/views/IViewContext'
 import { MapViewContext } from '@/views/mapView/mapView'
+import { IResourceNode } from '../scene/iscene'
 
 interface PatchEditProps {
+    node: IResourceNode
     context: IViewContext
 }
 
-export default function PatchEdit({ context }: PatchEditProps) {
+export default function PatchEdit({ node, context }: PatchEditProps) {
     const mapContext = context as MapViewContext
     const map = mapContext.map
 

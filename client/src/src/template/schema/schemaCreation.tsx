@@ -413,6 +413,7 @@ export default function SchemaCreation({
             })
 
             node.isTemp = false
+                ; (node as ResourceNode).tree.tempNodeExist = false
 
             setGeneralMessage('Created successfully')
             // TODO：卸载组件

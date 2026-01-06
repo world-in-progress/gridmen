@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { FilePlus, FolderTree } from "lucide-react"
+import { FilePlusCorner, FolderTree } from "lucide-react"
 
 const tips = [
     { tip1: "Navigate to the Explorer panel on the left side of the screen." },
@@ -46,7 +46,7 @@ export default function DefaultCreation() {
                     <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
                         <div className="flex flex-col items-center text-center gap-4">
                             <div className="p-4 bg-blue-50 rounded-full">
-                                <FilePlus className="h-12 w-12 text-[#007ACC]" />
+                                <FilePlusCorner className="h-12 w-12 text-[#007ACC]" />
                             </div>
                             <h2 className="text-black text-lg font-semibold">No Resource Selected</h2>
                             <p className="text-gray-600 text-sm max-w-md">

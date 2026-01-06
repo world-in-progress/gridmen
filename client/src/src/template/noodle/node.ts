@@ -173,7 +173,7 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
     }
 }
 
-export const GetNodeMountParams = async (node_key: string, isRemote: boolean) => {
+export const getNodeMountParams = async (node_key: string, isRemote: boolean) => {
     const baseUrl = getApiBaseUrl(isRemote)
     const url = `${baseUrl}${API_PREFIX}/mount_params?node_key=${node_key}`
 

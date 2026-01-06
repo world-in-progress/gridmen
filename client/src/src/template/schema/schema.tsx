@@ -65,17 +65,15 @@ export default class SchemaTemplate implements ITemplate {
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
             case SchemaMenuItem.CHECK_SCHEMA: {
-                const schemaInfo = await api.node.GetNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                const schemaInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                     ; (node as ResourceNode).mountParams = schemaInfo
-                console.log((node as ResourceNode).mountParams)
                 useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
             }
                 break
             case SchemaMenuItem.EDIT_SCHEMA:
                 {
-                    const schemaInfo = await api.node.GetNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                    const schemaInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                         ; (node as ResourceNode).mountParams = schemaInfo
-                    console.log((node as ResourceNode).mountParams)
                     useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
                 }
                 break
