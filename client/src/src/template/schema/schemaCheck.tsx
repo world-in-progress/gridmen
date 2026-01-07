@@ -5,6 +5,7 @@ import { IResourceNode } from '../scene/iscene'
 import { addMapMarker } from '@/utils/utils'
 import { ResourceNode } from '../scene/scene'
 import * as api from '@/template/noodle/apis'
+import { SchemaData } from './types'
 
 interface SchemaCheckProps {
     node: IResourceNode
@@ -27,9 +28,15 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
 
     const loadContext = async () => {
         if ((node as ResourceNode).mountParams === undefined) {
-            (node as ResourceNode).mountParams = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-            const schemaInfo = (node as ResourceNode).mountParams
-            console.log('Schema Info:', schemaInfo)
+            const schemaNode = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+
+            const { template_name, mount_params } = schemaNode
+
+            const schemaData = JSON.parse(mount_params) as SchemaData
+
+            (node as ResourceNode).mountParams = schemaData
+
+            addMapMarker(map, schemaData.alignment_origin, node.key)
         }
 
 

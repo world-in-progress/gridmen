@@ -9,7 +9,7 @@ import { IViewContext } from '@/views/IViewContext'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
-import { addMapMarker, clearMapMarkers, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { addMapMarker, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
 import { ResourceNode, ResourceTree } from '../scene/scene'
 import { IResourceNode } from '../scene/iscene'
 
@@ -230,7 +230,6 @@ export default function SchemaCreation({
     const [isSelectingPoint, setIsSelectingPoint] = useState(false)
     const [generalMessage, setGeneralMessage] = useState<string | null>(null)
     const [layerErrors, setLayerErrors] = useState<Record<number, string>>({})
-    // const [convertedCoord, setConvertedCoord] = useState<[number, number] | null>(null)
     const [formErrors, setFormErrors] = useState<FormErrors>({
         name: false,
         epsg: false,
@@ -273,12 +272,9 @@ export default function SchemaCreation({
 
     const unloadContext = async () => {
         (node as ResourceNode).context = {
-            name: pageContext.current.name,
-            epsg: pageContext.current.epsg,
-            alignmentOrigin: pageContext.current.alignmentOrigin,
-            alignmentConverted: pageContext.current.alignmentConverted,
-            gridLayers: pageContext.current.gridLayers
+            ...pageContext.current
         }
+
         return
     }
 
@@ -300,7 +296,6 @@ export default function SchemaCreation({
             }
         }
 
-        console.log('Converted Coord:', pageContext.current.alignmentConverted);
         triggerRepaint()
     }
 
@@ -326,10 +321,10 @@ export default function SchemaCreation({
             return
         }
 
-        clearMapMarkers()
+        clearMarkerByNodeKey(node.key)
         picking.current.marker = null
 
-        picking.current.cancel = pickCoordsFromMap(map, { color: '#FF0000' }, (marker) => {
+        picking.current.cancel = pickCoordsFromMap(map, node.key, { color: '#FF0000' }, (marker) => {
             picking.current.marker = marker
 
             const pc = pageContext.current
@@ -344,8 +339,8 @@ export default function SchemaCreation({
 
     const handleDrawAlignmentOrigin = () => {
         if (!map || !pageContext.current.alignmentOrigin) return
-        clearMapMarkers()
-        addMapMarker(map, pageContext.current.alignmentOrigin)
+        clearMarkerByNodeKey(node.key)
+        addMapMarker(map, pageContext.current.alignmentOrigin, node.key)
     }
 
     const handleAddGridLayer = () => {
@@ -412,11 +407,13 @@ export default function SchemaCreation({
                 mount_params_string: JSON.stringify(schemaData)
             })
 
+            clearMarkerByNodeKey(node.key)
+
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
+                ; (node.tree as ResourceTree).selectedNode = null
 
             setGeneralMessage('Created successfully')
-            // TODO：卸载组件
             await (node.tree as ResourceTree).refresh()
             toast.success('Created successfully')
 
@@ -462,7 +459,7 @@ export default function SchemaCreation({
                 </div>
             </div>
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-2/3 mx-auto mt-4 mb-4 space-y-4 pb-4'>
+                <div className='w-3/4 mx-auto mt-4 mb-4 space-y-2 pb-4'>
                     {/* ----------- */}
                     {/* Schema Name */}
                     {/* ----------- */}
@@ -475,9 +472,7 @@ export default function SchemaCreation({
                                 id='name'
                                 value={pageContext.current.name}
                                 readOnly={true}
-                                placeholder={'Enter new schema name'}
-                                className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''
-                                    }`}
+                                className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''}`}
                             />
                         </div>
                     </div>

@@ -8,10 +8,11 @@ import { IResourceNode } from "../scene/iscene"
 import { useLayerStore } from '@/store/storeSet'
 import { IViewContext } from "@/views/IViewContext"
 import { ResourceNode, ResourceTree } from "../scene/scene"
-import { Delete, Edit3, Info } from "lucide-react"
+import { Delete, Edit3, FilePlusCorner, Info } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 
 enum SchemaMenuItem {
+    CREATE_SCHEMA = 'Create Schema',
     CHECK_SCHEMA = 'Check Schema',
     EDIT_SCHEMA = 'Edit Schema',
     DELETE_SCHEMA = 'Delete Schema',
@@ -42,10 +43,15 @@ export default class SchemaTemplate implements ITemplate {
     renderMenu(node: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element {
         return (
             <ContextMenuContent>
-                <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CHECK_SCHEMA) }}>
+                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CHECK_SCHEMA) }}>
+                    <FilePlusCorner className='w-4 h-4' />
+                    <span>Create</span>
+                </ContextMenuItem>)}
+                {!node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CHECK_SCHEMA) }}>
                     <Info className='w-4 h-4' />
                     <span>Check</span>
-                </ContextMenuItem>
+                </ContextMenuItem>)}
+
                 {(node as ResourceNode).tree.leadIP === undefined && (
                     <>
                         <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.EDIT_SCHEMA) }}>
@@ -64,6 +70,9 @@ export default class SchemaTemplate implements ITemplate {
 
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
+            case SchemaMenuItem.CREATE_SCHEMA:
+
+                break
             case SchemaMenuItem.CHECK_SCHEMA: {
                 const schemaInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                     ; (node as ResourceNode).mountParams = schemaInfo
@@ -79,6 +88,13 @@ export default class SchemaTemplate implements ITemplate {
                 break
             case SchemaMenuItem.DELETE_SCHEMA:
                 {
+                    if (node.isTemp) {
+                        ; (node as ResourceNode).tree.tempNodeExist = false
+                        await (node.tree as ResourceTree).removeNode(node)
+                        toast.success(`Schema ${node.name} deleted successfully`)
+                        return
+                    }
+
                     await api.node.unmountNode(node.key)
                     toast.success(`Schema ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()

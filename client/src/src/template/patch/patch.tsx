@@ -3,7 +3,7 @@ import * as api from '../noodle/apis'
 import { ITemplate } from "../iTemplate"
 import { ResourceNode, ResourceTree } from "../scene/scene"
 import { IResourceNode } from "../scene/iscene"
-import { useLayerStore } from '@/store/storeSet'
+import { useLayerStore, useToolPanelStore } from '@/store/storeSet'
 import { IViewContext } from "@/views/IViewContext"
 import { Delete, Edit3, Info, FilePlusCorner } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
@@ -12,6 +12,7 @@ import PatchCheck from './patchCheck'
 import PatchEdit from './patchEdit'
 
 enum PatchMenuItem {
+    CREATE_PATCH = 'Create Patch',
     CHECK_PATCH = 'Check Patch',
     EDIT_PATCH = 'Edit Patch',
     DELETE_PATCH = 'Delete Patch',
@@ -44,7 +45,7 @@ export default class PatchTemplate implements ITemplate {
     renderMenu(node: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element {
         return (
             <ContextMenuContent>
-                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, PatchMenuItem.CHECK_PATCH) }}>
+                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, PatchMenuItem.CREATE_PATCH) }}>
                     <FilePlusCorner className='w-4 h-4' />
                     <span>Create</span>
                 </ContextMenuItem>)}
@@ -73,6 +74,9 @@ export default class PatchTemplate implements ITemplate {
 
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
+            case PatchMenuItem.CREATE_PATCH:
+                useToolPanelStore.getState().setActiveTab('create')
+                break
             case PatchMenuItem.CHECK_PATCH: {
                 const patchInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                     ; (node as ResourceNode).mountParams = patchInfo
@@ -87,6 +91,13 @@ export default class PatchTemplate implements ITemplate {
                 break
             case PatchMenuItem.DELETE_PATCH:
                 {
+                    if (node.isTemp) {
+                        ; (node as ResourceNode).tree.tempNodeExist = false
+                        await (node.tree as ResourceTree).removeNode(node)
+                        toast.success(`Patch ${node.name} deleted successfully`)
+                        return
+                    }
+
                     await api.node.unmountNode(node.key)
                     toast.success(`Patch ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()

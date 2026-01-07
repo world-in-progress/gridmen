@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input'
 import { Separator } from "@/components/ui/separator"
 import { ResourceTree } from '@/template/scene/scene'
 import { IResourceNode } from '@/template/scene/iscene'
-import { useSelectedNodeStore } from '@/store/storeSet'
+import { useSelectedNodeStore, useToolPanelStore } from '@/store/storeSet'
 import { RESOURCE_REGISTRY } from '@/registry/resourceRegistry'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -75,7 +75,6 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
             const { selectedNodeKey } = useSelectedNodeStore.getState()
             let parentKey = selectedNodeKey ?? '.'
 
-            // 如果当前选中的是非 folder（资源节点），则在其 parent 下创建
             const selectedNode = selectedNodeKey ? resourceTree.scene.get(selectedNodeKey) : null
             if (selectedNode && selectedNode.template_name !== 'default') {
                 parentKey = selectedNode.parent?.key ?? '.'
@@ -85,6 +84,7 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
                 ? `.${localNewResourceName}`
                 : `${parentKey}.${localNewResourceName}`
 
+            // TODO: 创建同名不同类型的Node
             if (resourceTree.scene.has(newNodeKey)) {
                 toast.error('Node already exists')
                 return
@@ -96,17 +96,11 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
                 parent_key: parentKey,
             })
 
-            console.log({
-                node_key: newNodeKey,
-                template_name: localValue,
-                parent_key: parentKey,
-            })
-
             setSelectedNodeKey(newNodeKey)
             setLocalNewResourceName('')
             onCreated && onCreated()
+            useToolPanelStore.getState().setActiveTab('create')
 
-            // 选中该临时节点，ToolPanel 会展示对应 template 的 creation view
             await resourceTree.clickNode(createdNode)
             resourceTree.tempNodeExist = true
         } catch (err) {
@@ -117,7 +111,7 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
-            void handleLocalCreate()
+            handleLocalCreate()
         } else if (e.key === 'Escape') {
             onCancel && onCancel()
         }
@@ -211,11 +205,16 @@ const NodeRenderer = ({
     const [isDragOver, setIsDragOver] = useState(false)
 
     const handleClickNode = useCallback((e: React.MouseEvent) => {
+        if (!isFolder && !node.isTemp) return
         // Clear any existing timeout to prevent single click when double clicking
         if (clickTimeoutRef.current) {
             clearTimeout(clickTimeoutRef.current)
             clickTimeoutRef.current = null
             return
+        }
+
+        if (node.isTemp) {
+            useToolPanelStore.getState().setActiveTab('create')
         }
 
         // Always set selected key so UI highlights the clicked node
@@ -337,12 +336,6 @@ const NodeRenderer = ({
             // private -> public
             if (sourceTitle === 'WorkSpace' && targetTitle === 'Public') {
 
-                console.log('push行为', {
-                    template_name: templateName,
-                    source_node_key: sourceNodeKey,
-                    target_node_key: targetNodeKey
-                })
-
                 await api.node.pushNode({
                     template_name: templateName,
                     source_node_key: sourceNodeKey,
@@ -357,12 +350,6 @@ const NodeRenderer = ({
 
             // public -> private
             if (sourceTitle === 'Public' && targetTitle === 'WorkSpace') {
-
-                console.log('pull行为', {
-                    template_name: templateName,
-                    source_node_key: sourceNodeKey,
-                    target_node_key: targetNodeKey
-                })
 
                 await api.node.pullNode({
                     template_name: templateName,
@@ -428,12 +415,12 @@ const NodeRenderer = ({
                                     {tree.isNodeExpanded(node.id) ? (
                                         <>
                                             <ChevronDown className='w-4 h-4 mr-0.5' />
-                                            <FolderOpen className='w-4 h-4 mr-2 text-gray-400' />
+                                            <FolderOpen className='w-4 h-4 mr-1 text-gray-400' />
                                         </>
                                     ) : (
                                         <>
                                             <ChevronRight className='w-4 h-4 mr-0.5' />
-                                            <Folder className='w-4 h-4 mr-2 text-gray-400' />
+                                            <Folder className='w-4 h-4 mr-1 text-gray-400' />
                                         </>
                                     )}
                                 </>
@@ -441,9 +428,9 @@ const NodeRenderer = ({
                                 (() => {
                                     switch (node.template_name) {
                                         case 'schema':
-                                            return <MapPin className={cn(node.isTemp ? 'text-white' : 'text-red-500', 'w-4 h-4 mr-2 ml-4.5 ')} />
+                                            return <MapPin className={cn(node.isTemp ? 'text-white' : 'text-red-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
                                         case 'patch':
-                                            return <Square className={cn(node.isTemp ? 'text-white' : 'text-sky-500', 'w-4 h-4 mr-2 ml-4.5 ')} />
+                                            return <Square className={cn(node.isTemp ? 'text-white' : 'text-sky-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
                                         default:
                                             return <File className='w-4 h-4 mr-2 ml-4.5 text-blue-500' />
                                     }
@@ -546,17 +533,10 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                     mount_params_string: JSON.stringify({})
                 })
 
-                console.log({
-                    node_key: newNodeKey,
-                    template_name: value,
-                    mount_params_string: JSON.stringify({})
-                })
-
-                // 标记新建的临时节点，便于后续 creation 激活
                 setSelectedNodeKey(newNodeKey)
-
                 setNewResourceName('')
                 setShowNewResourceInfo(false)
+                useToolPanelStore.getState().setActiveTab('create')
 
                 await resourceTree.refresh()
 
@@ -586,12 +566,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                 }
 
                 await api.node.mountNode({
-                    node_key: newNodeKey,
-                    template_name: '',
-                    mount_params_string: ''
-                })
-
-                console.log({
                     node_key: newNodeKey,
                     template_name: '',
                     mount_params_string: ''
@@ -788,7 +762,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                 className='z-10 h-8 bg-[#2A2C33] py-1 pl-1 text-sm font-semibold flex items-center text-gray-200 cursor-pointer'
                 onClick={handleClickTreeTitle}
             >
-                <span className='ml-2'>{title}</span>
+                <span className='ml-2 hover:[text-shadow:0_0_10px_rgba(255,255,255,0.5)]'>{title}</span>
                 <div className='ml-auto mr-2'>
                     {title === 'WorkSpace' && (
                         <>

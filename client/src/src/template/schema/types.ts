@@ -9,5 +9,4 @@ export interface SchemaData {
     epsg: number
     alignment_origin: [number, number]
     grid_info: [number, number][]
-    proj4_defs?: string
 }

@@ -35,33 +35,63 @@ export const convertPointCoordinate = async (originPoint: [number, number], from
     }
 }
 
-export const clearMapMarkers = (): void => {
-    const markers = document.getElementsByClassName('mapboxgl-marker')
-    if (markers.length > 0) {
-        Array.from(markers).forEach((marker) => {
-            marker.remove()
-        })
+export const clearMapAllMarkers = () => {
+    markerMap.forEach((marker) => {
+        marker.remove()
+    })
+    markerMap.clear()
+}
+
+const markerMap = new Map<string, mapboxgl.Marker>()
+
+export const clearMarkerByNodeKey = (nodeKey: string) => {
+    const marker = markerMap.get(nodeKey)
+    if (marker) {
+        marker.remove()
+        markerMap.delete(nodeKey)
     }
 }
 
-export const addMapMarker = (map: mapboxgl.Map, coords: [number, number], options?: mapboxgl.MarkerOptions): void => {
+export const addMapMarker = (
+    map: mapboxgl.Map,
+    coords: [number, number],
+    nodeKey: string,
+    options?: mapboxgl.MarkerOptions
+) => {
+    if (!map || !map.getCanvas() || !coords || coords.length < 2 || !nodeKey) return
 
-    if (!map || !map.getCanvas() || !coords || coords.length < 2) return
+    clearMarkerByNodeKey(nodeKey)
 
     const marker = new mapboxgl.Marker(options)
         .setLngLat([coords[0], coords[1]])
         .addTo(map)
+
+    markerMap.set(nodeKey, marker)
 }
 
-export const pickCoordsFromMap = (map: mapboxgl.Map, option?: mapboxgl.MarkerOptions, callback?: (marker: mapboxgl.Marker) => void): (() => void) => {
+export const pickCoordsFromMap = (
+    map: mapboxgl.Map,
+    nodeKey: string,
+    option?: mapboxgl.MarkerOptions,
+    callback?: (marker: mapboxgl.Marker) => void
+): (() => void) => {
+
     if (map.getCanvas()) map.getCanvas().style.cursor = 'crosshair'
 
     const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
         if (map.getCanvas()) map.getCanvas().style.cursor = ''
 
+        const existingMarker = markerMap.get(nodeKey)
+        if (existingMarker) {
+            existingMarker.remove()
+            markerMap.delete(nodeKey)
+        }
+
         const marker = new mapboxgl.Marker({ ...option, anchor: 'center' })
             .setLngLat(e.lngLat)
             .addTo(map)
+
+        markerMap.set(nodeKey, marker)
 
         callback && callback(marker)
     }
@@ -71,6 +101,12 @@ export const pickCoordsFromMap = (map: mapboxgl.Map, option?: mapboxgl.MarkerOpt
     return () => {
         map.off('click', handleMapClick)
         if (map.getCanvas()) map.getCanvas().style.cursor = ''
+
+        const marker = markerMap.get(nodeKey)
+        if (marker) {
+            marker.remove()
+            markerMap.delete(nodeKey)
+        }
     }
 }
 
@@ -208,19 +244,19 @@ export const debounce = <F extends (...args: any[]) => any>(
     func: F,
     delay: number
 ): (...args: Parameters<F>) => Promise<ReturnType<F>> => {
-    let timeoutId: NodeJS.Timeout | null = null;
+    let timeoutId: NodeJS.Timeout | null = null
 
     return (...args: Parameters<F>) => {
         if (timeoutId) {
-            clearTimeout(timeoutId);
+            clearTimeout(timeoutId)
         }
 
         return new Promise<ReturnType<F>>((resolve) => {
             timeoutId = setTimeout(() => {
-                const result = func(...args);
-                timeoutId = null;
-                resolve(result);
-            }, delay);
-        });
-    };
-};
+                const result = func(...args)
+                timeoutId = null
+                resolve(result)
+            }, delay)
+        })
+    }
+}

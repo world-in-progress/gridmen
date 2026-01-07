@@ -1,24 +1,30 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import * as api from '../noodle/apis'
 import { SchemaData } from '../schema/types'
 import { Input } from '@/components/ui/input'
+import { ResourceNode } from '../scene/scene'
 import { Button } from '@/components/ui/button'
+import { IResourceNode } from '../scene/iscene'
 import { IViewContext } from '@/views/IViewContext'
 import { Separator } from '@/components/ui/separator'
-import { Save, SquaresIntersect } from 'lucide-react'
+import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, clearMapMarkers, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
-import { IResourceNode } from '../scene/iscene'
+import { addMapMarker, addMapPatchBounds, clearMapAllMarkers, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
 
 interface PatchCreationProps {
     node: IResourceNode
     context: IViewContext
 }
 
+interface Schema extends SchemaData {
+    nodeKey: string
+}
+
 interface PageContext {
     name: string
-    schema: SchemaData | null
+    schema: Schema | null
     originBounds: [number, number, number, number] | null       // EPSG: 4326
     adjustedBounds: [number, number, number, number] | null     // EPSG: 4326
     inputBounds: [number, number, number, number] | null        // EPSG: schema
@@ -49,6 +55,15 @@ export default function PatchCreation({
     const map = mapContext.map!
     const drawInstance = mapContext.drawInstance!
 
+    const pageContext = useRef<PageContext>({
+        name: '',
+        schema: null,
+        originBounds: null,
+        adjustedBounds: null,
+        inputBounds: null,
+        hasBounds: false,
+    })
+
     const [isDrawingBounds, setIsDrawingBounds] = useState(false)
     const [generalMessage, setGeneralMessage] = useState<string | null>(null)
     const [convertCoordinate, setConvertCoordinate] = useState<[number, number, number, number] | null>(null)
@@ -63,16 +78,8 @@ export default function PatchCreation({
         bounds: false,
     })
 
-    const schemaMarkerPoint = useRef<[number, number]>([0, 0])
     const drawCoordinates = useRef<RectangleCoordinates | null>(null)
-    const pageContext = useRef<PageContext>({
-        name: '',
-        schema: null,
-        originBounds: null,
-        adjustedBounds: null,
-        inputBounds: null,
-        hasBounds: false,
-    })
+
 
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
@@ -90,12 +97,33 @@ export default function PatchCreation({
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
-    const formatSingleValue = (value: number): string => value.toFixed(6)
+    useEffect(() => {
+        loadContext()
 
-    const handleSetName = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.name = e.target.value
+        return () => {
+            unloadContext()
+        }
+    }, [])
+
+    const loadContext = async () => {
+        if ((node as ResourceNode).context !== undefined) {
+            pageContext.current = { ...(node as ResourceNode).context }
+        } else {
+            pageContext.current.name = node.name.split('.')[0]
+        }
+
         triggerRepaint()
     }
+
+    const unloadContext = () => {
+        (node as ResourceNode).context = {
+            ...pageContext.current
+        }
+
+        return
+    }
+
+    const formatSingleValue = (value: number): string => value.toFixed(6)
 
     const handleSchemaNodeDragOver = (e: React.DragEvent) => {
         e.preventDefault()
@@ -104,13 +132,46 @@ export default function PatchCreation({
     const handleSchemaNodeDragLeave = (e: React.DragEvent) => {
         e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
     }
-    const handleSchemaNodeDrop = (e: React.DragEvent) => {
+    const handleSchemaNodeDrop = async (e: React.DragEvent) => {
         e.preventDefault()
         e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
-        const schemaName = e.dataTransfer.getData('text/plain')
-        if (schemaName) {
-            console.log('Dropped schema:', schemaName)
+        const raw = e.dataTransfer.getData('application/gridmen-node') || e.dataTransfer.getData('text/plain')
+
+        const payload = JSON.parse(raw) as {
+            nodeKey: string
+            templateName: string
+            sourceTreeTitle: string
         }
+
+        const { nodeKey, templateName, sourceTreeTitle } = payload
+        console.log('schema dropped payload:', { nodeKey, templateName, sourceTreeTitle })
+
+        if (!nodeKey || templateName !== 'schema') {
+            toast.error('Please drag a schema node')
+            return
+        } else {
+            const schemaNode = await api.node.getNodeMountParams(nodeKey, sourceTreeTitle === 'Public' ? true : false)
+            console.log('Schema Info:', schemaNode)
+
+            const { template_name, mount_params } = schemaNode
+            console.log(template_name) // "schema"
+            console.log(mount_params)  // 字符串："{\"name\":\"8\",...}"
+
+            const schemaMountParams = JSON.parse(mount_params) as SchemaData
+            const schema: Schema = {
+                ...schemaMountParams,
+                nodeKey: nodeKey
+            }
+
+            console.log(schemaMountParams.name)
+            console.log(schemaMountParams.epsg)
+            console.log(schemaMountParams.alignment_origin)
+            console.log(schemaMountParams.grid_info)
+
+            pageContext.current.schema = schema
+            console.log('Selected Schema:', pageContext.current.schema)
+        }
+        triggerRepaint()
     }
 
     const handleSetEPSG = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,12 +250,12 @@ export default function PatchCreation({
             return
         }
 
-        if (inputBounds && inputBounds.length === 4) {
-            clearMapMarkers()
-            addMapMarker(map, schemaMarkerPoint.current)
+        if (inputBounds && inputBounds.length === 4 && pageContext.current.schema) {
+            clearMapAllMarkers()
+            addMapMarker(map, pageContext.current.schema.alignment_origin, pageContext.current.schema.nodeKey)
             clearDrawPatchBounds()
             clearGridLines()
-            const inputBoundsOn4326 = await covertBoundsTo4326(inputBounds!, pageContext.current.schema!.epsg)
+            const inputBoundsOn4326 = await covertBoundsTo4326(inputBounds!, pageContext.current.schema.epsg)
 
             if (!inputBoundsOn4326) {
                 toast.error('Failed to convert bounds to EPSG:4326')
@@ -220,6 +281,13 @@ export default function PatchCreation({
 
     const handleSubmit = () => {
         console.log('handleSubmit')
+    }
+
+    const deleteDragSchema = () => {
+        pageContext.current.schema = null
+        console.log('Deleted dragged schema', pageContext.current.schema)
+
+        triggerRepaint()
     }
 
     return (
@@ -258,7 +326,7 @@ export default function PatchCreation({
                 </div>
             </div>
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-2/3 mx-auto mt-4 mb-4 space-y-4 pb-4'>
+                <div className='w-2/3 mx-auto mt-4 mb-4 space-y-2 pb-4'>
                     {/* ----------- */}
                     {/* Schema Name */}
                     {/* ----------- */}
@@ -270,10 +338,8 @@ export default function PatchCreation({
                             <Input
                                 id='name'
                                 value={pageContext.current.name}
-                                onChange={handleSetName}
-                                placeholder={'Enter new patch name'}
-                                className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''
-                                    }`}
+                                readOnly={true}
+                                className={`w-full text-black border-gray-300 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : ''}`}
                             />
                         </div>
                     </div>
@@ -289,16 +355,26 @@ export default function PatchCreation({
                                 onDragOver={handleSchemaNodeDragOver}
                                 onDragLeave={handleSchemaNodeDragLeave}
                                 onDrop={handleSchemaNodeDrop}
-                                className='border-2 border-dashed border-gray-300 rounded-lg p-6 text-center transition-colors cursor-pointer hover:border-gray-400'
+                                className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-blue-50/50 group'
                             >
                                 {pageContext.current.schema?.name ? (
-                                    <div className='text-black'>
-                                        <div className='font-medium'>{pageContext.current.schema.name}</div>
-                                        <div className='text-sm text-gray-500 mt-1'>Drag to change</div>
+                                    <div className='space-y-2'>
+                                        <div className='inline-flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-200 rounded-md shadow-md transition-all duration-200 group-hover:shadow-md group-hover:border-red-300'>
+                                            <MapPin className='w-4 h-4 text-red-500' fill='none' stroke='currentColor' viewBox='0 0 24 24' />
+                                            <span className='font-semibold text-black text-md'>{pageContext.current.schema.name}</span>
+                                            <X className='w-4 h-4 text-gray-400 cursor-pointer hover:text-gray-600' onClick={deleteDragSchema} />
+                                        </div>
+                                        <div className='flex items-center justify-center gap-2 text-sm text-gray-500'>
+                                            <ArrowRightLeft className='w-4 h-4' />
+                                            <span >Drag to change schema</span>
+                                        </div>
                                     </div>
                                 ) : (
-                                    <div className='text-gray-500'>
-                                        <div className='font-medium'>Drag a schema here</div>
+                                    <div className='space-y-2 py-1'>
+                                        <div className='inline-flex items-center justify-center w-12 h-12 bg-gray-100 rounded-full mb-2 group-hover:bg-blue-100 transition-colors'>
+                                            <Upload className='w-6 h-6 text-gray-400 group-hover:text-blue-500 transition-colors' />
+                                        </div>
+                                        <div className='font-medium text-gray-500 text-sm'>Drag a schema here</div>
                                     </div>
                                 )}
                             </div>
@@ -309,7 +385,7 @@ export default function PatchCreation({
                     {/* --------- */}
                     <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
                         <h2 className='text-black text-lg font-semibold mb-2'>
-                            EPSG Code
+                            Schema EPSG Code
                         </h2>
                         <div className='space-y-2'>
                             <Input
@@ -325,12 +401,12 @@ export default function PatchCreation({
                     {/* Patch Bounds */}
                     {/* --------- */}
                     <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
-                        <h2 className='text-lg font-semibold mb-2'>
+                        <h2 className='text-black text-lg font-semibold mb-2'>
                             Patch Bounds
                         </h2>
                         <div className='space-y-2'>
                             <div className='p-2 bg-white rounded-md shadow-sm border border-gray-200'>
-                                <div className='font-bold text-md mb-2'>
+                                <div className='text-black font-semibold text-sm mb-2'>
                                     Method One: Draw to generate
                                 </div>
                                 <button
@@ -363,8 +439,8 @@ export default function PatchCreation({
                             </div>
                             <Separator className='h-px mb-2 bg-gray-300' />
                             <div className=' p-2 bg-white rounded-md shadow-sm border border-gray-200'>
-                                <div className='mb-2 font-bold text-md'>
-                                    Method Two: Input parameters to generate
+                                <div className='text-black font-semibold text-sm mb-2'>
+                                    Method Two: Input to generate
                                 </div>
                                 <div className='grid grid-cols-3 mb-2 gap-1 text-xs'>
                                     {/* Top Left Corner */}
@@ -381,7 +457,7 @@ export default function PatchCreation({
                                             type='number'
                                             value={pageContext.current.inputBounds?.[3] ?? ''}
                                             onChange={(e) => handleSetInputBounds(e, 3)}
-                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            className='w-full text-center text-black border border-gray-500 rounded-sm h-[22px]'
                                             placeholder='Enter max Y'
                                             step='any'
                                         />
@@ -400,7 +476,7 @@ export default function PatchCreation({
                                             type='number'
                                             value={pageContext.current.inputBounds?.[0] ?? ''}
                                             onChange={(e) => handleSetInputBounds(e, 0)}
-                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            className='w-full text-center text-black border border-gray-500 rounded-sm h-[22px]'
                                             placeholder='Enter min X'
                                             step='any'
                                         />
@@ -409,7 +485,7 @@ export default function PatchCreation({
                                     <div className='text-center'>
                                         <span className='font-bold text-[#FF8F2E] text-xl'>Center</span>
                                         <div
-                                            className='text-[10px] mt-1'
+                                            className='text-[10px] text-black mt-1'
                                         >
                                             {pageContext.current.inputBounds
                                                 ? `${formatSingleValue(
@@ -430,7 +506,7 @@ export default function PatchCreation({
                                             type='number'
                                             value={pageContext.current.inputBounds?.[2] ?? ''}
                                             onChange={(e) => handleSetInputBounds(e, 2)}
-                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            className='w-full text-center text-black border border-gray-500 rounded-sm h-[22px]'
                                             placeholder='Enter max X'
                                             step='any'
                                         />
@@ -449,7 +525,7 @@ export default function PatchCreation({
                                             type='number'
                                             value={pageContext.current.inputBounds?.[1] ?? ''}
                                             onChange={(e) => handleSetInputBounds(e, 1)}
-                                            className='w-full text-center border border-gray-500 rounded-sm h-[22px]'
+                                            className='w-full text-center text-black border border-gray-500 rounded-sm h-[22px]'
                                             placeholder='Enter min Y'
                                             step='any'
                                         />
@@ -464,7 +540,7 @@ export default function PatchCreation({
                                     className='w-full py-2 px-4 rounded-md font-medium transition-colors cursor-pointer bg-blue-500 text-white hover:bg-blue-600'
                                     onClick={drawBoundsByParams}
                                 >
-                                    Click to adjust and draw bounds
+                                    Click to draw bounds
                                 </button>
                             </div>
                         </div>

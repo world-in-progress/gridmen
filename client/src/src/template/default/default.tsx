@@ -1,13 +1,10 @@
 import { toast } from 'sonner'
 import * as api from '../noodle/apis'
-import DefaultEdit from "./defaultEdit"
+import DefaultPage from "./defaultPage"
 import { ITemplate } from "../iTemplate"
-import DefaultCheck from "./defaultCheck"
-import { ResourceNode, ResourceTree } from '../scene/scene'
-import DefaultCreation from "./defaultCreation"
 import { IResourceNode } from "../scene/iscene"
-import { IViewContext } from "@/views/IViewContext"
-import { Check, Delete, Edit, Edit3, FilePlusCorner, FolderPlus, Info, MapPinPlus } from "lucide-react"
+import { ResourceNode, ResourceTree } from '../scene/scene'
+import { Delete, FilePlusCorner, FolderPlus } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 
 enum DefaultMenuItem {
@@ -33,27 +30,27 @@ export default class DefaultTemplate implements ITemplate {
         }
     }
 
-    static checkMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
-        return () => DefaultCheck()
+    static checkMapView(): Function {
+        return () => DefaultPage()
     }
 
-    static creationMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
-        return () => DefaultCreation()
+    static creationMapView(): Function {
+        return () => DefaultPage()
     }
 
-    static editMapView(nodeSelf: IResourceNode, context: IViewContext): Function {
-        return () => DefaultEdit()
+    static editMapView(): Function {
+        return () => DefaultPage()
     }
 
-    static checkTableView(nodeSelf: IResourceNode, context: IViewContext): Function {
+    static checkTableView(): Function {
         return () => null
     }
 
-    static creationTableView(nodeSelf: IResourceNode, context: IViewContext): Function {
+    static creationTableView(): Function {
         return () => null
     }
 
-    static editTableView(nodeSelf: IResourceNode, context: IViewContext): Function {
+    static editTableView(): Function {
         return () => null
     }
 

@@ -17,7 +17,12 @@ interface ToolPanelProps {
     selectedNode?: IResourceNode | null
 }
 
-export default function ToolPanel({ viewModels, mapContainer, templateName = 'default', selectedNode = null }: ToolPanelProps) {
+export default function ToolPanel({
+    viewModels,
+    mapContainer,
+    templateName = 'default',
+    selectedNode = null
+}: ToolPanelProps) {
     const activeTab = useToolPanelStore((s) => s.activeTab)
 
     if (!viewModels) {
@@ -59,6 +64,10 @@ export default function ToolPanel({ viewModels, mapContainer, templateName = 'de
             : activeTab === 'check'
                 ? (CheckComponent || CreateComponent)
                 : CreateComponent
+
+
+    console.log('ToolPanel Render', { activeTab, ActiveComponent })
+    console.log('ToolPanel Render', { selectedNode })
 
     return (
         <div className="flex flex-col h-full w-full bg-gray-900">
