@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import * as api from '../noodle/apis'
 import { SchemaData } from '../schema/types'
 import { Input } from '@/components/ui/input'
-import { ResourceNode } from '../scene/scene'
+import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Button } from '@/components/ui/button'
 import { IResourceNode } from '../scene/iscene'
 import { IViewContext } from '@/views/IViewContext'
@@ -11,7 +11,8 @@ import { Separator } from '@/components/ui/separator'
 import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, clearMapAllMarkers, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { addMapMarker, addMapPatchBounds, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { PatchData } from './types'
 
 interface PatchCreationProps {
     node: IResourceNode
@@ -19,7 +20,7 @@ interface PatchCreationProps {
 }
 
 interface Schema extends SchemaData {
-    nodeKey: string
+    schemaNodeKey: string
 }
 
 interface PageContext {
@@ -39,12 +40,59 @@ interface RectangleCoordinates {
     center: [number, number];
 }
 
+interface FormErrors {
+    name: boolean
+    bounds: boolean
+}
+
+interface ValidationResult {
+    isValid: boolean
+    errors: FormErrors
+    generalError: string | null
+}
+
 const patchTips = [
     { tip1: 'Fill in the name of the Schema and the EPSG code.' },
     { tip2: 'Description is optional.' },
     { tip3: 'Click the button to draw and obtain or manually fill in the coordinates of the reference point.' },
     { tip4: 'Set the grid size for each level.' },
 ]
+
+const validatePatchForm = (
+    data: {
+        name: string
+        bounds: [number, number, number, number]
+    }
+): ValidationResult => {
+    const errors = {
+        name: false,
+        description: false,
+        bounds: false
+    }
+
+    let generalError: string | null = null
+
+    // Validate name
+    if (!data.name.trim()) {
+        errors.name = true
+        generalError = 'Please enter patch name'
+        return { isValid: false, errors, generalError }
+    }
+
+    // Validate bounds
+    if (!data.bounds) {
+        errors.bounds = true
+        generalError = 'Please draw patch bounds'
+        return { isValid: false, errors, generalError }
+    } else {
+        if (data.bounds[0] >= data.bounds[2] || data.bounds[1] >= data.bounds[3]) {
+            errors.bounds = true
+            generalError = 'Please draw patch bounds correctly'
+            return { isValid: false, errors, generalError }
+        }
+    }
+    return { isValid: true, errors, generalError }
+}
 
 export default function PatchCreation({
     node,
@@ -70,16 +118,15 @@ export default function PatchCreation({
     const [adjustedCoordinate, setAdjustedCoordinate] = useState<[number, number, number, number] | null>(null)
     const [formErrors, setFormErrors] = useState<{
         name: boolean
-        schema: boolean
         bounds: boolean
     }>({
         name: false,
-        schema: false,
         bounds: false,
     })
 
     const drawCoordinates = useRef<RectangleCoordinates | null>(null)
 
+    const tempSchemaKeyRef = useRef<string | null>(null)
 
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
@@ -143,45 +190,27 @@ export default function PatchCreation({
             sourceTreeTitle: string
         }
 
-        const { nodeKey, templateName, sourceTreeTitle } = payload
-        console.log('schema dropped payload:', { nodeKey, templateName, sourceTreeTitle })
+        const { nodeKey: dragNodeKey, templateName, sourceTreeTitle } = payload
 
-        if (!nodeKey || templateName !== 'schema') {
+        if (!dragNodeKey || templateName !== 'schema') {
             toast.error('Please drag a schema node')
             return
         } else {
-            const schemaNode = await api.node.getNodeMountParams(nodeKey, sourceTreeTitle === 'Public' ? true : false)
-            console.log('Schema Info:', schemaNode)
-
-            const { template_name, mount_params } = schemaNode
-            console.log(template_name) // "schema"
-            console.log(mount_params)  // 字符串："{\"name\":\"8\",...}"
-
+            const schemaNodeParams = await api.node.getNodeParams(dragNodeKey, sourceTreeTitle === 'Public' ? true : false)
+            const { template_name, mount_params } = schemaNodeParams
             const schemaMountParams = JSON.parse(mount_params) as SchemaData
             const schema: Schema = {
                 ...schemaMountParams,
-                nodeKey: nodeKey
+                schemaNodeKey: dragNodeKey
             }
 
-            console.log(schemaMountParams.name)
-            console.log(schemaMountParams.epsg)
-            console.log(schemaMountParams.alignment_origin)
-            console.log(schemaMountParams.grid_info)
+            clearMarkerByNodeKey(tempSchemaKeyRef.current!)
+            addMapMarker(map, schema.alignment_origin, schema.schemaNodeKey)
+            tempSchemaKeyRef.current = schema.schemaNodeKey
 
             pageContext.current.schema = schema
-            console.log('Selected Schema:', pageContext.current.schema)
         }
         triggerRepaint()
-    }
-
-    const handleSetEPSG = (e: React.ChangeEvent<HTMLInputElement>) => {
-        pageContext.current.schema!.epsg = parseInt(e.target.value)
-        updateCoords()
-        triggerRepaint()
-    }
-
-    const updateCoords = async () => {
-        console.log('updateCoords')
     }
 
     const handleDrawBounds = () => {
@@ -214,6 +243,13 @@ export default function PatchCreation({
 
     const adjustCoords = () => {
         console.log('adjustCoords')
+        pageContext.current.adjustedBounds = [
+            drawCoordinates.current!.southWest[0],
+            drawCoordinates.current!.southWest[1],
+            drawCoordinates.current!.northEast[0],
+            drawCoordinates.current!.northEast[1],
+        ]
+        pageContext.current.hasBounds = true
     }
 
     const clearDrawPatchBounds = () => {
@@ -244,20 +280,24 @@ export default function PatchCreation({
     }
 
     const drawBoundsByParams = async () => {
-        const inputBounds = pageContext.current.inputBounds
+        console.log('1')
         if (pageContext.current.hasBounds) {
+            console.log('2')
             toast.info('Map bounds have been adjusted')
             return
         }
 
-        if (inputBounds && inputBounds.length === 4 && pageContext.current.schema) {
+        if (pageContext.current.inputBounds && pageContext.current.inputBounds.length === 4 && pageContext.current.schema) {
+            console.log('3')
+            console.log('inputBounds', pageContext.current.inputBounds)
             clearMapAllMarkers()
-            addMapMarker(map, pageContext.current.schema.alignment_origin, pageContext.current.schema.nodeKey)
+            addMapMarker(map, pageContext.current.schema.alignment_origin, pageContext.current.schema.schemaNodeKey)
             clearDrawPatchBounds()
             clearGridLines()
-            const inputBoundsOn4326 = await covertBoundsTo4326(inputBounds!, pageContext.current.schema.epsg)
+            const inputBoundsOn4326 = await covertBoundsTo4326(pageContext.current.inputBounds!, pageContext.current.schema.epsg)
 
             if (!inputBoundsOn4326) {
+                console.log('4')
                 toast.error('Failed to convert bounds to EPSG:4326')
                 return
             }
@@ -269,7 +309,9 @@ export default function PatchCreation({
                 northWest: [inputBoundsOn4326[0], inputBoundsOn4326[3]],
                 center: [(inputBoundsOn4326[0] + inputBoundsOn4326[2]) / 2, (inputBoundsOn4326[1] + inputBoundsOn4326[3]) / 2],
             }
+
             adjustCoords()
+
             addMapPatchBounds(map, inputBoundsOn4326, '4326')
         }
     }
@@ -279,11 +321,55 @@ export default function PatchCreation({
         return `[${coord[0].toFixed(6)}, ${coord[1].toFixed(6)}]`
     }
 
-    const handleSubmit = () => {
+    const handleSubmit = async (e: React.FormEvent) => {
         console.log('handleSubmit')
+        e.preventDefault()
+
+        const validation = validatePatchForm({
+            name: pageContext.current.name!,
+            bounds: pageContext.current.adjustedBounds!
+        })
+
+        if (!validation.isValid) {
+            setFormErrors(validation.errors)
+            setGeneralMessage(validation.generalError)
+            return
+        }
+
+        const patchData: PatchData = {
+            name: pageContext.current.name,
+            bounds: pageContext.current.adjustedBounds!,
+        }
+
+        setGeneralMessage('Submitting data...')
+
+        try {
+            await api.node.mountNode({
+                node_key: node.key,
+                template_name: 'patch',
+                mount_params_string: JSON.stringify(patchData)
+            })
+
+            // TODO: 清除Marker和Bounds
+            clearMarkerByNodeKey(node.key)
+
+            node.isTemp = false
+                ; (node as ResourceNode).tree.tempNodeExist = false
+                ; (node.tree as ResourceTree).selectedNode = null
+
+            setGeneralMessage('Created successfully')
+            await (node.tree as ResourceTree).refresh()
+            toast.success('Patch Created successfully')
+
+        } catch (error) {
+            setGeneralMessage(`Failed to create patch: ${error}`)
+            toast.error(`Failed to create patch: ${error}`)
+        }
     }
 
     const deleteDragSchema = () => {
+        clearMarkerByNodeKey(tempSchemaKeyRef.current!)
+        tempSchemaKeyRef.current = null
         pageContext.current.schema = null
         console.log('Deleted dragged schema', pageContext.current.schema)
 
@@ -326,7 +412,7 @@ export default function PatchCreation({
                 </div>
             </div>
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-2/3 mx-auto mt-4 mb-4 space-y-2 pb-4'>
+                <div className='w-full mx-auto space-y-2 px-6 pt-2 pb-4'>
                     {/* ----------- */}
                     {/* Schema Name */}
                     {/* ----------- */}
@@ -390,10 +476,10 @@ export default function PatchCreation({
                         <div className='space-y-2'>
                             <Input
                                 id='epsg'
-                                placeholder={'Enter EPSG code (e.g. 4326)'}
-                                className={`text-black w-full border-gray-300 ${formErrors.schema ? 'border-red-500 focus:ring-red-500' : ''}`}
+                                placeholder={'Get EPSG Code From Schema'}
+                                className='text-black w-full border-gray-300 '
                                 value={pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''}
-                                onChange={handleSetEPSG}
+                                readOnly={true}
                             />
                         </div>
                     </div>
@@ -440,7 +526,7 @@ export default function PatchCreation({
                             <Separator className='h-px mb-2 bg-gray-300' />
                             <div className=' p-2 bg-white rounded-md shadow-sm border border-gray-200'>
                                 <div className='text-black font-semibold text-sm mb-2'>
-                                    Method Two: Input to generate
+                                    Method Two: Input parameters to generate
                                 </div>
                                 <div className='grid grid-cols-3 mb-2 gap-1 text-xs'>
                                     {/* Top Left Corner */}
@@ -540,7 +626,7 @@ export default function PatchCreation({
                                     className='w-full py-2 px-4 rounded-md font-medium transition-colors cursor-pointer bg-blue-500 text-white hover:bg-blue-600'
                                     onClick={drawBoundsByParams}
                                 >
-                                    Click to draw bounds
+                                    Click to adjust and draw bounds
                                 </button>
                             </div>
                         </div>

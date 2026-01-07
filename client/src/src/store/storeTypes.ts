@@ -27,12 +27,13 @@ export interface Layer {
     children?: Layer[]
     opacity?: number
     template?: string
+    node: ResourceNode | null
 }
 
 export interface LayerStore {
     layers: Layer[]
     setLayers: (next: Layer[] | ((prev: Layer[]) => Layer[])) => void
-    addSchemaLayerToResourceNode: (node: ResourceNode) => void
+    addNodeToLayerGroup: (node: ResourceNode) => void
 }
 
 export type ToolPanelTab = 'create' | 'check' | 'edit'

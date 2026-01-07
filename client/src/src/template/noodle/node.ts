@@ -75,8 +75,6 @@ export const mountNode = async ({ node_key, template_name, mount_params_string }
         node_key = `${ipPrefix}::${node_key}`
     }
 
-    console.log(node_key, template_name, mount_params_string)
-
     const baseUrl = getApiBaseUrl(leadIP || false)
     const url = `${baseUrl}${API_PREFIX}/mount`
 
@@ -173,7 +171,7 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
     }
 }
 
-export const getNodeMountParams = async (node_key: string, isRemote: boolean) => {
+export const getNodeParams = async (node_key: string, isRemote: boolean) => {
     const baseUrl = getApiBaseUrl(isRemote)
     const url = `${baseUrl}${API_PREFIX}/mount_params?node_key=${node_key}`
 

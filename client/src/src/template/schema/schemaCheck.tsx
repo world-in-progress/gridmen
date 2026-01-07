@@ -2,7 +2,7 @@ import React, { useEffect, useReducer } from 'react'
 import { IViewContext } from '@/views/IViewContext'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { IResourceNode } from '../scene/iscene'
-import { addMapMarker } from '@/utils/utils'
+import { addMapMarker, clearMarkerByNodeKey } from '@/utils/utils'
 import { ResourceNode } from '../scene/scene'
 import * as api from '@/template/noodle/apis'
 import { SchemaData } from './types'
@@ -21,31 +21,49 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
     useEffect(() => {
         loadContext()
 
-        return () => {
-            unloadContext()
-        }
+        return () => unloadContext()
     }, [])
 
     const loadContext = async () => {
-        if ((node as ResourceNode).mountParams === undefined) {
-            const schemaNode = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+        const resourceNode = node as ResourceNode
 
-            const { template_name, mount_params } = schemaNode
+        // Normalize mount params into SchemaData regardless of who set mountParams.
+        let schemaData: SchemaData | null = null
+        const existing = resourceNode.mountParams as any
 
-            const schemaData = JSON.parse(mount_params) as SchemaData
-
-            (node as ResourceNode).mountParams = schemaData
-
-            addMapMarker(map, schemaData.alignment_origin, node.key)
+        if (!existing) {
+            const schemaNode = await api.node.getNodeParams(node.key, resourceNode.tree.leadIP !== undefined ? true : false)
+            const parsed = JSON.parse(schemaNode.mount_params) as SchemaData
+            resourceNode.mountParams = parsed
+            schemaData = parsed
+        } else if (typeof existing === 'object' && typeof existing.mount_params === 'string') {
+            // Some callers store the raw response from getNodeParams.
+            schemaData = JSON.parse(existing.mount_params) as SchemaData
+            resourceNode.mountParams = schemaData
+        } else {
+            // Assume it's already SchemaData-compatible.
+            schemaData = existing as SchemaData
         }
 
+        if (schemaData) {
+            addMapMarker(map, schemaData.alignment_origin, node.key, { color: 'red' })
+
+            // Register cleanup so layer.node?.close() can clear drawings.
+            resourceNode.context = {
+                ...(resourceNode.context ?? {}),
+                __cleanup: {
+                    ...((resourceNode.context as any)?.__cleanup ?? {}),
+                    marker: () => clearMarkerByNodeKey(node.key),
+                },
+            }
+        }
 
         triggerRepaint()
     }
 
 
     const unloadContext = () => {
-
+        // cleanup is handled by node.close() when the layer is removed
     }
 
     return (

@@ -45,6 +45,7 @@ export const clearMapAllMarkers = () => {
 const markerMap = new Map<string, mapboxgl.Marker>()
 
 export const clearMarkerByNodeKey = (nodeKey: string) => {
+    console.log('clearMarkerByNodeKey', nodeKey)
     const marker = markerMap.get(nodeKey)
     if (marker) {
         marker.remove()

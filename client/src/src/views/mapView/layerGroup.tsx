@@ -1,9 +1,10 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin, Square } from "lucide-react"
+import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin, Square, MapPinned, PencilRuler } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/utils/utils"
 import { useLayerStore } from "@/store/storeSet"
+import { ResourceTree } from "@/template/scene/scene"
 import type { Layer } from "@/store/storeTypes"
 import type { ResourceNode } from "@/template/scene/scene"
 
@@ -37,6 +38,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
         setLayers((prev) => {
             const updateLayer = (layers: Layer[]): Layer[] => {
                 return layers.map((layer) => {
+
                     if (layer.id === id) {
                         return { ...layer, visible: !layer.visible }
                     }
@@ -71,30 +73,57 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
         return { layers: newLayers, removedLayer }
     }
 
+    const stripChildrenFromLeafLayer = (layer: Layer): Layer => {
+        if (layer.type !== 'Layer') return layer
+        const { children, ...rest } = layer
+        return rest
+    }
+
     const insertLayer = (layers: Layer[], targetId: string, newLayer: Layer, position: 'before' | 'after' | 'inside'): Layer[] => {
-        return layers.map(layer => {
-            if (layer.id === targetId) {
-                if (position === 'inside') {
+        const leafLayer = stripChildrenFromLeafLayer(newLayer)
+
+        return layers
+            .map(layer => {
+                if (layer.id === targetId && position === 'inside' && layer.type === 'group') {
                     return {
                         ...layer,
-                        children: [...(layer.children || []), newLayer]
+                        children: [...(layer.children || []), leafLayer]
                     }
                 }
-            }
-            if (layer.children) {
-                return { ...layer, children: insertLayer(layer.children, targetId, newLayer, position) }
-            }
-            return layer
-        }).flatMap((layer, index, arr) => {
-            if (layer.id === targetId) {
-                if (position === 'before') {
-                    return [newLayer, layer]
-                } else if (position === 'after') {
-                    return [layer, newLayer]
+                if (layer.children) {
+                    return { ...layer, children: insertLayer(layer.children, targetId, leafLayer, position) }
                 }
+                return layer
+            })
+            .flatMap((layer) => {
+                if (layer.id === targetId) {
+                    if (position === 'before') {
+                        return [leafLayer, layer]
+                    } else if (position === 'after') {
+                        return [layer, leafLayer]
+                    }
+                }
+                return [layer]
+            })
+    }
+
+    const triggerNodeCheck = (node: ResourceNode) => {
+        const tree = node.tree as ResourceTree
+        const handler = tree.getNodeMenuHandler()
+
+        const menuItem = (() => {
+            switch (node.template_name) {
+                case 'schema':
+                    return 'Check Schema'
+                case 'patch':
+                    return 'Check Patch'
+                default:
+                    return null
             }
-            return [layer]
-        })
+        })()
+
+        if (!menuItem) return
+        handler(node, menuItem)
     }
 
     const handleLayerDragStart = (e: React.DragEvent, layerId: string) => {
@@ -139,8 +168,12 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                 const { layers: layersAfterRemove, removedLayer } = findAndRemoveLayer(prev, layerId)
                 if (!removedLayer) return prev
 
-                const position = dropPosition || 'inside'
-                const newLayers = insertLayer(layersAfterRemove, targetLayerId, removedLayer, position)
+                const position = dropPosition || 'after'
+                const normalizedPosition = position === 'inside'
+                    ? 'inside'
+                    : position
+
+                const newLayers = insertLayer(layersAfterRemove, targetLayerId, stripChildrenFromLeafLayer(removedLayer), normalizedPosition)
                 return newLayers
             })
 
@@ -150,7 +183,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
         }
         else if (externalNodeKey) {
             const node = getResourceNodeByKey?.(externalNodeKey) as ResourceNode
-            useLayerStore.getState().addSchemaLayerToResourceNode(node)
+            triggerNodeCheck(node)
             setExpandedGroups(prev => new Set(prev).add('resource-node'))
         }
 
@@ -180,14 +213,13 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
 
         if (isGroup) {
             setDropPosition('inside')
+            return
+        }
+
+        if (y < height * 0.5) {
+            setDropPosition('before')
         } else {
-            if (y < height * 0.33) {
-                setDropPosition('before')
-            } else if (y > height * 0.67) {
-                setDropPosition('after')
-            } else {
-                setDropPosition('inside')
-            }
+            setDropPosition('after')
         }
     }
 
@@ -202,6 +234,22 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
         setDraggedLayerId(null)
         setDragOverLayerId(null)
         setDropPosition(null)
+    }
+
+    const handleDeleteLayer = (layer: Layer) => {
+        setLayers(prev => {
+            const { layers: nextLayers } = findAndRemoveLayer(prev, layer.id)
+            return nextLayers
+        })
+
+        layer.node?.close()
+
+        setExpandedGroups(prev => {
+            if (!prev.has(layer.id)) return prev
+            const next = new Set(prev)
+            next.delete(layer.id)
+            return next
+        })
     }
 
     const renderLayer = (layer: Layer, depth = 0) => {
@@ -238,7 +286,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     onDragStart={(e) => !isResourceNode && handleLayerDragStart(e, layer.id)}
                     onDragEnd={handleDragEnd}
                     className={cn(
-                        "group flex items-center gap-0.5 px-1.5 py-1 hover:bg-white/5 cursor-pointer transition-colors relative",
+                        "group flex items-center gap-0.5 px-1.5 py-1 hover:bg-white/5 transition-colors relative",
                         depth > 0 && "ml-4",
                         isDragOver && dropPosition === 'inside' && "bg-blue-500/20 border border-blue-400 border-dashed",
                         isDragging && "opacity-50"
@@ -249,7 +297,6 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     onDragLeave={handleDragLeave}
                 >
                     {/* Expand/Collapse Icon */}
-
                     {hasChildren && (
                         <div className="w-4 h-4 flex items-center justify-center">
                             <button onClick={() => toggleExpanded(layer.id)} className="hover:bg-white/10 rounded cursor-pointer">
@@ -267,19 +314,41 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     </button>
 
                     {/* Layer Icon */}
-                    <div className="w-4 h-4 flex items-center justify-center ml-1">
+                    <div className="w-4 h-4 flex items-center justify-center">
                         {getLayerIcon(layer.template)}
                     </div>
 
                     {/* Layer Name */}
-                    <span className={cn("flex-1 text-sm truncate ml-0.5", layer.visible ? "text-gray-200" : "text-gray-500")}>
+                    <span className={cn("flex-1 text-sm truncate", layer.visible ? "text-gray-200" : "text-gray-500")}>
                         {layer.name}
                     </span>
 
                     {/* Drag Handle */}
-                    {!isResourceNode && (
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity mr-4">
-                            <GripVertical className="w-4 h-4 text-gray-500 cursor-grab active:cursor-grabbing" />
+                    {!isResourceNode && layer.visible && (
+                        <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1 mr-1">
+                            <MapPinned
+                                className="w-4 h-4 text-gray-500 cursor-pointer hover:text-sky-500"
+                                onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                }}
+                            />
+                            <PencilRuler
+                                className="w-4 h-4 text-gray-500 cursor-pointer hover:text-green-500"
+                                onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                }}
+                            />
+                            <Trash2
+                                className="w-4 h-4 text-gray-500 cursor-pointer hover:text-red-500"
+                                onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    handleDeleteLayer(layer)
+                                }}
+                            />
+                            <GripVertical className="w-4 h-4 text-gray-500 cursor-grab hover:text-gray-400 active:cursor-grabbing" />
                         </div>
                     )}
                 </div>

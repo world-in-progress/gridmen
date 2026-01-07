@@ -74,16 +74,16 @@ export default class SchemaTemplate implements ITemplate {
 
                 break
             case SchemaMenuItem.CHECK_SCHEMA: {
-                const schemaInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                     ; (node as ResourceNode).mountParams = schemaInfo
-                useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
+                useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
             case SchemaMenuItem.EDIT_SCHEMA:
                 {
-                    const schemaInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                    const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                         ; (node as ResourceNode).mountParams = schemaInfo
-                    useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
                 }
                 break
             case SchemaMenuItem.DELETE_SCHEMA:

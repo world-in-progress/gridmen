@@ -35,6 +35,8 @@ interface NodeRendererProps {
     dragSourceTreeTitle?: string
     showNewResourceInfo?: boolean
     setShowNewResourceInfo?: (v: boolean) => void
+    showNewFolderInput?: boolean
+    setShowNewFolderInput?: (v: boolean) => void
 }
 
 interface TreeRendererProps {
@@ -183,6 +185,85 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
     )
 }
 
+function FolderCreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: ResourceTree, onCreated?: () => void, onCancel?: () => void }) {
+    const [localNewFolderName, setLocalNewFolderName] = useState<string>('')
+    const newFolderInputRefLocal = useRef<HTMLInputElement>(null)
+
+    const { setSelectedNodeKey } = useSelectedNodeStore()
+
+    const handleLocalCreateFolder = async () => {
+        if (localNewFolderName.trim() === '') {
+            toast.error('Folder name cannot be empty')
+            return
+        }
+
+        try {
+            const { selectedNodeKey } = useSelectedNodeStore.getState()
+            let parentKey = selectedNodeKey ?? '.'
+
+            const selectedNode = selectedNodeKey ? resourceTree.scene.get(selectedNodeKey) : null
+            if (selectedNode && selectedNode.template_name !== 'default') {
+                parentKey = selectedNode.parent?.key ?? '.'
+            }
+
+            const newNodeKey = parentKey === '.'
+                ? `.${localNewFolderName}`
+                : `${parentKey}.${localNewFolderName}`
+
+            if (resourceTree.scene.has(newNodeKey)) {
+                toast.error('Folder already exists')
+                return
+            }
+
+            await api.node.mountNode({
+                node_key: newNodeKey,
+                template_name: '',
+                mount_params_string: ''
+            })
+
+            setSelectedNodeKey(newNodeKey)
+            setLocalNewFolderName('')
+            onCreated && onCreated()
+
+            await resourceTree.refresh()
+
+            const createdNode = resourceTree.scene.get(newNodeKey)
+            if (createdNode) {
+                await resourceTree.clickNode(createdNode)
+            }
+        } catch (err) {
+            console.error(err)
+            toast.error('Failed to create new folder')
+        }
+    }
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            handleLocalCreateFolder()
+        } else if (e.key === 'Escape') {
+            onCancel && onCancel()
+        }
+    }
+
+    return (
+        <div className={cn('flex items-center py-0.5 px-2 text-sm w-full select-none')}>
+            <div className='flex'>
+                <Plus className='w-4 h-4 -ml-0.5 mr-0.5' />
+                <Folder className='w-4 h-4 mr-2 text-gray-400' />
+            </div>
+            <Input
+                ref={newFolderInputRefLocal}
+                value={localNewFolderName}
+                onChange={e => setLocalNewFolderName(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={() => onCancel && onCancel()}
+                className="h-6 text-sm rounded-xs bg-[#3C3C3C] border-gray-600"
+                autoFocus
+            />
+        </div>
+    )
+}
+
 const NodeRenderer = ({
     node,
     resourceTree,
@@ -191,6 +272,8 @@ const NodeRenderer = ({
     dragSourceTreeTitle: sourceTreeTitle,
     showNewResourceInfo,
     setShowNewResourceInfo,
+    showNewFolderInput,
+    setShowNewFolderInput,
 }: NodeRendererProps) => {
 
     const tree = node.tree as ResourceTree
@@ -451,6 +534,12 @@ const NodeRenderer = ({
                 </div>
             )}
 
+            {showNewFolderInput && resourceTree && resourceTree.selectedNode && resourceTree.selectedNode.id === node.id && setShowNewFolderInput && (
+                <div style={{ paddingLeft: `${depth * 10}px` }}>
+                    <FolderCreationBar resourceTree={resourceTree} onCreated={() => setShowNewFolderInput(false)} onCancel={() => setShowNewFolderInput(false)} />
+                </div>
+            )}
+
             {/* Render child nodes */}
             {isFolder && tree.isNodeExpanded(node.id) && node.children && (
                 <div>
@@ -462,6 +551,10 @@ const NodeRenderer = ({
                             depth={depth + 1}
                             triggerFocus={triggerFocus}
                             dragSourceTreeTitle={sourceTreeTitle}
+                            showNewResourceInfo={showNewResourceInfo}
+                            setShowNewResourceInfo={setShowNewResourceInfo}
+                            showNewFolderInput={showNewFolderInput}
+                            setShowNewFolderInput={setShowNewFolderInput}
                         />
                     ))}
                 </div>
@@ -476,12 +569,10 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
     const [open, setOpen] = useState(false)
     const [value, setValue] = useState("")
     const [newResourceName, setNewResourceName] = useState<string>('')
-    const [newFolderName, setNewFolderName] = useState<string>('')
     const [showNewResourceInfo, setShowNewResourceInfo] = useState<boolean>(false)
     const [showNewFolderInput, setShowNewFolderInput] = useState<boolean>(false)
     const newResourceInputRef = useRef<HTMLInputElement>(null)
     const newResourceDivRef = useRef<HTMLDivElement>(null)
-    const newFolderInputRef = useRef<HTMLInputElement>(null)
     const { selectedNodeKey, setSelectedNodeKey } = useSelectedNodeStore()
 
     const handleClickTreeTitle = () => {
@@ -500,14 +591,13 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
         e.preventDefault()
         setShowNewResourceInfo(true)
         setNewResourceName('')
-        handleCancelNewFolder()
+        setShowNewFolderInput(false)
     }
 
     const handleFolderPlusClick = (e: React.MouseEvent) => {
         e.stopPropagation()
         e.preventDefault()
         setShowNewFolderInput(true)
-        setNewFolderName('')
         handleCancelNewResource()
     }
 
@@ -552,35 +642,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
         }
     }
 
-    const handleCreateNewFolder = async () => {
-        if (newFolderName.trim() === '') {
-            toast.error('Folder name cannot be empty')
-            return
-        }
-        if (resourceTree) {
-            try {
-                if (selectedNodeKey !== null) {
-                    newNodeKey = selectedNodeKey + '.' + newFolderName
-                } else {
-                    newNodeKey = '.' + newFolderName
-                }
-
-                await api.node.mountNode({
-                    node_key: newNodeKey,
-                    template_name: '',
-                    mount_params_string: ''
-                })
-
-                setNewFolderName('')
-                setShowNewFolderInput(false)
-
-                await resourceTree.refresh()
-            }
-            catch {
-                toast.error('Failed to create new folder')
-            }
-        }
-    }
 
     const handleCancelNewResource = () => {
         setNewResourceName('')
@@ -640,18 +701,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
         }
     }
 
-    const handleCancelNewFolder = () => {
-        setNewFolderName('')
-        setShowNewFolderInput(false)
-    }
-
-    const handleNewFolderKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-            handleCreateNewFolder()
-        } else if (e.key === 'Escape') {
-            handleCancelNewFolder()
-        }
-    }
 
     const handleRefreshClick = async (e: React.MouseEvent) => {
         e.stopPropagation()
@@ -659,13 +708,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
             await resourceTree.refresh()
         }
     }
-
-    useEffect(() => {
-        if (showNewFolderInput && newFolderInputRef.current) {
-            newFolderInputRef.current.focus()
-        }
-    }, [showNewFolderInput])
-
 
     const handleRootDragOver = (e: React.DragEvent) => {
         // 允许在根目录放置，但不显示高亮
@@ -700,7 +742,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
             const dragData = JSON.parse(data)
             const { nodeKey: sourceNodeKey, templateName, sourceTreeTitle: sourceTitle } = dragData
 
-            // 如果源节点是文件夹，不允许拖放
             if (templateName === 'default') {
                 toast.error('Cannot drag folders')
                 return
@@ -788,13 +829,17 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                     </Button>
                 </div>
             </div>
-            {/* If resourceTree.selectedNode is null, render creation bar at top */}
             {showNewResourceInfo && resourceTree && !resourceTree.selectedNode && (
                 <div style={{ paddingLeft: `0px` }}>
                     <CreationBar resourceTree={resourceTree} onCreated={() => setShowNewResourceInfo(false)} onCancel={() => setShowNewResourceInfo(false)} />
                 </div>
             )}
 
+            {showNewFolderInput && resourceTree && !resourceTree.selectedNode && (
+                <div style={{ paddingLeft: `0px` }}>
+                    <FolderCreationBar resourceTree={resourceTree} onCreated={() => setShowNewFolderInput(false)} onCancel={() => setShowNewFolderInput(false)} />
+                </div>
+            )}
             {resourceTree && resourceTree.root.children && Array.from(resourceTree.root.children.values()).map(childNode => (
                 <NodeRenderer
                     key={childNode.id}
@@ -805,26 +850,10 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
                     dragSourceTreeTitle={title}
                     showNewResourceInfo={showNewResourceInfo}
                     setShowNewResourceInfo={setShowNewResourceInfo}
+                    showNewFolderInput={showNewFolderInput}
+                    setShowNewFolderInput={setShowNewFolderInput}
                 />
             ))}
-            {showNewFolderInput && (
-                <div className={cn('flex items-center py-0.5 px-2 text-sm w-full select-none')}>
-                    <div className='flex'>
-                        <Plus className='w-4 h-4 mr-0.5' />
-                        <Folder className='w-4 h-4 mr-2 text-gray-400' />
-                    </div>
-                    <Input
-                        ref={newFolderInputRef}
-                        value={newFolderName}
-                        onChange={e => setNewFolderName(e.target.value)}
-                        onKeyDown={handleNewFolderKeyDown}
-                        onBlur={handleCancelNewFolder}
-                        className="h-6 text-sm rounded-xs bg-[#3C3C3C] border-gray-600"
-                        autoFocus
-                    />
-                </div>
-            )}
-            {/* creation bar rendered either at top or inside NodeRenderer for focused node */}
         </div>
     )
 }

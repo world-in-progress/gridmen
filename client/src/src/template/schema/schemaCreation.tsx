@@ -400,6 +400,7 @@ export default function SchemaCreation({
         }
 
         setGeneralMessage('Submitting data...')
+
         try {
             await api.node.mountNode({
                 node_key: node.key,
@@ -415,7 +416,7 @@ export default function SchemaCreation({
 
             setGeneralMessage('Created successfully')
             await (node.tree as ResourceTree).refresh()
-            toast.success('Created successfully')
+            toast.success('Schema Created successfully')
 
         } catch (error) {
             setGeneralMessage(`Failed to create schema: ${error}`)
@@ -459,7 +460,7 @@ export default function SchemaCreation({
                 </div>
             </div>
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-3/4 mx-auto mt-4 mb-4 space-y-2 pb-4'>
+                <div className='w-full mx-auto space-y-2 px-6 pt-2 pb-4'>
                     {/* ----------- */}
                     {/* Schema Name */}
                     {/* ----------- */}

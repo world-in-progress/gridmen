@@ -31,6 +31,17 @@ export class ResourceNode implements IResourceNode {
         this.context = undefined
         this.mountParams = undefined
     }
+
+    close(): void {
+        // Generic cleanup hook:
+        // Any view (check/create/edit) may register cleanup callbacks into node.context.__cleanup.
+        // close() will execute and clear them without knowing resource-specific details.
+        const cleanup = (this.context as any)?.__cleanup as Record<string, (() => void)>
+        for (const dispose of Object.values(cleanup)) {
+            dispose?.()
+        }
+        delete (this.context as any).__cleanup
+    }
 }
 
 interface TreeUpdateCallback {
@@ -98,19 +109,37 @@ export class ResourceTree implements IResourceTree {
         const oldChildrenMap = node.children
         node.children = new Map()
 
+        const backendChildKeys = new Set<string>()
+
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Update parent-child relationship
         if (meta.children && meta.children.length > 0) {
             for (const child of meta.children) {
+                backendChildKeys.add(child.node_key)
                 if (oldChildrenMap.has(child.node_key)) {
-                    node.children.set(child.node_key, oldChildrenMap.get(child.node_key)!)
+                    const existingChild = oldChildrenMap.get(child.node_key)!
+                    existingChild.parent = node
+                    node.children.set(child.node_key, existingChild)
                     continue // skip if child node already exists
                 }
 
                 const childNode = new ResourceNode(this, child.node_key, node, TEMPLATE_REGISTRY[child.template_name])
                 node.children.set(childNode.id, childNode) // Add child to the node's children map
                 this.scene.set(childNode.id, childNode) // add child node to the scene map
+            }
+        }
+
+        // Preserve in-memory temporary children that are not present in backend data
+        for (const [childKey, childNode] of oldChildrenMap) {
+            const resourceChild = childNode as ResourceNode
+            if (resourceChild.isTemp && !node.children.has(childKey)) {
+                resourceChild.parent = node
+                node.children.set(childKey, resourceChild)
+                this.scene.set(childKey, resourceChild)
+            } else if (!resourceChild.isTemp && !backendChildKeys.has(childKey)) {
+                // Drop stale non-temp nodes that no longer exist in backend
+                this.scene.delete(childKey)
             }
         }
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

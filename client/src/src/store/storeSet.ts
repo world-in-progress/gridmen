@@ -22,12 +22,20 @@ export const useTempNodeStore = create<TempNewNodeProps>((set) => ({
 }))
 
 const DEFAULT_LAYERS: Layer[] = [
+    // {
+    //     id: "base-map",
+    //     name: "Base Map",
+    //     visible: true,
+    //     type: "group",
+    //     children: [],
+    // },
     {
         id: "resource-node",
         name: "Resource Node",
         visible: true,
         type: "group",
         children: [],
+        node: null,
     },
 ]
 
@@ -38,13 +46,14 @@ export const useLayerStore = create<LayerStore>((set) => ({
             layers: typeof next === 'function' ? next(state.layers) : next,
         }))
     },
-    addSchemaLayerToResourceNode: (node: ResourceNode) => {
+    addNodeToLayerGroup: (node: ResourceNode) => {
         const nextLayer: Layer = {
             id: node.key,
             name: node.key.split('.').slice(-1)[0],
             visible: true,
             type: "Layer",
             template: node.template_name,
+            node: node,
         }
 
         const resourceGroup: Layer = {
@@ -53,6 +62,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
             visible: true,
             type: "group",
             children: [],
+            node: null,
         }
 
         set((state) => {

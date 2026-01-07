@@ -78,15 +78,15 @@ export default class PatchTemplate implements ITemplate {
                 useToolPanelStore.getState().setActiveTab('create')
                 break
             case PatchMenuItem.CHECK_PATCH: {
-                const patchInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                     ; (node as ResourceNode).mountParams = patchInfo
-                useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
+                useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
             case PatchMenuItem.EDIT_PATCH: {
-                const patchInfo = await api.node.getNodeMountParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                     ; (node as ResourceNode).mountParams = patchInfo
-                useLayerStore.getState().addSchemaLayerToResourceNode(node as ResourceNode)
+                useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
             case PatchMenuItem.DELETE_PATCH:
