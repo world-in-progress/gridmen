@@ -18,21 +18,43 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
     resource_dir.mkdir(parents=True, exist_ok=True)
     
     meta_file = resource_dir / 'patch.meta.json'
-    if not meta_file.exists():
-        default_meta = {
-            'bounds': [0.0, 0.0, 1000.0, 1000.0]  # Default bounds
-        }
-        with open(meta_file, 'w') as f:
-            json.dump(default_meta, f, indent=4)
-            
-    # Typically, a patch needs a schema. We assume it's linked or provided.
-    # For now, we'll look for a schema file in the same or parent directory, 
-    # or rely on params.
-    schema_file = params.get('schema_file') if params else None
-    if not schema_file:
-        # Fallback to a default schema location or error
-        schema_file = str(Path.cwd() / 'resource' / 'default_schema' / 'schema.json')
 
+    schema_node_key = params.get('schema_node_key') if params else None
+    schema_file = None
+    schema_data = None
+
+    if schema_node_key:
+        try:
+            schema_rel_path = schema_node_key.strip('.').replace('.', os.sep)
+            schema_file = Path.cwd() / 'resource' / schema_rel_path / 'schema.json'
+            if schema_file.exists():
+                with open(schema_file) as f:
+                    schema_data = json.load(f)
+            else:
+                print(f"Warning: Schema file {schema_file} does not exist")
+                schema_file = None
+        except Exception as e:
+            print(f"Warning: Could not load schema from {schema_node_key}: {e}")
+            schema_file = None
+    else:
+        print("No schema node key provided, using default schema values.")
+
+    if not meta_file.exists():
+        patch_name = node_key.split('.')[-1]
+        patch_bounds = params.get('bounds') if params else None
+
+        patch_meta = {
+            'name': patch_name,
+            'bounds': patch_bounds,  # Default bounds
+            'schema': schema_data
+        }
+
+        with open(meta_file, 'w') as f:
+            json.dump(patch_meta, f, indent=4)
+    
+    if not schema_file:
+        schema_file = str(Path.cwd() / 'resource' / 'default_schema' / 'schema.json')
+    
     return {
         'resource_space': str(resource_dir),
         'schema_file': schema_file

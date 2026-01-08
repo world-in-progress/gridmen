@@ -20,16 +20,28 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
     """
     name = node_key.split('.')[-1]
     resource_space = Path.cwd() / 'resource' / name / 'schema.json'
+
     if not resource_space.exists():
-        resource_space.parent.mkdir(parents=True, exist_ok=True)
-        default_info = {
-            'name': '',
-            'epsg': '',
-            'alignment_origin': [0.0, 0.0],
-            'grid_info': []
+        if params is not None:
+            print(f"Warning: Resource {resource_space} already exists. Not overwriting existing data.")
+        return {
+            'resource_space': str(resource_space)
         }
+    else:
+        resource_space.parent.mkdir(parents=True, exist_ok=True)
+
+        if params is not None:
+            schema_data = params
+        else:
+            print(f"Info: params is None for node {node_key}, using default schema values.")
+            schema_data = {
+                'name': '',
+                'epsg': '',
+                'alignment_origin': [0.0, 0.0],
+                'grid_info': []
+            }
         with open(resource_space, 'w') as f:
-            json.dump(default_info, f, indent=4)
+            json.dump(schema_data, f, indent=4)
     
     return {
         'resource_space': str(resource_space)

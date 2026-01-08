@@ -102,29 +102,29 @@ def update_schema(name: str, data: GridSchema):
         message='Project schema updated successfully'
     )
 
-@router.delete('/{name}', response_model=BaseResponse)
-def delete_schema(name: str):
-    """
-    Description
-    --
-    Delete a grid schema by name.
-    """
-    # Get Schema node key
-    node_key = f'root.topo.schemas.{name}'
+# @router.delete('/{name}', response_model=BaseResponse)
+# def delete_schema(name: str):
+#     """
+#     Description
+#     --
+#     Delete a grid schema by name.
+#     """
+#     # Get Schema node key
+#     node_key = f'root.topo.schemas.{name}'
     
-    # Check if the schema file exists
-    grid_schema_path = Path(settings.GRID_SCHEMA_DIR, name, 'schema.json')
-    if not grid_schema_path.exists():
-        raise HTTPException(status_code=404, detail='Grid schema not found')
+#     # Check if the schema file exists
+#     grid_schema_path = Path(settings.GRID_SCHEMA_DIR, name, 'schema.json')
+#     if not grid_schema_path.exists():
+#         raise HTTPException(status_code=404, detail='Grid schema not found')
     
-    try:
-        # Only unmount the node, the UNMOUNT hook will handle file deletion
-        noodle.unmount(node_key)
+#     try:
+#         # Only unmount the node, the UNMOUNT hook will handle file deletion
+#         noodle.unmount(node_key)
         
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to delete schema: {str(e)}')
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f'Failed to delete schema: {str(e)}')
     
-    return BaseResponse(
-        success=True,
-        message='Grid schema deleted successfully'
-    )
+#     return BaseResponse(
+#         success=True,
+#         message='Grid schema deleted successfully'
+#     )
