@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { Layer, LayerStore, SelectedNodeStore, SettingsProps, TempNewNodeProps, ToolPanelStore } from "./storeTypes"
+import { Layer, LayerGroupStore, LayerStore, SelectedNodeStore, SettingsProps, TempNewNodeProps, ToolPanelStore } from "./storeTypes"
 import { ResourceNode } from '@/template/scene/scene'
 
 export const DEFAULT_LEAD_IP = 'http://127.0.0.1:8001'
@@ -101,4 +101,9 @@ export const useLayerStore = create<LayerStore>((set) => ({
 export const useToolPanelStore = create<ToolPanelStore>((set) => ({
     activeTab: 'create',
     setActiveTab: (tab) => set({ activeTab: tab }),
+}))
+
+export const useLayerGroupStore = create<LayerGroupStore>((set) => ({
+    isEditMode: false,
+    setEditMode: (isEdit) => set({ isEditMode: isEdit }),
 }))

@@ -6,12 +6,14 @@ import { Input } from '@/components/ui/input'
 import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Button } from '@/components/ui/button'
 import { IResourceNode } from '../scene/iscene'
+import { useLayerGroupStore } from '@/store/storeSet'
+import { useToolPanelStore } from '@/store/storeSet'
 import { IViewContext } from '@/views/IViewContext'
 import { Separator } from '@/components/ui/separator'
 import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
 import { PatchData } from './types'
 
 interface PatchCreationProps {
@@ -176,7 +178,7 @@ export default function PatchCreation({
             const fromEPSG = '4326'
             const toEPSG = pageContext.current.schema.epsg
 
-            // const { convertedBounds, adjustedBounds, expandedBounds } = adjustPatchBounds(pageContext.current.originBounds, fromEPSG, toEPSG)
+            const { convertedBounds, adjustedBounds, expandedBounds } = adjustPatchBounds(pageContext.current.originBounds, fromEPSG, toEPSG)
         }
     }
     const formatSingleValue = (value: number): string => value.toFixed(6)
@@ -249,9 +251,6 @@ export default function PatchCreation({
     }
 
     /////////////////////////////////////////////////////
-
-
-
     const clearDrawPatchBounds = () => {
         console.log('clearDrawPatchBounds')
     }
@@ -259,7 +258,6 @@ export default function PatchCreation({
     const clearGridLines = () => {
         console.log('clearGridLines')
     }
-
     /////////////////////////////////////////////////////
 
     const covertBoundsTo4326 = async (bounds: [number, number, number, number], fromEPSG: number): Promise<[number, number, number, number] | null> => {
@@ -350,6 +348,10 @@ export default function PatchCreation({
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
+
+            // 根据 layerGroup 模式恢复 toolPanel 状态
+            const { isEditMode } = useLayerGroupStore.getState()
+            useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
 
             setGeneralMessage('Created successfully')
             await (node.tree as ResourceTree).refresh()
