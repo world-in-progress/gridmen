@@ -45,7 +45,6 @@ interface TreeRendererProps {
     triggerFocus: number
 }
 
-// CreationBar component: reused inside tree top or under focused node
 function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: ResourceTree, onCreated?: () => void, onCancel?: () => void }) {
     const [localOpen, setLocalOpen] = useState(false)
     const [localValue, setLocalValue] = useState("")
@@ -315,22 +314,22 @@ const NodeRenderer = ({
     }, [node, isFolder, setSelectedNodeKey])
 
 
-    const handleDoubleClickNode = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation()
+    // const handleDoubleClickNode = useCallback((e: React.MouseEvent) => {
+    //     e.stopPropagation()
 
-        // Clear single click timeout
-        if (clickTimeoutRef.current) {
-            clearTimeout(clickTimeoutRef.current)
-            clickTimeoutRef.current = null
-        }
+    //     // Clear single click timeout
+    //     if (clickTimeoutRef.current) {
+    //         clearTimeout(clickTimeoutRef.current)
+    //         clickTimeoutRef.current = null
+    //     }
 
-        // Prevent text selection
-        if (window.getSelection) {
-            window.getSelection()?.removeAllRanges()
-        }
+    //     // Prevent text selection
+    //     if (window.getSelection) {
+    //         window.getSelection()?.removeAllRanges()
+    //     }
 
-        (node.tree as ResourceTree).doubleClickNode(node)
-    }, [node])
+    //     (node.tree as ResourceTree).doubleClickNode(node)
+    // }, [node])
 
     const handleNodeMenu = useCallback((node: IResourceNode, menuItem: any) => {
         return (node.tree as ResourceTree).getNodeMenuHandler()(node, menuItem)
@@ -484,7 +483,7 @@ const NodeRenderer = ({
                         data-node-type={isFolder ? 'folder' : 'file'}
                         style={{ paddingLeft: `${depth * 10}px` }}
                         onClick={handleClickNode}
-                        onDoubleClick={handleDoubleClickNode}
+                        // onDoubleClick={handleDoubleClickNode}
                         draggable={!isFolder}
                         onDragStart={(e) => { handleDragStart(e) }}
                         onDragOver={(e) => { handleDragOver(e) }}

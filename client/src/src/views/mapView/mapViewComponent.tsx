@@ -4,6 +4,8 @@ import { create } from 'zustand'
 import mapboxgl from 'mapbox-gl'
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css'
+// @ts-expect-error no declare file for rectangle mode
+import DrawRectangle from 'mapbox-gl-draw-rectangle-mode'
 import ToolPanel from './toolPanel'
 import LayerGroup from './layerGroup'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -22,6 +24,7 @@ let resizer: ResizeObserver | null = null
 
 interface MapContainerProps {
     onMapLoad?: (map: mapboxgl.Map) => void
+    onDrawReady?: (draw: MapboxDraw) => void
 }
 
 const mapCanvasDebounce = (map: mapboxgl.Map, delay: number, mapRef: HTMLDivElement) => {
@@ -40,15 +43,39 @@ const useMapStore = create<MapViewContext>((set) => ({
     setDrawInstance: (drawInstance: MapboxDraw) => set({ drawInstance }),
 }))
 
-const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad }, ref) => {
+const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad, onDrawReady }, ref) => {
 
-    const isProcessingDrawEvent = false
-    const drawInstance: MapboxDraw | null = null
+    const isProcessingDrawEventRef = useRef(false)
+    const drawInstanceRef = useRef<MapboxDraw | null>(null)
 
     const initializedRef = useRef(false)
     const mapWrapperRef = useRef<HTMLDivElement>(null)
 
-    const { setMap } = useMapStore()
+    const { setMap, setDrawInstance } = useMapStore()
+
+    const handleDrawCreate = useCallback((e: any) => {
+        if (isProcessingDrawEventRef.current) return
+
+        isProcessingDrawEventRef.current = true
+        try {
+            const draw = drawInstanceRef.current
+            if (!draw) return
+
+            if (e.features && e.features.length > 0) {
+                const feature = e.features[0]
+                if (draw.getMode() === 'draw_rectangle' && feature?.geometry?.type === 'Polygon') {
+                    const coordinates = calculateRectangleCoordinates(feature)
+                    const drawCompleteEvent = new CustomEvent('rectangle-draw-complete', {
+                        detail: { coordinates }
+                    })
+                    document.dispatchEvent(drawCompleteEvent)
+                    draw.changeMode('simple_select')
+                }
+            }
+        } finally {
+            isProcessingDrawEventRef.current = false
+        }
+    }, [])
 
     // const handleDrawCreate = (e: any) => {
     //     if (isProcessingDrawEvent) return
@@ -115,6 +142,110 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
                     mapInstance.setFog({})
                 })
 
+                const drawColor = '#F06B00'
+
+                // TS 类型定义在当前 tsconfig 下无法将 MapboxDraw 视为可构造；运行时没问题
+                const MapboxDrawAny = MapboxDraw as any
+
+                const draw = new MapboxDrawAny({
+                    displayControlsDefault: false,
+                    boxSelect: false,
+                    modes: {
+                        ...MapboxDrawAny.modes,
+                        draw_rectangle: DrawRectangle
+                    },
+                    styles: [
+                        // Active point style
+                        {
+                            'id': 'gl-draw-point-active',
+                            'type': 'circle',
+                            'filter': ['all', ['==', '$type', 'Point'], ['==', 'active', 'true']],
+                            'paint': {
+                                'circle-radius': 7,
+                                'circle-color': drawColor
+                            }
+                        },
+                        // Inactive point style
+                        {
+                            'id': 'gl-draw-point',
+                            'type': 'circle',
+                            'filter': ['all', ['==', '$type', 'Point'], ['==', 'active', 'false']],
+                            'paint': {
+                                'circle-radius': 5,
+                                'circle-color': drawColor
+                            }
+                        },
+                        // Line style
+                        {
+                            'id': 'gl-draw-line',
+                            'type': 'line',
+                            'filter': ['all', ['==', '$type', 'LineString'], ['!=', 'mode', 'static']],
+                            'layout': {
+                                'line-cap': 'round',
+                                'line-join': 'round'
+                            },
+                            'paint': {
+                                'line-color': drawColor,
+                                'line-width': 2,
+                                'line-dasharray': [2, 2]
+                            }
+                        },
+                        // Polygon fill style
+                        {
+                            'id': 'gl-draw-polygon-fill',
+                            'type': 'fill',
+                            'filter': ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
+                            'paint': {
+                                'fill-color': drawColor,
+                                'fill-outline-color': drawColor,
+                                'fill-opacity': 0.1
+                            }
+                        },
+                        // Polygon outline style
+                        {
+                            'id': 'gl-draw-polygon-stroke',
+                            'type': 'line',
+                            'filter': ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
+                            'layout': {
+                                'line-cap': 'round',
+                                'line-join': 'round'
+                            },
+                            'paint': {
+                                'line-color': drawColor,
+                                'line-width': 2,
+                                'line-dasharray': [2, 2]
+                            }
+                        },
+                        // Vertex style
+                        {
+                            'id': 'gl-draw-point-mid-point',
+                            'type': 'circle',
+                            'filter': ['all', ['==', '$type', 'Point'], ['==', 'meta', 'midpoint']],
+                            'paint': {
+                                'circle-radius': 4,
+                                'circle-color': drawColor
+                            }
+                        },
+                        // Vertex point style
+                        {
+                            'id': 'gl-draw-point-and-mid',
+                            'type': 'circle',
+                            'filter': ['all', ['==', '$type', 'Point'], ['==', 'meta', 'vertex']],
+                            'paint': {
+                                'circle-radius': 5,
+                                'circle-color': drawColor
+                            }
+                        }
+                    ]
+                })
+
+                mapInstance.addControl(draw)
+                drawInstanceRef.current = draw
+                setDrawInstance(draw)
+                onDrawReady?.(draw)
+
+                mapInstance.on('draw.create', handleDrawCreate)
+
                 onMapLoad!(mapInstance)
 
                 setMap(mapInstance)
@@ -126,13 +257,18 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad 
         return () => {
             initializedRef.current = false
 
+            const currentMap = useMapStore.getState().map
+            if (currentMap) {
+                currentMap.off('draw.create', handleDrawCreate)
+            }
+
             if (resizer && currentMapWrapper) {
                 resizer.unobserve(currentMapWrapper)
                 resizer.disconnect()
             }
         }
 
-    }, [onMapLoad, setMap])
+    }, [onMapLoad, onDrawReady, setMap, setDrawInstance, handleDrawCreate])
 
     return (
         <div className="flex h-full items-center justify-center">
@@ -150,12 +286,17 @@ interface MapViewComponentProps {
 export default function MapViewComponent({ templateName = 'default', selectedNode = null, getResourceNodeByKey }: MapViewComponentProps) {
 
     const [mapInstance, setMapInstance] = useState<mapboxgl.Map | null>(null)
+    const [drawInstance, setDrawInstance] = useState<MapboxDraw | null>(null)
 
     const viewConfig = VIEW_REGISTRY[MapView.classKey]
     const viewModels = viewConfig?.viewModels || null
 
     const handleMapLoad = useCallback((map: mapboxgl.Map) => {
         setMapInstance(map)
+    }, [])
+
+    const handleDrawReady = useCallback((draw: MapboxDraw) => {
+        setDrawInstance(draw)
     }, [])
 
     return (
@@ -168,13 +309,14 @@ export default function MapViewComponent({ templateName = 'default', selectedNod
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={62}>
-                <MapContainer onMapLoad={handleMapLoad} />
+                <MapContainer onMapLoad={handleMapLoad} onDrawReady={handleDrawReady} />
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={24}>
                 <ToolPanel
                     viewModels={viewModels}
                     mapContainer={mapInstance}
+                    drawInstance={drawInstance}
                     templateName={templateName}
                     selectedNode={selectedNode}
                 />

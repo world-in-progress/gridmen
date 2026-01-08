@@ -13,6 +13,7 @@ interface ToolPanelProps {
         [templateName: string]: NodeTemplateFunctionSet
     } | null
     mapContainer: mapboxgl.Map | null
+    drawInstance?: MapboxDraw | null
     templateName?: string
     selectedNode?: IResourceNode | null
 }
@@ -20,6 +21,7 @@ interface ToolPanelProps {
 export default function ToolPanel({
     viewModels,
     mapContainer,
+    drawInstance = null,
     templateName = 'default',
     selectedNode = null
 }: ToolPanelProps) {
@@ -45,7 +47,7 @@ export default function ToolPanel({
 
     const context: MapViewContext = {
         map: mapContainer,
-        drawInstance: null,
+        drawInstance,
         setMap: (map: mapboxgl.Map) => {
             console.log('setMap', map)
         },

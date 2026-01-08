@@ -177,11 +177,13 @@ export const addMapPatchBounds = (
         lineWidth?: number,
     }
 ) => {
+
     const sourceId = id ? `bounds-source-${id}` : 'bounds-source'
     const fillLayerId = id ? `bounds-fill-${id}` : 'bounds-fill'
     const outlineLayerId = id ? `bounds-outline-${id}` : 'bounds-outline'
 
     const addBounds = () => {
+        // 这一步添加触发了
         // Remove existing layers/source with the same ID before adding new ones
         if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId)
         if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId)
@@ -310,8 +312,6 @@ export const adjustPatchBounds = async (
 
     let convertedSW: [number, number] = [bounds[0], bounds[1]]
     let convertedNE: [number, number] = [bounds[2], bounds[3]]
-
-    // let tempCalculatedBounds: [number, number, number, number]
 
     if (fromEPSG !== toEPSG) {
         const SW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, toEPSG)      // toEPSG
