@@ -18,12 +18,11 @@ def MOUNT(node_key: str, params: dict | None) -> dict | None:
     Returns:
         Dictionary containing node-specific launch parameters
     """
-    name = node_key.split('.')[-1]
-    resource_space = Path.cwd() / 'resource' / name / 'schema.json'
+    rel_path = node_key.strip('.').replace('.', os.sep)
+    resource_space = Path.cwd() / 'resource' / rel_path / 'schema.json'
 
-    if not resource_space.exists():
-        if params is not None:
-            print(f"Warning: Resource {resource_space} already exists. Not overwriting existing data.")
+    if resource_space.exists():
+        print(f"Warning: Resource {resource_space} already exists. Not overwriting existing data.")
         return {
             'resource_space': str(resource_space)
         }
@@ -54,7 +53,7 @@ def UNMOUNT(node_key: str) -> None:
     Args:
         node_key: The node key being unmounted
     """
-    name = node_key.split('.')[-1]
+    name = node_key.strip('.').replace('.', os.sep)
     resource_space = Path.cwd() / 'resource' / name / 'schema.json'
     if resource_space.exists():
         resource_space.unlink()
@@ -77,7 +76,7 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
     """
     try:
         # Extract node name from node_key (last part after splitting by '.')
-        node_name = node_key.split('.')[-1]
+        node_name = node_key.strip('.').replace('.', os.sep)
         
         # Generate node-specific resource space path
         resource_space = Path.cwd() / 'resource' / node_name / 'schema.json'
