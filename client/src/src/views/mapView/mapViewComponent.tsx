@@ -1,13 +1,16 @@
+
 import { useEffect, useRef, forwardRef, useState, useCallback } from 'react'
 import { create } from 'zustand'
 import mapboxgl from 'mapbox-gl'
+import MapboxDraw from '@mapbox/mapbox-gl-draw'
+import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css'
 import ToolPanel from './toolPanel'
 import LayerGroup from './layerGroup'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import MapView, { MapViewContext } from './mapView'
 import { VIEW_REGISTRY } from '@/registry/viewRegistry'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { debounce } from '@/utils/utils'
+import { calculateRectangleCoordinates, debounce } from '@/utils/utils'
 import { IResourceNode } from '@/template/scene/iscene'
 
 const initialLongitude = 114.051537
@@ -39,10 +42,36 @@ const useMapStore = create<MapViewContext>((set) => ({
 
 const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad }, ref) => {
 
+    const isProcessingDrawEvent = false
+    const drawInstance: MapboxDraw | null = null
+
     const initializedRef = useRef(false)
     const mapWrapperRef = useRef<HTMLDivElement>(null)
 
     const { setMap } = useMapStore()
+
+    // const handleDrawCreate = (e: any) => {
+    //     if (isProcessingDrawEvent) return
+
+    //     isProcessingDrawEvent = true
+    //     try {
+    //         if (e.features && e.features.length > 0) {
+    //             const feature = e.features[0];
+    //             if (drawInstance && drawInstance.getMode() === 'draw_rectangle' && feature.geometry.type === 'Polygon') {
+    //                 const coordinates = calculateRectangleCoordinates(feature)
+    //                 const drawCompleteEvent = new CustomEvent('rectangle-draw-complete', {
+    //                     detail: { coordinates }
+    //                 })
+    //                 document.dispatchEvent(drawCompleteEvent)
+    //                 if (drawInstance) {
+    //                     drawInstance.changeMode('simple_select')
+    //                 }
+    //             }
+    //         }
+    //     } finally {
+    //         isProcessingDrawEvent = false
+    //     }
+    // }
 
     useEffect(() => {
         mapboxgl.accessToken = import.meta.env.VITE_MAP_TOKEN

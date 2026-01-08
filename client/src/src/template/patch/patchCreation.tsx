@@ -106,6 +106,8 @@ export default function PatchCreation({
     const map = mapContext.map!
     const drawInstance = mapContext.drawInstance!
 
+
+
     const pageContext = useRef<PageContext>({
         name: '',
         schema: null,
@@ -156,6 +158,10 @@ export default function PatchCreation({
     }, [])
 
     const loadContext = async () => {
+        if (!drawInstance) {
+            console.log('map draw instance is null')
+        }
+
         if ((node as ResourceNode).context !== undefined) {
             pageContext.current = { ...(node as ResourceNode).context }
         } else {
@@ -173,12 +179,18 @@ export default function PatchCreation({
         return
     }
 
-    const adjustCoords = () => {
+    const adjustCoords = async () => {
         if (pageContext.current.originBounds && pageContext.current.originBounds.length === 4 && pageContext.current.schema) {
-            const fromEPSG = '4326'
+            const bounds = pageContext.current.originBounds
+            const gridLevel = pageContext.current.schema.grid_info[0]
+            const fromEPSG = 4326
             const toEPSG = pageContext.current.schema.epsg
+            const alignmentOrigin = pageContext.current.schema.alignment_origin
 
-            const { convertedBounds, adjustedBounds, expandedBounds } = adjustPatchBounds(pageContext.current.originBounds, fromEPSG, toEPSG)
+            const { convertedBounds, alignedBounds, expandedBounds } = await adjustPatchBounds(bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
+            console.log('convertedBounds', convertedBounds)
+            console.log('alignedBounds', alignedBounds)
+            console.log('expandedBounds', expandedBounds)
         }
     }
     const formatSingleValue = (value: number): string => value.toFixed(6)
