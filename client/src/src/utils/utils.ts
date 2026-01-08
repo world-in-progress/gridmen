@@ -35,14 +35,14 @@ export const convertPointCoordinate = async (originPoint: [number, number], from
     }
 }
 
+const markerMap = new Map<string, mapboxgl.Marker>()
+
 export const clearMapAllMarkers = () => {
     markerMap.forEach((marker) => {
         marker.remove()
     })
     markerMap.clear()
 }
-
-const markerMap = new Map<string, mapboxgl.Marker>()
 
 export const clearMarkerByNodeKey = (nodeKey: string) => {
     console.log('clearMarkerByNodeKey', nodeKey)
@@ -261,3 +261,17 @@ export const debounce = <F extends (...args: any[]) => any>(
         })
     }
 }
+
+// export const adjustPatchBounds = (
+//     bounds: [number, number, number, number],
+//     gridLevel: [number, number],
+//     fromEPSG: string,
+//     toEPSG: string,
+//     alignmentOrigin: [number, number]
+// ): (
+//     convertedBounds: [number, number, number, number],
+//     adjustedBounds: [number, number, number, number],
+//     expandedBounds: [number, number, number, number]
+// ) => {
+//     console.log('adjustPatchBounds', bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
+// }

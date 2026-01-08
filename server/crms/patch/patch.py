@@ -545,7 +545,7 @@ class Patch(IPatch):
             min_xs, min_ys, max_xs, max_ys = self._get_coordinates(level, current_global_ids)
             result_array[original_indices] = np.column_stack((min_xs, min_ys, max_xs, max_ys))
             
-        return result_array.flatten().tolist()
+        return result_array.flatten().tolist() 
 
     def merge_multi_grids(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
         """Merges multiple child grids into their respective parent grid

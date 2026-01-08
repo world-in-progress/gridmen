@@ -28,6 +28,7 @@ interface PageContext {
     schema: Schema | null
     originBounds: [number, number, number, number] | null       // EPSG: 4326
     adjustedBounds: [number, number, number, number] | null     // EPSG: 4326
+    drawCoordinates: RectangleCoordinates | null
     inputBounds: [number, number, number, number] | null        // EPSG: schema
     hasBounds: boolean
 }
@@ -108,6 +109,7 @@ export default function PatchCreation({
         schema: null,
         originBounds: null,
         adjustedBounds: null,
+        drawCoordinates: null,
         inputBounds: null,
         hasBounds: false,
     })
@@ -125,7 +127,6 @@ export default function PatchCreation({
     })
 
     const drawCoordinates = useRef<RectangleCoordinates | null>(null)
-
     const tempSchemaKeyRef = useRef<string | null>(null)
 
     let bgColor = 'bg-red-50'
@@ -170,6 +171,14 @@ export default function PatchCreation({
         return
     }
 
+    const adjustCoords = () => {
+        if (pageContext.current.originBounds && pageContext.current.originBounds.length === 4 && pageContext.current.schema) {
+            const fromEPSG = '4326'
+            const toEPSG = pageContext.current.schema.epsg
+
+            // const { convertedBounds, adjustedBounds, expandedBounds } = adjustPatchBounds(pageContext.current.originBounds, fromEPSG, toEPSG)
+        }
+    }
     const formatSingleValue = (value: number): string => value.toFixed(6)
 
     const handleSchemaNodeDragOver = (e: React.DragEvent) => {
@@ -229,7 +238,7 @@ export default function PatchCreation({
     const onDrawComplete = (event: Event) => {
         const customEvent = event as CustomEvent<{ coordinates: RectangleCoordinates | null }>
         if (customEvent.detail.coordinates) {
-            drawCoordinates.current = customEvent.detail.coordinates
+            pageContext.current.originBounds = [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]]
             adjustCoords()
             addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], '4326')
         }
@@ -241,16 +250,7 @@ export default function PatchCreation({
 
     /////////////////////////////////////////////////////
 
-    const adjustCoords = () => {
-        console.log('adjustCoords')
-        pageContext.current.adjustedBounds = [
-            drawCoordinates.current!.southWest[0],
-            drawCoordinates.current!.southWest[1],
-            drawCoordinates.current!.northEast[0],
-            drawCoordinates.current!.northEast[1],
-        ]
-        pageContext.current.hasBounds = true
-    }
+
 
     const clearDrawPatchBounds = () => {
         console.log('clearDrawPatchBounds')
@@ -302,13 +302,7 @@ export default function PatchCreation({
                 return
             }
 
-            drawCoordinates.current = {
-                southWest: [inputBoundsOn4326[0], inputBoundsOn4326[1]],
-                southEast: [inputBoundsOn4326[2], inputBoundsOn4326[1]],
-                northEast: [inputBoundsOn4326[2], inputBoundsOn4326[3]],
-                northWest: [inputBoundsOn4326[0], inputBoundsOn4326[3]],
-                center: [(inputBoundsOn4326[0] + inputBoundsOn4326[2]) / 2, (inputBoundsOn4326[1] + inputBoundsOn4326[3]) / 2],
-            }
+            pageContext.current.originBounds = inputBoundsOn4326
 
             adjustCoords()
 

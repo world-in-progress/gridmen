@@ -43,7 +43,6 @@ interface TreeRendererProps {
     title: string
     resourceTree: ResourceTree | null
     triggerFocus: number
-    focusNode?: IResourceNode | null
 }
 
 // CreationBar component: reused inside tree top or under focused node
@@ -563,17 +562,12 @@ const NodeRenderer = ({
     )
 }
 
-const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRendererProps) => {
-    let newNodeKey
+const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) => {
 
-    const [open, setOpen] = useState(false)
-    const [value, setValue] = useState("")
-    const [newResourceName, setNewResourceName] = useState<string>('')
     const [showNewResourceInfo, setShowNewResourceInfo] = useState<boolean>(false)
     const [showNewFolderInput, setShowNewFolderInput] = useState<boolean>(false)
-    const newResourceInputRef = useRef<HTMLInputElement>(null)
-    const newResourceDivRef = useRef<HTMLDivElement>(null)
-    const { selectedNodeKey, setSelectedNodeKey } = useSelectedNodeStore()
+
+    const { setSelectedNodeKey } = useSelectedNodeStore()
 
     const handleClickTreeTitle = () => {
         if (resourceTree) {
@@ -590,7 +584,6 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
         e.stopPropagation()
         e.preventDefault()
         setShowNewResourceInfo(true)
-        setNewResourceName('')
         setShowNewFolderInput(false)
     }
 
@@ -598,109 +591,8 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus, focusNode }: TreeRend
         e.stopPropagation()
         e.preventDefault()
         setShowNewFolderInput(true)
-        handleCancelNewResource()
-    }
-
-    const handleCreateNewResource = async () => {
-        const tempNodeName = ''
-        // ' (not confirm yet)'
-
-        if (newResourceName.trim() === '') {
-            toast.error('Resource name cannot be empty')
-            return
-        }
-        if (resourceTree) {
-            try {
-                if (selectedNodeKey !== null) {
-                    newNodeKey = selectedNodeKey + '.' + newResourceName + tempNodeName
-                } else {
-                    newNodeKey = '.' + newResourceName + tempNodeName
-                }
-
-                await api.node.mountNode({
-                    node_key: newNodeKey,
-                    template_name: value,
-                    mount_params_string: JSON.stringify({})
-                })
-
-                setSelectedNodeKey(newNodeKey)
-                setNewResourceName('')
-                setShowNewResourceInfo(false)
-                useToolPanelStore.getState().setActiveTab('create')
-
-                await resourceTree.refresh()
-
-                const createdNode = resourceTree.scene.get(newNodeKey)
-                if (createdNode) {
-                    await resourceTree.clickNode(createdNode)
-                }
-
-                resourceTree.tempNodeExist = true
-            } catch {
-                toast.error('Failed to create new resource')
-            }
-        }
-    }
-
-
-    const handleCancelNewResource = () => {
-        setNewResourceName('')
         setShowNewResourceInfo(false)
-        setValue('')
-        setOpen(false)
     }
-
-    const checkFocus = (e: React.FocusEvent<HTMLDivElement>) => {
-        const relatedTarget = e.relatedTarget as HTMLElement | null
-        const isPopoverContent = relatedTarget?.closest('[data-slot="popover-content"]')
-
-        if (open || isPopoverContent) {
-            return
-        }
-
-        if (!newResourceDivRef.current?.contains(relatedTarget as Node)) {
-            setTimeout(() => {
-                if (showNewResourceInfo && !open) {
-                    handleCancelNewResource()
-                }
-            })
-        }
-    }
-
-    const handlePopoverOpenChange = (isOpen: boolean) => {
-        setOpen(isOpen)
-        if (!isOpen && showNewResourceInfo && newResourceInputRef.current) {
-            setTimeout(() => {
-                newResourceInputRef.current?.focus()
-            }, 0)
-        }
-    }
-
-    const handleResourceTypeSelect = () => {
-        const selectedResource = RESOURCE_REGISTRY.find((resource) => resource.value === value)
-
-        if (!selectedResource) {
-            return <File className="w-4 h-4" />
-        }
-
-        const SelectedIcon = selectedResource.icon
-
-        return <SelectedIcon className="w-4 h-4" />
-    }
-
-    const handleNewResourceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
-            if (value === '') {
-                toast.info('Please select new resource type.')
-                return
-            } else {
-                handleCreateNewResource()
-            }
-        } else if (e.key === 'Escape') {
-            handleCancelNewResource()
-        }
-    }
-
 
     const handleRefreshClick = async (e: React.MouseEvent) => {
         e.stopPropagation()
@@ -932,10 +824,10 @@ export default function ResourceTreeComponent({
                     EXPLORER
                 </div>
                 {/* WorkSpace */}
-                <TreeRenderer resourceTree={privateTree} title={"WorkSpace"} triggerFocus={triggerFocus} focusNode={focusNode} />
+                <TreeRenderer resourceTree={privateTree} title={"WorkSpace"} triggerFocus={triggerFocus} />
                 <Separator className='my-2 bg-[#585858] w-full' />
                 {/* Public */}
-                <TreeRenderer resourceTree={publicTree} title={"Public"} triggerFocus={triggerFocus} focusNode={focusNode} />
+                <TreeRenderer resourceTree={publicTree} title={"Public"} triggerFocus={triggerFocus} />
             </div>
         </div>
     )
