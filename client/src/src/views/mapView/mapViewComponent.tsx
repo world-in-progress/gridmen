@@ -134,11 +134,11 @@ export default function MapViewComponent({ templateName = 'default', selectedNod
             direction="horizontal"
             className="h-full w-full text-white "
         >
-            <ResizablePanel defaultSize={12}>
+            <ResizablePanel defaultSize={14}>
                 <LayerGroup getResourceNodeByKey={getResourceNodeByKey} />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={64}>
+            <ResizablePanel defaultSize={62}>
                 <MapContainer onMapLoad={handleMapLoad} />
             </ResizablePanel>
             <ResizableHandle withHandle />

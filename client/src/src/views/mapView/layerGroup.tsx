@@ -3,10 +3,11 @@ import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, M
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/utils/utils"
-import { useLayerStore } from "@/store/storeSet"
+import { useLayerStore, useLayerGroupStore, useToolPanelStore } from "@/store/storeSet"
 import { ResourceTree } from "@/template/scene/scene"
 import type { Layer } from "@/store/storeTypes"
 import type { ResourceNode } from "@/template/scene/scene"
+import { Switch } from "@/components/ui/switch"
 
 interface LayerGroupProps {
     getResourceNodeByKey?: (key: string) => any | null
@@ -16,6 +17,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
 
     const layers = useLayerStore((s) => s.layers)
     const setLayers = useLayerStore((s) => s.setLayers)
+    const { isEditMode, setEditMode } = useLayerGroupStore()
 
     const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null)
     const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null)
@@ -110,13 +112,15 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
     const triggerNodeCheck = (node: ResourceNode) => {
         const tree = node.tree as ResourceTree
         const handler = tree.getNodeMenuHandler()
+        const { isEditMode } = useLayerGroupStore.getState()
 
         const menuItem = (() => {
+            const action = isEditMode ? 'Edit' : 'Check'
             switch (node.template_name) {
                 case 'schema':
-                    return 'Check Schema'
+                    return `${action} Schema`
                 case 'patch':
-                    return 'Check Patch'
+                    return `${action} Patch`
                 default:
                     return null
             }
@@ -286,7 +290,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     onDragStart={(e) => !isResourceNode && handleLayerDragStart(e, layer.id)}
                     onDragEnd={handleDragEnd}
                     className={cn(
-                        "group flex items-center gap-0.5 px-1.5 py-1 hover:bg-white/5 transition-colors relative",
+                        "group flex items-center gap-0.5 px-1.5 py-1 hover:bg-white/5 transition-colors relative cursor-pointer",
                         depth > 0 && "ml-4",
                         isDragOver && dropPosition === 'inside' && "bg-blue-500/20 border border-blue-400 border-dashed",
                         isDragging && "opacity-50"
@@ -295,6 +299,12 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     onDrop={(e) => handleDrop(e, layer.id)}
                     onDragOver={(e) => handleDragOver(e, layer.id, isGroup || isResourceNode)}
                     onDragLeave={handleDragLeave}
+                    onClick={(e) => {
+                        if (!isResourceNode && layer.node) {
+                            e.stopPropagation()
+                            triggerNodeCheck(layer.node)
+                        }
+                    }}
                 >
                     {/* Expand/Collapse Icon */}
                     {hasChildren && (
@@ -310,7 +320,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                         onClick={() => toggleVisibility(layer.id)}
                         className="w-5 h-5 flex items-center justify-center hover:bg-white/10 rounded cursor-pointer"
                     >
-                        {layer.visible ? <Eye className="w-4 h-4 text-blue-400" /> : <EyeOff className="w-4 h-4 text-gray-500" />}
+                        {layer.visible ? <Eye className="w-4 h-4 text-sky-500" /> : <EyeOff className="w-4 h-4 text-gray-500" />}
                     </button>
 
                     {/* Layer Icon */}
@@ -328,13 +338,6 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                         <div className="flex opacity-0 group-hover:opacity-100 transition-opacity gap-1 mr-1">
                             <MapPinned
                                 className="w-4 h-4 text-gray-500 cursor-pointer hover:text-sky-500"
-                                onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                }}
-                            />
-                            <PencilRuler
-                                className="w-4 h-4 text-gray-500 cursor-pointer hover:text-green-500"
                                 onClick={(e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
@@ -362,30 +365,39 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
     return (
         <div className="w-full h-full bg-[#1e1e1e] border-r border-gray-800 flex flex-col">
             {/* Header */}
-            <div className="px-3 py-2 border-b border-[#2A2C33] flex items-center justify-between">
+            <div className="px-3 py-1.5 border-b border-[#2A2C33] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Layers className="w-4 h-4 text-gray-400" />
-                    <h2 className="text-sm font-semibold text-gray-200">Layers</h2>
+                    <h2 className=" font-semibold text-gray-200">Layers</h2>
+                </div>
+                <div className="flex items-center gap-1">
+                    <span className="text-sm font-semibold text-gray-400">Check</span>
+                    <Switch
+                        checked={isEditMode}
+                        onCheckedChange={setEditMode}
+                        className='data-[state=checked]:bg-amber-400 h-4 data-[state=unchecked]:bg-gray-300 cursor-pointer'
+                    />
+                    <span className="text-sm font-semibold text-gray-400">Edit</span>
                 </div>
             </div>
 
             {/* Toolbar */}
-            <div className="px-0.5 h-8 border-b border-[#2A2C33] flex items-center justify-between gap-0.5">
+            <div className="px-2 h-8 border-b border-[#2A2C33] flex items-center justify-between gap-1">
                 <Button
                     variant="ghost"
-                    className="h-7 px-2 text-xs rounded-sm text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
+                    className="group h-6 w-1/2 px-2 text-xs rounded-sm hover:bg-white/10 cursor-pointer"
                 >
-                    <Eye className="w-4 h-4" />
-                    Show All
+                    <Eye className="w-4 h-4 text-gray-400 group-hover:text-sky-500" />
+                    <span className="text-gray-400 group-hover:text-gray-200">Show All</span>
                 </Button>
                 <Button
                     variant="ghost"
-                    className="h-7 px-2 text-xs rounded-sm text-gray-400 hover:text-gray-200 hover:bg-white/10 cursor-pointer"
+                    className="group h-6 w-1/2 px-2 text-xs rounded-sm hover:bg-white/10 cursor-pointer"
                     onClick={() => setLayers([])}
                 // TODO: 清空Resource Node内图层
                 >
-                    <Trash2 className="w-4 h-4" />
-                    Remove
+                    <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-500" />
+                    <span className="text-gray-400 group-hover:text-gray-200">Remove</span>
                 </Button>
             </div>
 

@@ -262,16 +262,70 @@ export const debounce = <F extends (...args: any[]) => any>(
     }
 }
 
-// export const adjustPatchBounds = (
-//     bounds: [number, number, number, number],
-//     gridLevel: [number, number],
-//     fromEPSG: string,
-//     toEPSG: string,
-//     alignmentOrigin: [number, number]
-// ): (
-//     convertedBounds: [number, number, number, number],
-//     adjustedBounds: [number, number, number, number],
-//     expandedBounds: [number, number, number, number]
-// ) => {
-//     console.log('adjustPatchBounds', bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
-// }
+export const adjustPatchBounds = async (
+    bounds: [number, number, number, number],
+    gridLevel: [number, number],
+    fromEPSG: string,
+    toEPSG: string,
+    alignmentOrigin: [number, number]
+): Promise<{
+    convertedBounds: [number, number, number, number]
+    adjustedBounds: [number, number, number, number]
+    expandedBounds: [number, number, number, number]
+}> => {
+    const gridWidth = gridLevel[0]
+    const gridHeight = gridLevel[1]
+
+    let convertedSW: [number, number] = [bounds[0], bounds[1]]
+    let convertedNE: [number, number] = [bounds[2], bounds[3]]
+
+    // let tempCalculatedBounds: [number, number, number, number]
+
+    if (fromEPSG !== toEPSG) {
+        const SW = await convertPointCoordinate([bounds[0], bounds[1]], parseInt(fromEPSG), parseInt(toEPSG))      // toEPSG
+        const NE = await convertPointCoordinate([bounds[2], bounds[3]], parseInt(fromEPSG), parseInt(toEPSG))      // toEPSG
+        convertedSW = SW!
+        convertedNE = NE!
+    }
+
+    const convertedBounds: [number, number, number, number] = [convertedSW[0], convertedSW[1], convertedNE[0], convertedNE[1]]  //toEPSG
+
+    const calcuSW = await convertPointCoordinate([bounds[0], bounds[1]], parseInt(fromEPSG), 3857)      // 3857
+    const calcuNE = await convertPointCoordinate([bounds[2], bounds[3]], parseInt(fromEPSG), 3857)      // 3857
+    const tempCalculatedBounds = [calcuSW![0], calcuSW![1], calcuNE![0], calcuNE![1]]
+
+    const tempCalculatedAlignmentOrigin = await convertPointCoordinate(alignmentOrigin, parseInt(fromEPSG), 3857) // 3857
+
+    const swX = tempCalculatedBounds[0]
+    const swY = tempCalculatedBounds[1]
+
+    const baseX = tempCalculatedAlignmentOrigin![0]
+    const baseY = tempCalculatedAlignmentOrigin![1]
+
+    const dX = swX - baseX
+    const dY = swY - baseY
+
+    const disX = Math.floor(dX / gridWidth) * gridWidth
+    const disY = Math.floor(dY / gridHeight) * gridHeight
+
+    const offsetX = disX - dX
+    const offsetY = disY - dY
+
+    const rectWidth = tempCalculatedBounds[2] - tempCalculatedBounds[0]
+    const rectHeight = tempCalculatedBounds[3] - tempCalculatedBounds[1]
+
+
+
+
+
+
+
+
+
+
+    return {
+        convertedBounds: convertedBounds,
+        adjustedBounds: bounds,
+        expandedBounds: bounds,
+    }
+}
