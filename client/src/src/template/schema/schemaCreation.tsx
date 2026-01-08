@@ -397,7 +397,7 @@ export default function SchemaCreation({
         const schemaData: SchemaData = {
             name: pageContext.current.name,
             epsg: pageContext.current.epsg!,
-            alignment_origin: pageContext.current.alignmentOrigin,
+            alignment_origin: pageContext.current.alignmentConverted!,
             grid_info: pageContext.current.gridLayers.map(layer => [parseFloat(layer.width), parseFloat(layer.height)]),
         }
 
