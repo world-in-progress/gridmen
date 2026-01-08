@@ -119,7 +119,7 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
     }
 
     return (
-        <div className={cn('flex items-center py-0.5 px-1 gap-0.5 text-sm w-full select-none')}>
+        <div className={cn('flex items-center py-0.5 gap-0.5 text-sm w-full select-none')}>
             <Popover open={localOpen} onOpenChange={(isOpen) => handleLocalPopoverOpenChange(isOpen)}>
                 <PopoverTrigger asChild>
                     <Button

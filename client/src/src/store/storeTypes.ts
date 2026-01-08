@@ -42,3 +42,8 @@ export interface ToolPanelStore {
     activeTab: ToolPanelTab
     setActiveTab: (tab: ToolPanelTab) => void
 }
+
+export interface LayerGroupStore {
+    isEditMode: boolean
+    setEditMode: (isEdit: boolean) => void
+}
