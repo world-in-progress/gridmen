@@ -37,7 +37,7 @@ export default class SchemaTemplate implements ITemplate {
         return () => SchemaCreation({ node, context })
     }
     static editMapView(node: IResourceNode, context: IViewContext): Function {
-        return () => SchemaEdit({ context })
+        return () => SchemaEdit({ node, context })
     }
 
     renderMenu(node: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element {

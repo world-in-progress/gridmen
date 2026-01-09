@@ -2,7 +2,7 @@ import React, { useEffect, useReducer } from 'react'
 import { IViewContext } from '@/views/IViewContext'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { IResourceNode } from '../scene/iscene'
-import { addMapMarker, clearMarkerByNodeKey } from '@/utils/utils'
+import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate } from '@/utils/utils'
 import { ResourceNode } from '../scene/scene'
 import * as api from '@/template/noodle/apis'
 import { SchemaData } from './types'
@@ -46,7 +46,8 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
         }
 
         if (schemaData) {
-            addMapMarker(map, schemaData.alignment_origin, node.key, { color: 'red' })
+            const alignmentOriginOn4326 = await convertPointCoordinate(schemaData.alignment_origin, schemaData.epsg, 4326)
+            addMapMarker(map, alignmentOriginOn4326!, node.key, { color: 'red' })
 
             // Register cleanup so layer.node?.close() can clear drawings.
             resourceNode.context = {

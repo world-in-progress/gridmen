@@ -65,11 +65,14 @@ def UNMOUNT(node_key: str) -> None:
     Unmount a patch node.
     """
     rel_path = node_key.strip('.').replace('.', os.sep)
-    resource_dir = Path.cwd() / 'resource' / rel_path
-    # In a real environment, we might want to keep the data or delete it
-    # For consistency with other hooks shown, we'll skip aggressive deletion 
-    # unless it's strictly required.
-    pass
+    resource_space = Path.cwd() / 'resource' / rel_path
+    if resource_space.exists():
+        resource_space.unlink()
+        
+    # Remove the directory if empty
+    parent_dir = resource_space.parent
+    if parent_dir.exists() and not any(parent_dir.iterdir()):
+        parent_dir.rmdir()
 
 def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
     """

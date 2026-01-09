@@ -6,12 +6,14 @@ import { Input } from '@/components/ui/input'
 import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Button } from '@/components/ui/button'
 import { IResourceNode } from '../scene/iscene'
+import { useLayerGroupStore } from '@/store/storeSet'
+import { useToolPanelStore } from '@/store/storeSet'
 import { IViewContext } from '@/views/IViewContext'
 import { Separator } from '@/components/ui/separator'
 import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
 import { PatchData } from './types'
 
 interface PatchCreationProps {
@@ -26,10 +28,11 @@ interface Schema extends SchemaData {
 interface PageContext {
     name: string
     schema: Schema | null
-    originBounds: [number, number, number, number] | null       // EPSG: 4326
-    adjustedBounds: [number, number, number, number] | null     // EPSG: 4326
+    originBounds: [number, number, number, number] | null
+    convertedBounds: [number, number, number, number] | null
+    adjustedBounds: [number, number, number, number] | null
     drawCoordinates: RectangleCoordinates | null
-    inputBounds: [number, number, number, number] | null        // EPSG: schema
+    inputBounds: [number, number, number, number] | null
     hasBounds: boolean
 }
 
@@ -104,10 +107,13 @@ export default function PatchCreation({
     const map = mapContext.map!
     const drawInstance = mapContext.drawInstance!
 
+
+
     const pageContext = useRef<PageContext>({
         name: '',
         schema: null,
         originBounds: null,
+        convertedBounds: null,
         adjustedBounds: null,
         drawCoordinates: null,
         inputBounds: null,
@@ -116,8 +122,7 @@ export default function PatchCreation({
 
     const [isDrawingBounds, setIsDrawingBounds] = useState(false)
     const [generalMessage, setGeneralMessage] = useState<string | null>(null)
-    const [convertCoordinate, setConvertCoordinate] = useState<[number, number, number, number] | null>(null)
-    const [adjustedCoordinate, setAdjustedCoordinate] = useState<[number, number, number, number] | null>(null)
+
     const [formErrors, setFormErrors] = useState<{
         name: boolean
         bounds: boolean
@@ -126,7 +131,6 @@ export default function PatchCreation({
         bounds: false,
     })
 
-    const drawCoordinates = useRef<RectangleCoordinates | null>(null)
     const tempSchemaKeyRef = useRef<string | null>(null)
 
     let bgColor = 'bg-red-50'
@@ -171,12 +175,20 @@ export default function PatchCreation({
         return
     }
 
-    const adjustCoords = () => {
+    const adjustCoords = async () => {
         if (pageContext.current.originBounds && pageContext.current.originBounds.length === 4 && pageContext.current.schema) {
-            const fromEPSG = '4326'
+            const bounds = pageContext.current.originBounds
+            const gridLevel = pageContext.current.schema.grid_info[0]
+            const fromEPSG = 4326
             const toEPSG = pageContext.current.schema.epsg
+            const alignmentOrigin = pageContext.current.schema.alignment_origin
 
-            // const { convertedBounds, adjustedBounds, expandedBounds } = adjustPatchBounds(pageContext.current.originBounds, fromEPSG, toEPSG)
+            const { convertedBounds, alignedBounds, expandedBounds } = await adjustPatchBounds(bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
+
+            pageContext.current.convertedBounds = convertedBounds
+            pageContext.current.adjustedBounds = expandedBounds
+
+            triggerRepaint()
         }
     }
     const formatSingleValue = (value: number): string => value.toFixed(6)
@@ -214,15 +226,21 @@ export default function PatchCreation({
             }
 
             clearMarkerByNodeKey(tempSchemaKeyRef.current!)
-            addMapMarker(map, schema.alignment_origin, schema.schemaNodeKey)
+            const AlignmentOriginOn4326 = await convertPointCoordinate(schema.alignment_origin, schema.epsg, 4326)
+            addMapMarker(map, AlignmentOriginOn4326!, schema.schemaNodeKey)
             tempSchemaKeyRef.current = schema.schemaNodeKey
 
             pageContext.current.schema = schema
+            console.log('Dragged schema', pageContext.current.schema)
         }
         triggerRepaint()
     }
 
     const handleDrawBounds = () => {
+        if (pageContext.current.schema === null) {
+            toast.info('Please select a schema first')
+            return
+        }
         if (isDrawingBounds) {
             setIsDrawingBounds(false)
             stopDrawRectangle(map, drawInstance)
@@ -235,23 +253,22 @@ export default function PatchCreation({
         }
     }
 
-    const onDrawComplete = (event: Event) => {
+    const onDrawComplete = async (event: Event) => {
         const customEvent = event as CustomEvent<{ coordinates: RectangleCoordinates | null }>
         if (customEvent.detail.coordinates) {
             pageContext.current.originBounds = [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]]
-            adjustCoords()
+            await adjustCoords()
+            pageContext.current.inputBounds = pageContext.current.convertedBounds
             addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], '4326')
         }
         document.removeEventListener('rectangle-draw-complete', onDrawComplete)
         setIsDrawingBounds(false)
         stopDrawRectangle(map, drawInstance)
+
         triggerRepaint()
     }
 
     /////////////////////////////////////////////////////
-
-
-
     const clearDrawPatchBounds = () => {
         console.log('clearDrawPatchBounds')
     }
@@ -259,7 +276,6 @@ export default function PatchCreation({
     const clearGridLines = () => {
         console.log('clearGridLines')
     }
-
     /////////////////////////////////////////////////////
 
     const covertBoundsTo4326 = async (bounds: [number, number, number, number], fromEPSG: number): Promise<[number, number, number, number] | null> => {
@@ -284,6 +300,11 @@ export default function PatchCreation({
         if (pageContext.current.hasBounds) {
             console.log('2')
             toast.info('Map bounds have been adjusted')
+            return
+        }
+
+        if (pageContext.current.schema === null) {
+            toast.info('Please select a schema first')
             return
         }
 
@@ -316,7 +337,6 @@ export default function PatchCreation({
     }
 
     const handleSubmit = async (e: React.FormEvent) => {
-        console.log('handleSubmit')
         e.preventDefault()
 
         const validation = validatePatchForm({
@@ -333,6 +353,7 @@ export default function PatchCreation({
         const patchData: PatchData = {
             name: pageContext.current.name,
             bounds: pageContext.current.adjustedBounds!,
+            schema_node_key: pageContext.current.schema!.schemaNodeKey
         }
 
         setGeneralMessage('Submitting data...')
@@ -344,12 +365,18 @@ export default function PatchCreation({
                 mount_params_string: JSON.stringify(patchData)
             })
 
+            console.log('Submitting patch data:', JSON.stringify(patchData))
+
             // TODO: 清除Marker和Bounds
             clearMarkerByNodeKey(node.key)
 
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
+
+            // 根据 layerGroup 模式恢复 toolPanel 状态
+            const { isEditMode } = useLayerGroupStore.getState()
+            useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
 
             setGeneralMessage('Created successfully')
             await (node.tree as ResourceTree).refresh()
@@ -628,9 +655,9 @@ export default function PatchCreation({
                     {/* --------------- */}
                     {/* Original Coordinates */}
                     {/* --------------- */}
-                    {convertCoordinate &&
+                    {pageContext.current.convertedBounds &&
                         <div className='mt-4 p-3 bg-white rounded-md shadow-sm border border-gray-200'>
-                            <h3 className='font-semibold text-lg mb-2'>Original Bounds (EPSG:{pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''})</h3>
+                            <h3 className='font-semibold text-black text-lg mb-2'>Original Bounds (EPSG:{pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''})</h3>
                             <div className='grid grid-cols-3 gap-1 text-xs'>
                                 {/* Top Left Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -639,7 +666,7 @@ export default function PatchCreation({
                                 {/* North/Top - northEast[1] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-blue-600 text-xl'>N</span>
-                                    <div>[{formatSingleValue(convertCoordinate[3])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.convertedBounds[3])}]</div>
                                 </div>
                                 {/* Top Right Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -648,17 +675,17 @@ export default function PatchCreation({
                                 {/* West/Left - southWest[0] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-green-600 text-xl'>W</span>
-                                    <div>[{formatSingleValue(convertCoordinate[0])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.convertedBounds[0])}]</div>
                                 </div>
                                 {/* Center */}
                                 <div className='text-center'>
-                                    <span className='font-bold text-xl'>Center</span>
-                                    <div>{formatCoordinate([(convertCoordinate[0] + convertCoordinate[2]) / 2, (convertCoordinate[1] + convertCoordinate[3]) / 2])}</div>
+                                    <span className='font-bold text-[#FF8F2E] text-xl'>Center</span>
+                                    <div className='text-black'>{formatCoordinate([(pageContext.current.convertedBounds[0] + pageContext.current.convertedBounds[2]) / 2, (pageContext.current.convertedBounds[1] + pageContext.current.convertedBounds[3]) / 2])}</div>
                                 </div>
                                 {/* East/Right - southEast[0] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-red-600 text-xl'>E</span>
-                                    <div>[{formatSingleValue(convertCoordinate[2])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.convertedBounds[2])}]</div>
                                 </div>
                                 {/* Bottom Left Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -667,7 +694,7 @@ export default function PatchCreation({
                                 {/* South/Bottom - southWest[1] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-purple-600 text-xl'>S</span>
-                                    <div>[{formatSingleValue(convertCoordinate[1])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.convertedBounds[1])}]</div>
                                 </div>
                                 {/* Bottom Right Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -679,9 +706,9 @@ export default function PatchCreation({
                     {/* --------------- */}
                     {/* Adjusted Coordinates */}
                     {/* --------------- */}
-                    {adjustedCoordinate &&
+                    {pageContext.current.adjustedBounds &&
                         <div className='mt-4 p-3 bg-white rounded-md shadow-sm border border-gray-200'>
-                            <h3 className='font-semibold text-lg mb-2'>Adjusted Coordinates (EPSG:{pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''})</h3>
+                            <h3 className='font-semibold text-black text-lg mb-2'>Adjusted Coordinates (EPSG:{pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''})</h3>
                             <div className='grid grid-cols-3 gap-1 text-xs'>
                                 {/* Top Left Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -690,7 +717,7 @@ export default function PatchCreation({
                                 {/* North/Top - northEast[1] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-blue-600 text-xl'>N</span>
-                                    <div>[{formatSingleValue(adjustedCoordinate[3])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.adjustedBounds[3])}]</div>
                                 </div>
                                 {/* Top Right Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -699,17 +726,17 @@ export default function PatchCreation({
                                 {/* West/Left - southWest[0] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-green-600 text-xl'>W</span>
-                                    <div>[{formatSingleValue(adjustedCoordinate[0])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.adjustedBounds[0])}]</div>
                                 </div>
                                 {/* Center */}
                                 <div className='text-center'>
-                                    <span className='font-bold text-xl'>Center</span>
-                                    <div>{formatCoordinate([(adjustedCoordinate[0] + adjustedCoordinate[2]) / 2, (adjustedCoordinate[1] + adjustedCoordinate[3]) / 2])}</div>
+                                    <span className='font-bold text-[#FF8F2E] text-xl'>Center</span>
+                                    <div className='text-black'>{formatCoordinate([(pageContext.current.adjustedBounds[0] + pageContext.current.adjustedBounds[2]) / 2, (pageContext.current.adjustedBounds[1] + pageContext.current.adjustedBounds[3]) / 2])}</div>
                                 </div>
                                 {/* East/Right - southEast[0] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-red-600 text-xl'>E</span>
-                                    <div>[{formatSingleValue(adjustedCoordinate[2])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.adjustedBounds[2])}]</div>
                                 </div>
                                 {/* Bottom Left Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>
@@ -718,7 +745,7 @@ export default function PatchCreation({
                                 {/* South/Bottom - southWest[1] */}
                                 <div className='text-center'>
                                     <span className='font-bold text-purple-600 text-xl'>S</span>
-                                    <div>[{formatSingleValue(adjustedCoordinate[1])}]</div>
+                                    <div className='text-black'>[{formatSingleValue(pageContext.current.adjustedBounds[1])}]</div>
                                 </div>
                                 {/* Bottom Right Corner */}
                                 <div className='relative h-12 flex items-center justify-center'>

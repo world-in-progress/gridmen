@@ -9,9 +9,11 @@ import { IViewContext } from '@/views/IViewContext'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
-import { addMapMarker, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
+import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
 import { ResourceNode, ResourceTree } from '../scene/scene'
 import { IResourceNode } from '../scene/iscene'
+import { useLayerGroupStore } from '@/store/storeSet'
+import { useToolPanelStore } from '@/store/storeSet'
 
 interface SchemaCreationProps {
     node: IResourceNode
@@ -395,7 +397,7 @@ export default function SchemaCreation({
         const schemaData: SchemaData = {
             name: pageContext.current.name,
             epsg: pageContext.current.epsg!,
-            alignment_origin: pageContext.current.alignmentOrigin,
+            alignment_origin: pageContext.current.alignmentConverted!,
             grid_info: pageContext.current.gridLayers.map(layer => [parseFloat(layer.width), parseFloat(layer.height)]),
         }
 
@@ -413,6 +415,9 @@ export default function SchemaCreation({
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
+
+            const { isEditMode } = useLayerGroupStore.getState()
+            useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
 
             setGeneralMessage('Created successfully')
             await (node.tree as ResourceTree).refresh()

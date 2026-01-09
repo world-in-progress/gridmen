@@ -111,6 +111,37 @@ export const pickCoordsFromMap = (
     }
 }
 
+export interface RectangleCoordinates {
+    northEast: [number, number];
+    southEast: [number, number];
+    southWest: [number, number];
+    northWest: [number, number];
+    center: [number, number];
+}
+
+export const calculateRectangleCoordinates = (feature: any): RectangleCoordinates | null => {
+    if (!feature || feature.geometry.type !== 'Polygon') return null
+
+    const coordinates = feature.geometry.coordinates[0]
+    if (coordinates.length < 4) return null
+
+    const lngs = coordinates.map((coord: number[]) => coord[0])
+    const lats = coordinates.map((coord: number[]) => coord[1])
+
+    const minLng = Math.min(...lngs)
+    const maxLng = Math.max(...lngs)
+    const minLat = Math.min(...lats)
+    const maxLat = Math.max(...lats)
+
+    return {
+        northEast: [maxLng, maxLat],
+        southEast: [maxLng, minLat],
+        southWest: [minLng, minLat],
+        northWest: [minLng, maxLat],
+        center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2]
+    }
+}
+
 export const startDrawRectangle = (map: mapboxgl.Map, drawInstance: MapboxDraw) => {
     if (!map || !drawInstance) return
 
@@ -129,6 +160,7 @@ export const stopDrawRectangle = (map: mapboxgl.Map, drawInstance: MapboxDraw) =
 
     try {
         drawInstance.changeMode('simple_select')
+        drawInstance.deleteAll()
     } catch (error) {
         console.error('Error stopping draw rectangle:', error)
     }
@@ -145,11 +177,13 @@ export const addMapPatchBounds = (
         lineWidth?: number,
     }
 ) => {
+
     const sourceId = id ? `bounds-source-${id}` : 'bounds-source'
     const fillLayerId = id ? `bounds-fill-${id}` : 'bounds-fill'
     const outlineLayerId = id ? `bounds-outline-${id}` : 'bounds-outline'
 
     const addBounds = () => {
+        // 这一步添加触发了
         // Remove existing layers/source with the same ID before adding new ones
         if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId)
         if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId)
@@ -262,16 +296,97 @@ export const debounce = <F extends (...args: any[]) => any>(
     }
 }
 
-// export const adjustPatchBounds = (
-//     bounds: [number, number, number, number],
-//     gridLevel: [number, number],
-//     fromEPSG: string,
-//     toEPSG: string,
-//     alignmentOrigin: [number, number]
-// ): (
-//     convertedBounds: [number, number, number, number],
-//     adjustedBounds: [number, number, number, number],
-//     expandedBounds: [number, number, number, number]
-// ) => {
-//     console.log('adjustPatchBounds', bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
-// }
+export const adjustPatchBounds = async (
+    bounds: [number, number, number, number],
+    gridLevel: [number, number],
+    fromEPSG: number,
+    toEPSG: number,
+    alignmentOrigin: [number, number]
+): Promise<{
+    convertedBounds: [number, number, number, number]
+    alignedBounds: [number, number, number, number]
+    expandedBounds: [number, number, number, number]
+}> => {
+    const gridWidth = gridLevel[0]
+    const gridHeight = gridLevel[1]
+
+    let convertedSW: [number, number] = [bounds[0], bounds[1]]
+    let convertedNE: [number, number] = [bounds[2], bounds[3]]
+
+    if (fromEPSG !== toEPSG) {
+        const SW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, toEPSG)      // toEPSG
+        const NE = await convertPointCoordinate([bounds[2], bounds[3]], fromEPSG, toEPSG)      // toEPSG
+        convertedSW = SW!
+        convertedNE = NE!
+    }
+
+    const convertedBounds: [number, number, number, number] = [convertedSW[0], convertedSW[1], convertedNE[0], convertedNE[1]]  //toEPSG
+
+    const calcuSW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, 3857)      // 3857
+    const calcuNE = await convertPointCoordinate([bounds[2], bounds[3]], fromEPSG, 3857)      // 3857
+    const tempCalculatedBounds = [calcuSW![0], calcuSW![1], calcuNE![0], calcuNE![1]]
+
+    const tempCalculatedAlignmentOrigin = await convertPointCoordinate(alignmentOrigin, fromEPSG, 3857) // 3857
+    const swX = tempCalculatedBounds[0]
+    const swY = tempCalculatedBounds[1]
+
+    const baseX = tempCalculatedAlignmentOrigin![0]
+    const baseY = tempCalculatedAlignmentOrigin![1]
+
+    const dX = swX - baseX
+    const dY = swY - baseY
+
+    const disX = Math.floor(dX / gridWidth) * gridWidth
+    const disY = Math.floor(dY / gridHeight) * gridHeight
+
+    const offsetX = disX - dX
+    const offsetY = disY - dY
+
+    const rectWidth = tempCalculatedBounds[2] - tempCalculatedBounds[0]
+    const rectHeight = tempCalculatedBounds[3] - tempCalculatedBounds[1]
+
+    const tempAlignSW = [tempCalculatedBounds[0] + offsetX, tempCalculatedBounds[1] + offsetY]
+    const tempAlignNE = [tempAlignSW[0] + rectWidth, tempAlignSW[1] + rectHeight]
+
+    const alignSW = await convertPointCoordinate([tempAlignSW[0], tempAlignSW[1]], 3857, toEPSG)      // toEPSG
+    const alignNE = await convertPointCoordinate([tempAlignNE[0], tempAlignNE[1]], 3857, toEPSG)      // toEPSG
+
+    const alignedBounds: [number, number, number, number] = [alignSW![0], alignSW![1], alignNE![0], alignNE![1]]  //toEPSG
+
+    const expandedRectWidth = Math.ceil(rectWidth / gridWidth) * gridWidth
+    const expandedRectHeight = Math.ceil(rectHeight / gridHeight) * gridHeight
+
+    const tempExpandSW = tempAlignSW
+    const tempExpandNE = [tempExpandSW[0] + expandedRectWidth, tempExpandSW[1] + expandedRectHeight]
+
+    const expandSW = await convertPointCoordinate([tempExpandSW[0], tempExpandSW[1]], 3857, toEPSG)      // toEPSG
+    const expandNE = await convertPointCoordinate([tempExpandNE[0], tempExpandNE[1]], 3857, toEPSG)      // toEPSG
+
+    const expandedBounds: [number, number, number, number] = [expandSW![0], expandSW![1], expandNE![0], expandNE![1]]  //toEPSG
+
+    return {
+        convertedBounds: convertedBounds,
+        alignedBounds: alignedBounds,
+        expandedBounds: expandedBounds,
+    }
+}
+
+export const calculateGridCounts = (
+    southWest: [number, number],
+    basePoint: [number, number],
+    gridLevel: [number, number]
+): {
+    widthCount: number,
+    heightCount: number
+} => {
+    const gridWidth = gridLevel[0]
+    const gridHeight = gridLevel[1]
+
+    const [swX, swY] = southWest
+    const [baseX, baseY] = basePoint
+
+    const widthCount = Math.abs((swX - baseX) / gridWidth)
+    const heightCount = Math.abs((swY - baseY) / gridHeight)
+
+    return { widthCount, heightCount }
+}
