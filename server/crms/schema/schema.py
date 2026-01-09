@@ -7,7 +7,7 @@ from icrms.ischema import ISchema
 logger = logging.getLogger(__name__)
 
 class Schema(ISchema):
-    def __init__(self, resource_space: str):
+    def __init__(self, resource_space: str, **kwargs):
         """Initialize Schema from resource space (JSON file)"""
         self.resource_path = Path(resource_space)
         if not self.resource_path.exists():

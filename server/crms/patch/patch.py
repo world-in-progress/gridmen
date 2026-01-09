@@ -32,7 +32,7 @@ class Patch(IPatch):
     The Grid Resource.  
     Grid is a 2D grid system that can be subdivided into smaller grids by pre-declared subdivide rules.  
     """
-    def __init__(self, schema_file: str, resource_space: str):
+    def __init__(self, schema_file: str, resource_space: str, **kwargs):
         """Method to initialize Grid
 
         Args:
