@@ -107,8 +107,6 @@ export default function PatchCreation({
     const map = mapContext.map!
     const drawInstance = mapContext.drawInstance!
 
-
-
     const pageContext = useRef<PageContext>({
         name: '',
         schema: null,

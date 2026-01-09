@@ -390,3 +390,14 @@ export const calculateGridCounts = (
 
     return { widthCount, heightCount }
 }
+
+export const convertBoundsCoordinates = async (
+    coordinates: [number, number, number, number],
+    fromEPSG: number,
+    toEPSG: number
+): Promise<[number, number, number, number]> => {
+    const sw = await convertPointCoordinate([coordinates[0], coordinates[1]], fromEPSG, toEPSG)
+    const ne = await convertPointCoordinate([coordinates[2], coordinates[3]], fromEPSG, toEPSG)
+
+    return [sw![0], sw![1], ne![0], ne![1]]
+}

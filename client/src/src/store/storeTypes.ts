@@ -34,6 +34,11 @@ export interface LayerStore {
     layers: Layer[]
     setLayers: (next: Layer[] | ((prev: Layer[]) => Layer[])) => void
     addNodeToLayerGroup: (node: ResourceNode) => void
+
+    layerNodes: ResourceNode[]
+    addLayerNode: (node: ResourceNode) => void
+    removeLayerNode: (nodeKey: string) => void
+    clearLayerNodes: () => void
 }
 
 export type ToolPanelTab = 'create' | 'check' | 'edit'
