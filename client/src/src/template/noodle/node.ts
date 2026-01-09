@@ -186,3 +186,35 @@ export const getNodeParams = async (node_key: string, isRemote: boolean) => {
         throw new Error(`Failed to get node params: ${error}`)
     }
 }
+
+export const linkNode = async (node_key: string, access_mode: 'r' | 'w', leadIP?: boolean) => {
+    const baseUrl = getApiBaseUrl(leadIP || false)
+    const url = `${baseUrl}${API_PREFIX}/link`
+
+    try {
+        const response = await fetch(url, { method: 'GET' })
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`)
+        }
+        const responseData: LinkNodeResponse = await response.json()
+        return responseData
+    } catch (error) {
+        throw new Error(`Failed to link node: ${error}`)
+    }
+}
+
+export const unlinkNode = async (node_key: string, lock_id: string, leadIP?: boolean) => {
+    const baseUrl = getApiBaseUrl(leadIP || false)
+    const url = `${baseUrl}${API_PREFIX}/unlink`
+
+    try {
+        const response = await fetch(url, { method: 'GET' })
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`)
+        }
+        const responseData: baseResponse = await response.json()
+        return responseData
+    } catch (error) {
+        throw new Error(`Failed to unlink node: ${error}`)
+    }
+}

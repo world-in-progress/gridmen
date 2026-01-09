@@ -17,12 +17,34 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
 
     const layers = useLayerStore((s) => s.layers)
     const setLayers = useLayerStore((s) => s.setLayers)
+    const removeLayerNode = useLayerStore((s) => s.removeLayerNode)
+    const clearLayerNodes = useLayerStore((s) => s.clearLayerNodes)
     const { isEditMode, setEditMode } = useLayerGroupStore()
 
     const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null)
     const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null)
     const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside' | null>(null)
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["resource-node"]))
+
+    const getResourceNodeGroup = (layersList: Layer[]) => {
+        return layersList.find((l) => l.id === 'resource-node' && l.type === 'group') || null
+    }
+
+    const collectLayerNodes = (layerList: Layer[]): ResourceNode[] => {
+        const nodes: ResourceNode[] = []
+        const visit = (items: Layer[]) => {
+            for (const item of items) {
+                if (item.type === 'Layer' && item.node) {
+                    nodes.push(item.node)
+                }
+                if (item.children && item.children.length > 0) {
+                    visit(item.children)
+                }
+            }
+        }
+        visit(layerList)
+        return nodes
+    }
 
     const toggleExpanded = (id: string) => {
         setExpandedGroups((prev) => {
@@ -246,7 +268,9 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             return nextLayers
         })
 
-        layer.node?.close()
+        // 同步维护 ResourceNode 列表
+        removeLayerNode(layer.node!.key)
+        layer.node!.close()
 
         setExpandedGroups(prev => {
             if (!prev.has(layer.id)) return prev
@@ -254,6 +278,23 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             next.delete(layer.id)
             return next
         })
+    }
+
+    const handleRemoveAllLayers = () => {
+        // 只清空 Resource Node 图层组内部的图层，不移除 Resource Node 组本身
+        const resourceGroup = getResourceNodeGroup(layers)
+        const nodesToClose = resourceGroup?.children ? collectLayerNodes(resourceGroup.children) : []
+        nodesToClose.forEach((n) => n.close())
+
+        setLayers((prev) =>
+            prev.map((layer) => {
+                if (layer.id !== 'resource-node' || layer.type !== 'group') {
+                    return layer
+                }
+                return { ...layer, children: [] }
+            })
+        )
+        clearLayerNodes()
     }
 
     const renderLayer = (layer: Layer, depth = 0) => {
@@ -393,7 +434,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                 <Button
                     variant="ghost"
                     className="group h-6 w-1/2 px-2 text-xs rounded-sm hover:bg-white/10 cursor-pointer"
-                    onClick={() => setLayers([])}
+                    onClick={handleRemoveAllLayers}
                 // TODO: 清空Resource Node内图层
                 >
                     <Trash2 className="w-4 h-4 text-gray-400 group-hover:text-red-500" />

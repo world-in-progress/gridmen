@@ -41,10 +41,26 @@ const DEFAULT_LAYERS: Layer[] = [
 
 export const useLayerStore = create<LayerStore>((set) => ({
     layers: DEFAULT_LAYERS,
+    layerNodes: [],
     setLayers: (next) => {
         set((state) => ({
             layers: typeof next === 'function' ? next(state.layers) : next,
         }))
+    },
+    addLayerNode: (node: ResourceNode) => {
+        set((state) => {
+            const exists = state.layerNodes.some((n) => n.key === node.key)
+            if (exists) return state
+            return { layerNodes: [...state.layerNodes, node] }
+        })
+    },
+    removeLayerNode: (nodeKey: string) => {
+        set((state) => ({
+            layerNodes: state.layerNodes.filter((n) => n.key !== nodeKey),
+        }))
+    },
+    clearLayerNodes: () => {
+        set({ layerNodes: [] })
     },
     addNodeToLayerGroup: (node: ResourceNode) => {
         const nextLayer: Layer = {
@@ -94,6 +110,13 @@ export const useLayerStore = create<LayerStore>((set) => ({
             }
 
             return { layers: update(state.layers) }
+        })
+
+        // 同步维护 ResourceNode 列表（与 layers 解耦）
+        set((state) => {
+            const exists = state.layerNodes.some((n) => n.key === node.key)
+            if (exists) return state
+            return { layerNodes: [...state.layerNodes, node] }
         })
     },
 }))
