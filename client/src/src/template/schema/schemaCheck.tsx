@@ -6,6 +6,7 @@ import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate } from '@/ut
 import { ResourceNode } from '../scene/scene'
 import * as api from '@/template/noodle/apis'
 import { SchemaData } from './types'
+import { linkNode } from '../noodle/node'
 
 interface SchemaCheckProps {
     node: IResourceNode
@@ -25,43 +26,76 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
     }, [])
 
     const loadContext = async () => {
-        const resourceNode = node as ResourceNode
-
-        // Normalize mount params into SchemaData regardless of who set mountParams.
-        let schemaData: SchemaData | null = null
-        const existing = resourceNode.mountParams as any
-
-        if (!existing) {
-            const schemaNode = await api.node.getNodeParams(node.key, resourceNode.tree.leadIP !== undefined ? true : false)
-            const parsed = JSON.parse(schemaNode.mount_params) as SchemaData
-            resourceNode.mountParams = parsed
-            schemaData = parsed
-        } else if (typeof existing === 'object' && typeof existing.mount_params === 'string') {
-            // Some callers store the raw response from getNodeParams.
-            schemaData = JSON.parse(existing.mount_params) as SchemaData
-            resourceNode.mountParams = schemaData
-        } else {
-            // Assume it's already SchemaData-compatible.
-            schemaData = existing as SchemaData
+        if (!(node as ResourceNode).lockId) {
+            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            (node as ResourceNode).lockId = linkResponse.lock_id
         }
 
-        if (schemaData) {
-            const alignmentOriginOn4326 = await convertPointCoordinate(schemaData.alignment_origin, schemaData.epsg, 4326)
-            addMapMarker(map, alignmentOriginOn4326!, node.key, { color: 'red' })
+        if ((node as ResourceNode).mountParams !== null) {
+            const schemaNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+            const parsed = JSON.parse(schemaNode.mount_params) as SchemaData
+            (node as ResourceNode).mountParams = parsed
 
-            // Register cleanup so layer.node?.close() can clear drawings.
-            resourceNode.context = {
-                ...(resourceNode.context ?? {}),
-                __cleanup: {
-                    ...((resourceNode.context as any)?.__cleanup ?? {}),
-                    marker: () => clearMarkerByNodeKey(node.key),
-                },
-            }
+            const alignmentOriginOn4326 = await convertPointCoordinate(parsed.alignment_origin, parsed.epsg, 4326)
+            addMapMarker(map, alignmentOriginOn4326!, node.key, { color: 'red' })
+        } else {
+            const alignmentOriginOn4326 = await convertPointCoordinate((node as ResourceNode).mountParams.alignment_origin, (node as ResourceNode).mountParams.epsg, 4326)
+            addMapMarker(map, alignmentOriginOn4326!, node.key, { color: 'red' })
+        }
+
+        (node as ResourceNode).context = {
+            ...((node as ResourceNode).context ?? {}),
+            __cleanup: {
+                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
+                marker: () => clearMarkerByNodeKey(node.key),
+            },
         }
 
         triggerRepaint()
     }
 
+    // const loadContext = async () => {
+    //     const resourceNode = node as ResourceNode
+
+    //     // Normalize mount params into SchemaData regardless of who set mountParams.
+    //     let schemaData: SchemaData | null = null
+    //     const existing = resourceNode.mountParams as any
+
+    //     if (!existing) {
+    //         const schemaNode = await api.node.getNodeParams(node.key, resourceNode.tree.leadIP !== undefined ? true : false)
+    //         const parsed = JSON.parse(schemaNode.mount_params) as SchemaData
+    //         resourceNode.mountParams = parsed
+    //         schemaData = parsed
+    //     } else if (typeof existing === 'object' && typeof existing.mount_params === 'string') {
+    //         // Some callers store the raw response from getNodeParams.
+    //         schemaData = JSON.parse(existing.mount_params) as SchemaData
+    //         resourceNode.mountParams = schemaData
+    //     } else {
+    //         // Assume it's already SchemaData-compatible.
+    //         schemaData = existing as SchemaData
+    //     }
+
+    //     if (schemaData) {
+    //         if (!resourceNode.lockId) {
+    //             const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', resourceNode.tree.leadIP !== undefined ? true : false)
+    //             resourceNode.lockId = linkResponse.lock_id
+    //         }
+
+    //         const alignmentOriginOn4326 = await convertPointCoordinate(schemaData.alignment_origin, schemaData.epsg, 4326)
+    //         addMapMarker(map, alignmentOriginOn4326!, node.key, { color: 'red' })
+
+    //         // Register cleanup so layer.node?.close() can clear drawings.
+    //         resourceNode.context = {
+    //             ...(resourceNode.context ?? {}),
+    //             __cleanup: {
+    //                 ...((resourceNode.context as any)?.__cleanup ?? {}),
+    //                 marker: () => clearMarkerByNodeKey(node.key),
+    //             },
+    //         }
+    //     }
+
+    //     triggerRepaint()
+    // }
 
     const unloadContext = () => {
         // cleanup is handled by node.close() when the layer is removed

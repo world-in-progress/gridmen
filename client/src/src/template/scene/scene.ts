@@ -2,10 +2,11 @@ import * as api from '../noodle/apis'
 import { IResourceNode, IResourceTree } from "./iscene"
 import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
 import { ITemplate } from '../iTemplate'
+import { unlinkNode } from '../noodle/node'
 
 export class ResourceNode implements IResourceNode {
     key: string
-    lockId: string = ''
+    lockId: string | null = null
     aligned: boolean = false
     isTemp: boolean = false
     tree: ResourceTree
@@ -14,7 +15,7 @@ export class ResourceNode implements IResourceNode {
     children: Map<string, IResourceNode> = new Map()
 
     context: any
-    mountParams: any
+    mountParams: any | null = null
 
     get id(): string { return this.key }
     get name(): string { return this.key.split('.').pop() || '' }
@@ -32,7 +33,7 @@ export class ResourceNode implements IResourceNode {
         this.mountParams = undefined
     }
 
-    close(): void {
+    async close(): Promise<void> {
         // Generic cleanup hook:
         // Any view (check/create/edit) may register cleanup callbacks into node.context.__cleanup.
         // close() will execute and clear them without knowing resource-specific details.
@@ -41,6 +42,9 @@ export class ResourceNode implements IResourceNode {
             dispose?.()
         }
         delete (this.context as any).__cleanup
+
+        const unlinkResponse = await unlinkNode(this.key, this.lockId!, this.tree.leadIP !== undefined ? true : false)
+        this.lockId = null
     }
 }
 

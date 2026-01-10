@@ -45,7 +45,7 @@ export const clearMapAllMarkers = () => {
 }
 
 export const clearMarkerByNodeKey = (nodeKey: string) => {
-    console.log('clearMarkerByNodeKey', nodeKey)
+    console.log('clearMarkerByNodeKey执行了')
     const marker = markerMap.get(nodeKey)
     if (marker) {
         marker.remove()

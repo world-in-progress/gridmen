@@ -372,6 +372,9 @@ export default function PatchCreation({
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
 
+            // tree.selectedNode is mutable; notify before switching tabs so ToolPanel receives null selectedNode
+            ; (node.tree as ResourceTree).notifyDomUpdate()
+
             // 根据 layerGroup 模式恢复 toolPanel 状态
             const { isEditMode } = useLayerGroupStore.getState()
             useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')

@@ -187,9 +187,9 @@ export const getNodeParams = async (node_key: string, isRemote: boolean) => {
     }
 }
 
-export const linkNode = async (node_key: string, access_mode: 'r' | 'w', leadIP?: boolean) => {
+export const linkNode = async (icrm_tag: string, node_key: string, access_mode: 'r' | 'w', leadIP?: boolean) => {
     const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/link`
+    const url = `${baseUrl}${API_PREFIX}/link?icrm_tag=${icrm_tag}&node_key=${node_key}&access_mode=${access_mode}`
 
     try {
         const response = await fetch(url, { method: 'GET' })
@@ -205,7 +205,7 @@ export const linkNode = async (node_key: string, access_mode: 'r' | 'w', leadIP?
 
 export const unlinkNode = async (node_key: string, lock_id: string, leadIP?: boolean) => {
     const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/unlink`
+    const url = `${baseUrl}${API_PREFIX}/unlink?node_key=${node_key}&lock_id=${lock_id}`
 
     try {
         const response = await fetch(url, { method: 'GET' })

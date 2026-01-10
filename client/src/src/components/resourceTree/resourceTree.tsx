@@ -12,6 +12,7 @@ import {
     RefreshCcw,
     ChevronDown,
     ChevronRight,
+    SquaresUnite,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/utils/utils'
@@ -513,6 +514,8 @@ const NodeRenderer = ({
                                             return <MapPin className={cn(node.isTemp ? 'text-white' : 'text-red-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
                                         case 'patch':
                                             return <Square className={cn(node.isTemp ? 'text-white' : 'text-sky-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
+                                        case 'grid':
+                                            return <SquaresUnite className={cn(node.isTemp ? 'text-white' : 'text-amber-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
                                         default:
                                             return <File className='w-4 h-4 mr-2 ml-4.5 text-blue-500' />
                                     }

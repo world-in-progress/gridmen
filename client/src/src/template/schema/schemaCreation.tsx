@@ -415,6 +415,7 @@ export default function SchemaCreation({
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
+                ; (node.tree as ResourceTree).notifyDomUpdate()
 
             const { isEditMode } = useLayerGroupStore.getState()
             useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')

@@ -132,6 +132,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
     }
 
     const triggerNodeCheck = (node: ResourceNode) => {
+        console.log(node.lockId)
         const tree = node.tree as ResourceTree
         const handler = tree.getNodeMenuHandler()
         const { isEditMode } = useLayerGroupStore.getState()
