@@ -32,31 +32,39 @@ class Patch(IPatch):
     The Grid Resource.  
     Grid is a 2D grid system that can be subdivided into smaller grids by pre-declared subdivide rules.  
     """
-    def __init__(self, schema_file: str, resource_space: str, **kwargs):
+    def __init__(self, resource_space: str, **kwargs):
         """Method to initialize Grid
 
         Args:
-            schema_file (str): Path to the schema file
             resource_space (str): Path to the resource directory of grid patch
         """
-        # Get info from schema file
-        with open(schema_file, 'r') as f:
-            schema = json.load(f)
-        epsg: int = schema['epsg']
-        grid_info: list[list[float]] = schema['grid_info']
-        first_size: list[float] = grid_info[0]
-        
+        # Get info from schema file 
+        self.resource_space = Path(resource_space)
+        self.meta_file = self.resource_space / 'patch.meta.json'
+
+        if not self.resource_space.exists():
+            raise FileNotFoundError(f"Patch resource directory not found: {resource_space}")
+    
+        if not self.meta_file.exists():
+            raise FileNotFoundError(f"Patch meta file not found at {self.meta_file}. Resource might be corrupted or not initialized properly.")
+
         # Get info from patch meta file
-        meta_file = Path(resource_space) / 'patch.meta.json'
-        if not meta_file.exists():
-            # If meta file doesn't exist, use default values
-            # Typically this should be handled in hooks or initialization
-            bounds = [0.0, 0.0, 100.0, 100.0]
-        else:
-            with open(meta_file, 'r') as f:
+        try:
+            with open(self.meta_file, 'r') as f:
                 meta = json.load(f)
             bounds: list[float] = meta['bounds']
-        
+            
+            # Read schema info from nested 'schema' object
+            schema_data = meta.get('schema')
+            if not schema_data:
+                raise KeyError("Missing 'schema' object in patch meta")
+            
+            epsg: int = schema_data['epsg']
+            grid_info: list[list[float]] = schema_data['grid_info']
+            first_size: list[float] = grid_info[0]
+        except (KeyError, IndexError) as e:
+            raise ValueError(f"Failed to decode patch meta file: {e}")
+
         # Calculate subdivide rules
         subdivide_rules: list[list[int]] = [
             [
@@ -161,7 +169,7 @@ class Patch(IPatch):
                     self._initialize_default()
             else:
                 # Initialize patch data using default method
-                logger.warning('Grid file does not exist, initializing default patch data...')
+                logger.info('Grid file does not exist, initializing default patch data...')
                 self._initialize_default()
                 logger.info('Successfully initialized default patch data')
             logger.info('Patch initialized successfully')
@@ -360,7 +368,7 @@ class Patch(IPatch):
 
         Args:
             levels (list[int]): Array of levels for each grid to subdivide
-            global_ids (list[int]): Array of global IDs for each grid to subdivide
+            global_ids (list[int): Array of global IDs for each grid to subdivide
 
         Returns:
             tuple[list[int], list[int]]: The levels and global IDs of the subdivided grids.
