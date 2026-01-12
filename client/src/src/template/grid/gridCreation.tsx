@@ -1,4 +1,4 @@
-import React, { useReducer, useState } from 'react'
+import React, { useEffect, useReducer, useState } from 'react'
 import {
     AlertDialog,
     AlertDialogTitle,
@@ -57,6 +57,32 @@ export default function GridCreation({
     const [highlightedResource, setHighlightedResource] = useState<string | null>(null)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
+
+    useEffect(() => {
+        loadContext()
+
+        return () => {
+            unloadContext()
+        }
+    }, [])
+
+    const loadContext = () => {
+        if ((node as ResourceNode).context !== undefined) {
+            pageContext.current = { ...(node as ResourceNode).context }
+        } else {
+            pageContext.current.name = node.name.split('.')[0]
+        }
+
+        triggerRepaint()
+    }
+
+    const unloadContext = () => {
+        (node as ResourceNode).context = {
+            ...pageContext.current
+        }
+
+        return
+    }
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault()
@@ -244,23 +270,19 @@ export default function GridCreation({
                 </div>
             </div>
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-2/3 mx-auto mt-4 mb-4 space-y-4 pb-4'>
+                <div className='w-full mx-auto space-y-2 px-6 pt-2 pb-4'>
                     {/* ----------- */}
                     {/* Grid Name */}
                     {/* ----------- */}
                     <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
                         <h2 className='text-lg text-black font-semibold mb-2'>
-                            Grid Name
+                            New Grid Name
                         </h2>
                         <div className='space-y-2'>
                             <Input
                                 id='name'
                                 value={pageContext.current.name}
-                                onChange={(e) => {
-                                    pageContext.current.name = e.target.value
-                                    triggerRepaint()
-                                }}
-                                placeholder={'Enter new grid name'}
+                                readOnly={true}
                                 className={`w-full text-black border-gray-300`}
                             />
                         </div>

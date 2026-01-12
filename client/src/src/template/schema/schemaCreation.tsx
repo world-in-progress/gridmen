@@ -262,7 +262,7 @@ export default function SchemaCreation({
         }
     }, [])
 
-    const loadContext = async () => {
+    const loadContext = () => {
         if ((node as ResourceNode).context !== undefined) {
             pageContext.current = { ...(node as ResourceNode).context }
         } else {
@@ -272,7 +272,7 @@ export default function SchemaCreation({
         triggerRepaint()
     }
 
-    const unloadContext = async () => {
+    const unloadContext = () => {
         (node as ResourceNode).context = {
             ...pageContext.current
         }

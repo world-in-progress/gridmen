@@ -134,7 +134,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (!map) return
 
         // 加载中
-        await linkNode(node.key, 'r')
+        await linkNode('cc/IPatch/0.1.0', node.key, 'r', node.tree.leadIP !== undefined ? true : false);
 
         const waitForMapLoad = () => {
             return new Promise<void>((resolve) => {
