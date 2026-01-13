@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import * as api from '../noodle/apis'
+import * as api from '../api/apis'
 import { SchemaData } from '../schema/types'
 import { Input } from '@/components/ui/input'
 import { ResourceNode, ResourceTree } from '../scene/scene'
@@ -372,8 +372,8 @@ export default function PatchCreation({
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
 
-            // tree.selectedNode is mutable; notify before switching tabs so ToolPanel receives null selectedNode
-            ; (node.tree as ResourceTree).notifyDomUpdate()
+                // tree.selectedNode is mutable; notify before switching tabs so ToolPanel receives null selectedNode
+                ; (node.tree as ResourceTree).notifyDomUpdate()
 
             // 根据 layerGroup 模式恢复 toolPanel 状态
             const { isEditMode } = useLayerGroupStore.getState()

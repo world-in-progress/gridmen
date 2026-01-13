@@ -1,5 +1,5 @@
 import DefaultTemplate from "../default/default"
-import * as api from '../noodle/apis'
+import * as api from '../api/apis'
 import { IResourceNode } from "../scene/iscene"
 import { IViewContext } from "@/views/IViewContext"
 import GridCheck from "./gridCheck"

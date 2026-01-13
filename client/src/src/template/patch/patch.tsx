@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import * as api from '../noodle/apis'
+import * as api from '../api/apis'
 import { ITemplate } from "../iTemplate"
 import { ResourceNode, ResourceTree } from "../scene/scene"
 import { IResourceNode } from "../scene/iscene"
@@ -10,7 +10,7 @@ import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-men
 import PatchCreation from './patchCreation'
 import PatchCheck from './patchCheck'
 import PatchEdit from './patchEdit'
-import { linkNode } from '../noodle/node'
+import { linkNode } from '../api/node'
 
 enum PatchMenuItem {
     CREATE_PATCH = 'Create Patch',
@@ -89,7 +89,8 @@ export default class PatchTemplate implements ITemplate {
                     const linkResponse = await linkNode('cc/IPatch/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
-                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                // const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                const patchInfo = await api.patch.getPatchMeta(node.key, (node as ResourceNode).lockId!, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
                 (node as ResourceNode).mountParams = patchInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }

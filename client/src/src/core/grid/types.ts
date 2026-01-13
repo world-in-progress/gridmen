@@ -1,6 +1,7 @@
 import BoundingBox2D from '../util/boundingBox2D';
 import type { Converter } from 'proj4/dist/lib/core'
 import { MercatorCoordinate } from '../math/mercatorCoordinate';
+import { ResourceNode } from '@/template/scene/scene';
 
 export const EDGE_CODE_INVALID = -1;
 export const EDGE_CODE_NORTH = 0b00;
@@ -44,6 +45,8 @@ export interface StructuredGridRenderVertices {
 }
 
 export type GridContext = {
+    noodleKey: string
+    lockId: string
     srcCS: string;
     targetCS: string;
     bBox: BoundingBox2D;
@@ -307,12 +310,12 @@ export class MultiGridInfoParser {
             });
 
             if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
+                throw new Error(`HTTP error! Status: ${response.status}`);
             }
 
             const buffer = await response.arrayBuffer();
             return MultiGridInfoParser.fromBuffer(buffer);
-            
+
         } catch (error) {
             console.error('Failed to fetch MultiGridInfo:', error);
             throw error;
@@ -369,12 +372,12 @@ export class GridKeyHashTable {
         this._hashTableSize = Math.max(8192, size * 2)
         this._hashTableSize = Math.pow(2, Math.ceil(Math.log2(this._hashTableSize)))
         this._hashTableMask = this._hashTableSize - 1
-        
+
         this._gridKeyHashTable = new Uint32Array(this._hashTableSize * 2)
         this._gridStorageIdTable = new Uint32Array(this._hashTableSize)
         this._gridStorageIdTable.fill(0xFFFFFFFF)
     }
-    
+
     private _hash(level: number, globalId: number): number {
         // Simplified version of FNV-1a hash algorithm
         let hash = 2166136261
@@ -384,72 +387,72 @@ export class GridKeyHashTable {
         hash *= 16777619
         return (hash >>> 0) & this._hashTableMask // ensure positive value and limit within table size
     }
-    
+
     private _findSlot(level: number, globalId: number): number {
         let hash = this._hash(level, globalId)
-        
+
         while (this._gridStorageIdTable[hash] !== 0xFFFFFFFF) {
             const storedLevel = this._gridKeyHashTable[hash * 2]
             const storedGlobalId = this._gridKeyHashTable[hash * 2 + 1]
-            
+
             if (storedLevel === level && storedGlobalId === globalId) {
                 return hash
             }
-            
+
             hash = (hash + 1) & this._hashTableMask
         }
-        
+
         return hash
     }
-    
+
     get(level: number, globalId: number): number | undefined {
         let hash = this._hash(level, globalId)
-        
+
         while (this._gridStorageIdTable[hash] !== 0xFFFFFFFF) {
             const storedLevel = this._gridKeyHashTable[hash * 2]
             const storedGlobalId = this._gridKeyHashTable[hash * 2 + 1]
-            
+
             if (storedLevel === level && storedGlobalId === globalId) {
                 return this._gridStorageIdTable[hash]
             }
-            
+
             hash = (hash + 1) & this._hashTableMask
         }
-        
+
         return undefined
     }
-    
+
     update(storageId: number, level: number, globalId: number) {
         const slot = this._findSlot(level, globalId)
         this._gridKeyHashTable[slot * 2] = level
         this._gridKeyHashTable[slot * 2 + 1] = globalId
         this._gridStorageIdTable[slot] = storageId
     }
-    
+
     delete(level: number, globalId: number) {
         let hash = this._hash(level, globalId)
-        
+
         while (this._gridStorageIdTable[hash] !== 0xFFFFFFFF) {
             const storedLevel = this._gridKeyHashTable[hash * 2]
             const storedGlobalId = this._gridKeyHashTable[hash * 2 + 1]
-            
+
             if (storedLevel === level && storedGlobalId === globalId) {
                 this._gridStorageIdTable[hash] = 0xFFFFFFFF
-                
+
                 let nextHash = (hash + 1) & this._hashTableMask
                 while (this._gridStorageIdTable[nextHash] !== 0xFFFFFFFF) {
                     const nextLevel = this._gridKeyHashTable[nextHash * 2]
                     const nextGlobalId = this._gridKeyHashTable[nextHash * 2 + 1]
                     const nextStorageId = this._gridStorageIdTable[nextHash]
-                    
+
                     this._gridStorageIdTable[nextHash] = 0xFFFFFFFF
                     this.update(nextStorageId, nextLevel, nextGlobalId)
-                    
+
                     nextHash = (nextHash + 1) & this._hashTableMask
                 }
                 break
             }
-            
+
             hash = (hash + 1) & this._hashTableMask
         }
     }

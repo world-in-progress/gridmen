@@ -2,8 +2,9 @@ import proj4 from 'proj4'
 import Dispatcher from '../message/dispatcher'
 import { MercatorCoordinate } from '../math/mercatorCoordinate'
 import { GridContext, GridCheckingInfo, GridSaveInfo, MultiGridBaseInfo, StructuredGridRenderVertices, GridKeyHashTable } from './types'
+import { ResourceNode } from '@/template/scene/scene'
 
-proj4.defs('EPSG:2326',"+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs")
+proj4.defs('EPSG:2326', "+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs")
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
@@ -43,9 +44,12 @@ export interface GridRecordOptions {
 
 export default class GridCore {
     // Grid metadata
+    key: string
     maxGridNum: number
     levelInfos: GridLevelInfo[]
     renderRelativeCenter: Float32Array
+
+    private _lockId: string
 
     // Worker dispatcher
     private _dispatcher: Dispatcher
@@ -57,8 +61,10 @@ export default class GridCore {
     private _gridGlobalIdCache: Uint32Array
     private _gridKey_storageId_dict: GridKeyHashTable
 
-    constructor(public context: GridContext, public isRemote: boolean, options: GridRecordOptions = {}) {
+    constructor(public context: GridContext, options: GridRecordOptions = {}) {
         // Init metadata
+        this.key = context.noodleKey
+        this._lockId = context.lockId
         this.maxGridNum = options.maxGridNum ?? 4096 * 4096
         this.levelInfos = new Array<GridLevelInfo>(this.context.rules.length)
         this.context.rules.forEach((_, level, rules) => {
@@ -113,7 +119,8 @@ export default class GridCore {
         // Brodcast actors to init grid manager and initialize grid cache
         this._dispatcher.broadcast('setGridManager', this.context, () => {
             // Get activate grid information
-            this._dispatcher.actor.send('getGridInfo', this.isRemote, (_, baseInfo: MultiGridBaseInfo) => {
+            this._dispatcher.actor.send('getGridInfo', { node_key: this.key, lock_id: this._lockId }, (_, baseInfo: MultiGridBaseInfo) => {
+                console.log('GridCore init getGridInfo', baseInfo)
                 this.updateMultiGridRenderInfo(baseInfo, callback)
             })
         })
@@ -126,7 +133,7 @@ export default class GridCore {
             const storageId = this._nextStorageId + i
             this._gridKey_storageId_dict.update(storageId, baseInfo.levels[i], baseInfo.globalIds[i])
         }
-        
+
         // Get render vertices of all grids
         this._gridLevelCache.set(baseInfo.levels, this._nextStorageId)
         this._gridDeletedCache.set(baseInfo.deleted!, this._nextStorageId)
@@ -199,9 +206,9 @@ export default class GridCore {
             removableGlobalIds[index] = globalId
         })
 
-       for (let i = 0; i < removableGridNum; i++) {
+        for (let i = 0; i < removableGridNum; i++) {
             this._gridKey_storageId_dict.delete(removableLevels[i], removableGlobalIds[i])
-       } 
+        }
 
         const maintainedGridNum = this.gridNum - removableGridNum
         const replacedGridNum = maintainedGridNum > removableGridNum ? removableGridNum : maintainedGridNum
@@ -236,7 +243,7 @@ export default class GridCore {
         const removableStorageIds: number[] = []    // target storageIds to be removed
         storageIds.forEach((storageId, index) => {
             if (index > replacedGridInfo.length - 1) return
-            
+
             // Replace removable render info with the last render info in the cache
             const [replacedStorageId, replacedLevel, replacedGlobalId, replacedDeleted] = replacedGridInfo[index]
             this._gridLevelCache[storageId] = replacedLevel
@@ -248,7 +255,7 @@ export default class GridCore {
             removableStorageIds.push(storageId)
         })
         callback && callback([
-            replacedStorageIds, 
+            replacedStorageIds,
             removableStorageIds,
         ])
     }
@@ -270,7 +277,7 @@ export default class GridCore {
             this._gridDeletedCache[storageId] = DELETED_FLAG
         }
         // Mark provided grids as deleted
-        this._dispatcher.actor.send('deleteGrids', { levels, globalIds, isRemote: this.isRemote }, () => {
+        this._dispatcher.actor.send('deleteGrids', { levels, globalIds, node_key: this.key, lock_id: this._lockId }, () => {
             callback && callback()
         })
     }
@@ -286,7 +293,7 @@ export default class GridCore {
             this._gridDeletedCache[storageId] = UNDELETED_FLAG
         }
         // Recover provided grids
-        this._dispatcher.actor.send('recoverGrids', { levels, globalIds, isRemote: this.isRemote }, () => {
+        this._dispatcher.actor.send('recoverGrids', { levels, globalIds, node_key: this.key, lock_id: this._lockId }, () => {
             callback && callback()
         })
     }
@@ -297,9 +304,9 @@ export default class GridCore {
      * Info stored in cache (indexed by storageIds) of the subdividable grids is replaced because of the previous delete operation,
      * use storageIds to get info of subdividable grids is incorrect.
      */
-    subdivideGrids(subdivideInfos: {levels: Uint8Array, globalIds: Uint32Array}, callback?: Function): void {
+    subdivideGrids(subdivideInfos: { levels: Uint8Array, globalIds: Uint32Array }, callback?: Function): void {
         // Dispatch a worker to subdivide the grids
-        this._dispatcher.actor.send('subdivideGrids', { ...subdivideInfos, isRemote: this.isRemote }, (_, baseInfo: MultiGridBaseInfo) => {
+        this._dispatcher.actor.send('subdivideGrids', { ...subdivideInfos, node_key: this.key, lock_id: this._lockId }, (_, baseInfo: MultiGridBaseInfo) => {
             baseInfo.deleted = new Uint8Array(baseInfo.levels.length).fill(UNDELETED_FLAG)
             this.updateMultiGridRenderInfo(baseInfo, callback)
         })
@@ -315,7 +322,7 @@ export default class GridCore {
             globalIds[i] = globalId
         }
         // Merge provided grids
-        this._dispatcher.actor.send('mergeGrids', { levels, globalIds, isRemote: this.isRemote }, (_: any, parentInfo: MultiGridBaseInfo) => {
+        this._dispatcher.actor.send('mergeGrids', { levels, globalIds, node_key: this.key, lock_id: this._lockId }, (_: any, parentInfo: MultiGridBaseInfo) => {
             // Get storageIds of all child grids
             const childStorageIds: number[] = []
             const parentNum = parentInfo.levels.length
@@ -330,12 +337,12 @@ export default class GridCore {
                     })
                 }
             }
-            callback && callback({childStorageIds, parentInfo})
+            callback && callback({ childStorageIds, parentInfo })
         })
     }
 
     getGridInfoByFeature(path: string, callback?: Function) {
-        this._dispatcher.actor.send('getGridInfoByFeature', { path, isRemote: this.isRemote }, (_, gridInfo: {levels: Uint8Array, globalIds: Uint32Array}) => {
+        this._dispatcher.actor.send('getGridInfoByFeature', { path, node_key: this.key, lock_id: this._lockId }, (_, gridInfo: { levels: Uint8Array, globalIds: Uint32Array }) => {
             const { levels, globalIds } = gridInfo
             const gridNum = levels.length
             const storageIds: number[] = new Array(gridNum)
@@ -411,7 +418,7 @@ export default class GridCore {
     }
 
     save(callback: Function) {
-        this._dispatcher.actor.send('saveGrids', this.isRemote, (_: any, gridInfo: GridSaveInfo) => {
+        this._dispatcher.actor.send('saveGrids', { node_key: this.key, lock_id: this._lockId }, (_: any, gridInfo: GridSaveInfo) => {
             callback && callback(gridInfo)
         })
     }
@@ -422,7 +429,7 @@ export default class GridCore {
 function encodeFloatToDouble(value: number) {
     const result = new Float32Array(2);
     result[0] = value;
-  
+
     const delta = value - result[0];
     result[1] = delta;
     return result;

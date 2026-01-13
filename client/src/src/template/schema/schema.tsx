@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import * as api from '../noodle/apis'
+import * as api from '../api/apis'
 import SchemaEdit from "./schemaEdit"
 import SchemaCheck from "./schemaCheck"
 import { ITemplate } from "../iTemplate"
@@ -10,7 +10,7 @@ import { IViewContext } from "@/views/IViewContext"
 import { ResourceNode, ResourceTree } from "../scene/scene"
 import { Delete, Edit3, FilePlusCorner, Info } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
-import { linkNode } from '../noodle/node'
+import { linkNode } from '../api/node'
 
 enum SchemaMenuItem {
     CREATE_SCHEMA = 'Create Schema',

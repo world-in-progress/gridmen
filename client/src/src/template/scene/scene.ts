@@ -1,8 +1,8 @@
-import * as api from '../noodle/apis'
+import * as api from '../api/apis'
 import { IResourceNode, IResourceTree } from "./iscene"
 import { TEMPLATE_REGISTRY } from '@/registry/templateRegistry'
 import { ITemplate } from '../iTemplate'
-import { unlinkNode } from '../noodle/node'
+import { unlinkNode } from '../api/node'
 
 export class ResourceNode implements IResourceNode {
     key: string
@@ -45,6 +45,10 @@ export class ResourceNode implements IResourceNode {
 
         await unlinkNode(this.key, this.lockId!, this.tree.leadIP !== undefined ? true : false)
         this.lockId = null
+    }
+
+    get noodleKey(): string {
+        return this.tree.leadIP ? `${this.tree.leadIP}::${this.key}` : this.key
     }
 }
 

@@ -9,6 +9,7 @@ export function extractIPFromUrl(url: string): string {
     }
 }
 
+// TODO:传入noodle key做字符串匹配
 export function getApiBaseUrl(useRemoteIP: boolean = false): string {
     if (useRemoteIP) {
         const publicIP = useSettingStore.getState().publicIP

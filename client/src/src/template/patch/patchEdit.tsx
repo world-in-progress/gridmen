@@ -14,27 +14,22 @@ import { useSettingStore } from '@/store/storeSet'
 import store from '@/store/store'
 import { ResourceNode } from '../scene/scene'
 import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
-import { getNodeParams, linkNode } from '../noodle/node'
+import { getNodeParams, linkNode } from '../api/node'
 import { GridContext } from '@/core/grid/types'
 import { boundingBox2D } from '@/core/util/boundingBox2D'
 import GridCore from '@/core/grid/NHGridCore'
 import { convertBoundsCoordinates } from '@/utils/utils'
-import * as api from '@/template/noodle/apis'
+import * as api from '@/template/api/apis'
 import { SchemaData } from '../schema/types'
+import { PatchMeta } from '../api/types'
 
 interface PatchEditProps {
     node: IResourceNode
     context: IViewContext
 }
 
-interface patchInfo {
-    name: string
-    bounds: [number, number, number, number]
-    schema: SchemaData
-}
-
 interface PageContext {
-    patch: patchInfo | null
+    patch: PatchMeta | null
     schema: SchemaData | null
     topologyLayer: TopologyLayer | null
     gridCore: GridCore | null
@@ -145,20 +140,23 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         if ((node as ResourceNode).mountParams === null) {
-            const patchNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
-            (node as ResourceNode).mountParams = patchNode
-            pageContext.current.patch = JSON.parse(patchNode.mount_params)
+            // const patchNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            // (node as ResourceNode).mountParams = patchNode
+            const patchInfo = await api.patch.getPatchMeta(node.key, (node as ResourceNode).lockId!, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            (node as ResourceNode).mountParams = patchInfo
+            // pageContext.current.patch = JSON.parse(patchInfo)
+            pageContext.current.patch = patchInfo
             console.log('patch', pageContext.current.patch)
         } else {
-            pageContext.current.patch = JSON.parse((node as ResourceNode).mountParams.mount_params)
+            pageContext.current.patch = (node as ResourceNode).mountParams
             console.log('patch', pageContext.current.patch)
         }
 
         // TODO: 移入点击菜单的瞬间
-        if (pageContext.current.schema === null) {
-            const schemaNode = await getNodeParams(pageContext.current.patch!.schema_node_key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-            pageContext.current.schema = JSON.parse(schemaNode.mount_params) as SchemaData
-        }
+        // if (pageContext.current.schema === null) {
+        //     const schemaNode = await getNodeParams(pageContext.current.patch!.schema_node_key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+        //     pageContext.current.schema = JSON.parse(schemaNode.mount_params) as SchemaData
+        // }
 
         const waitForMapLoad = () => {
             return new Promise<void>((resolve) => {
@@ -192,24 +190,22 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
         // // If the patch/schema is defined in EPSG:4326, convert bounds to EPSG:3857 (meters)
         // // so grid construction and sizing operate in meters.
-        const srcCS = `EPSG:${pageContext.current.patch?.epsg}`
-        const bBoxCoords = pageContext.current.patch!.bounds as [number, number, number, number]
-
-        console.log('srcCS', srcCS)
-        console.log('bounds', bBoxCoords)
 
         const gridContext: GridContext = {
-            // srcCS: `EPSG:${pageContext.current.patch?.epsg}`,
-            srcCS: srcCS,
+            noodleKey: node.noodleKey,
+            lockId: node.lockId!,
+            srcCS: `EPSG:${pageContext.current.patch?.epsg}`,
             targetCS: 'EPSG:4326',
-            // bBox: boundingBox2D(...pageContext.current.patch!.bounds),
-            bBox: boundingBox2D(...bBoxCoords),
+            bBox: boundingBox2D(...pageContext.current.patch!.bounds as [number, number, number, number]),
             rules: pageContext.current.patch!.subdivide_rules
         }
+
         const gridLayer = new TopologyLayer(map)
         clg.addLayer(gridLayer)
-        const gridCore: GridCore = new GridCore(gridContext, node.tree.leadIP ? true : false)
+
+        const gridCore: GridCore = new GridCore(gridContext)
         await gridLayer.initialize(map, map.painter.context.gl)
+
         pageContext.current.topologyLayer = gridLayer
         gridLayer.gridCore = gridCore
         pageContext.current.gridCore = gridCore

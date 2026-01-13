@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import * as api from '../noodle/apis'
+import * as api from '../api/apis'
 import DefaultPage from "./defaultPage"
 import { ITemplate } from "../iTemplate"
 import { IResourceNode } from "../scene/iscene"

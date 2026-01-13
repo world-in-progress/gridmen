@@ -31,5 +31,5 @@ register(func)
 import * as gridUtils from "../grid/util.worker"
 register(gridUtils)
 
-import * as sceneUtils from "@/components/utils/util.worker"
+import * as sceneUtils from "@/template/api/node"
 register(sceneUtils)

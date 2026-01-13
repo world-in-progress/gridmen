@@ -4,9 +4,9 @@ import { MapViewContext } from '@/views/mapView/mapView'
 import { IResourceNode } from '../scene/iscene'
 import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate } from '@/utils/utils'
 import { ResourceNode } from '../scene/scene'
-import * as api from '@/template/noodle/apis'
+import * as api from '@/template/api/apis'
 import { SchemaData } from './types'
-import { linkNode } from '../noodle/node'
+import { linkNode } from '../api/node'
 
 interface SchemaCheckProps {
     node: IResourceNode

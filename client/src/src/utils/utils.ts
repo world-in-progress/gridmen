@@ -2,7 +2,7 @@ import proj4 from 'proj4'
 import mapboxgl from 'mapbox-gl'
 import { twMerge } from "tailwind-merge"
 import { clsx, type ClassValue } from "clsx"
-import * as apis from '@/template/noodle/apis'
+import * as apis from '@/template/api/apis'
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 
 export function cn(...inputs: ClassValue[]) {

@@ -49,3 +49,13 @@ export interface UnlinkNodeParams {
     node_key: string
     lock_id: string
 }
+
+export interface PatchMeta {
+    name: string
+    epsg: number
+    starred: boolean
+    description: string
+    alignment_origin: [number, number]
+    subdivide_rules: [number, number][]
+    bounds: [number, number, number, number]
+}

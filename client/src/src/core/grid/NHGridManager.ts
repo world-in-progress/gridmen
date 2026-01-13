@@ -26,7 +26,7 @@ export class GridEdgeManager {
     edgeKey_cache = new Array<string>();
     edge_adjGridStorageIds_cache = new Array<number[]>();
 
-    constructor() {}
+    constructor() { }
 
     release(): null {
         this.edgeKey_cache = [];
@@ -616,6 +616,7 @@ export default class GridManager {
 
     set context(context: GridContext) {
         // Update projection converter
+        // TODO: 改成后端动态返回
         this._projConverter = proj4(context.srcCS, context.targetCS);
 
         // Update subdivide rules first
@@ -1100,7 +1101,7 @@ export default class GridManager {
         const verticesLow = new Float32Array(8);
         const vertexBuffer = new Float32Array(gridNum * 8);
         const vertexBufferLow = new Float32Array(gridNum * 8);
-        
+
         for (let i = 0; i < gridNum; i++) {
             const level = levels[i]
             const globalId = globalIds[i]
@@ -1119,7 +1120,7 @@ export default class GridManager {
             vertexBufferLow[gridNum * 2 * 1 + i * 2 + 0] = verticesLow[2];
             vertexBufferLow[gridNum * 2 * 1 + i * 2 + 1] = verticesLow[3];
             vertexBufferLow[gridNum * 2 * 2 + i * 2 + 0] = verticesLow[4];
-            vertexBufferLow[gridNum * 2 * 2 + i * 2 + 1] = verticesLow[5];  
+            vertexBufferLow[gridNum * 2 * 2 + i * 2 + 1] = verticesLow[5];
             vertexBufferLow[gridNum * 2 * 3 + i * 2 + 0] = verticesLow[6];
             vertexBufferLow[gridNum * 2 * 3 + i * 2 + 1] = verticesLow[7];
         };
@@ -1142,7 +1143,7 @@ export default class GridManager {
         const trBufferLow = new Float32Array(gridNum * 2);
         const blBufferLow = new Float32Array(gridNum * 2);
         const brBufferLow = new Float32Array(gridNum * 2);
-        
+
         for (let i = 0; i < gridNum; i++) {
             const level = levels[i]
             const globalId = globalIds[i]
@@ -1188,7 +1189,7 @@ function lerp(a: number, b: number, t: number): number {
 function encodeFloatToDouble(value: number) {
     const result = new Float32Array(2);
     result[0] = value;
-  
+
     const delta = value - result[0];
     result[1] = delta;
     return result;
