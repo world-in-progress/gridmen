@@ -10,6 +10,7 @@ import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-men
 import PatchCreation from './patchCreation'
 import PatchCheck from './patchCheck'
 import PatchEdit from './patchEdit'
+import { linkNode } from '../noodle/node'
 
 enum PatchMenuItem {
     CREATE_PATCH = 'Create Patch',
@@ -78,14 +79,18 @@ export default class PatchTemplate implements ITemplate {
                 useToolPanelStore.getState().setActiveTab('create')
                 break
             case PatchMenuItem.CHECK_PATCH: {
-                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-                    ; (node as ResourceNode).mountParams = patchInfo
+                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                (node as ResourceNode).mountParams = patchInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
             case PatchMenuItem.EDIT_PATCH: {
-                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-                    ; (node as ResourceNode).mountParams = patchInfo
+                if (!(node as ResourceNode).lockId) {
+                    const linkResponse = await linkNode('cc/IPatch/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                    (node as ResourceNode).lockId = linkResponse.lock_id
+                }
+                const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                (node as ResourceNode).mountParams = patchInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break

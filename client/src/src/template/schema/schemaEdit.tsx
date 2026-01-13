@@ -26,10 +26,10 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
     }, [])
 
     const loadContext = async () => {
-        if (!(node as ResourceNode).lockId) {
-            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
-            (node as ResourceNode).lockId = linkResponse.lock_id
-        }
+        // if (!(node as ResourceNode).lockId) {
+        //     const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+        //     (node as ResourceNode).lockId = linkResponse.lock_id
+        // }
 
         if ((node as ResourceNode).mountParams !== null) {
             const schemaNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)

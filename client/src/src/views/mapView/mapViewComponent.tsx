@@ -14,6 +14,8 @@ import { VIEW_REGISTRY } from '@/registry/viewRegistry'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { calculateRectangleCoordinates, debounce } from '@/utils/utils'
 import { IResourceNode } from '@/template/scene/iscene'
+import CustomLayerGroup from './topology/customLayerGroup'
+import store from '@/store/store'
 
 const initialLongitude = 114.051537
 const initialLatitude = 22.446937
@@ -142,11 +144,16 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                     mapInstance.setFog({})
                 })
 
+                mapInstance.on('load', async () => {
+                    const layerGroup = new CustomLayerGroup()
+                    layerGroup.id = 'gridman-custom-layer-group'
+                    mapInstance.addLayer(layerGroup)
+                    store.set('clg', layerGroup)
+                })
+
                 const drawColor = '#F06B00'
 
-                // TS 类型定义在当前 tsconfig 下无法将 MapboxDraw 视为可构造；运行时没问题
                 const MapboxDrawAny = MapboxDraw as any
-
                 const draw = new MapboxDrawAny({
                     displayControlsDefault: false,
                     boxSelect: false,

@@ -50,20 +50,45 @@ export default function Framework() {
 
         const treeOfNode = node.tree as ResourceTree
 
-        if (privateTree) privateTree.selectedNode = null
-        if (publicTree) publicTree.selectedNode = null
-
-        treeOfNode.selectedNode = node
-        treeOfNode.notifyDomUpdate()
-
+        // Decide which ToolPanel tab to switch to (if any)
+        let nextTab: 'create' | 'check' | 'edit' | null = null
         if (typeof menuItem === 'string') {
             const key = menuItem.toLowerCase()
-            if (key.includes('edit')) useToolPanelStore.getState().setActiveTab('edit')
-            else if (key.includes('check')) useToolPanelStore.getState().setActiveTab('check')
-            else if (key.includes('create')) useToolPanelStore.getState().setActiveTab('create')
+            if (key.includes('edit')) nextTab = 'edit'
+            else if (key.includes('check')) nextTab = 'check'
+            else if (key.includes('create')) nextTab = 'create'
         }
 
-        node.template?.handleMenuOpen(node, menuItem)
+        const applySelection = () => {
+            if (privateTree) privateTree.selectedNode = null
+            if (publicTree) publicTree.selectedNode = null
+            treeOfNode.selectedNode = node
+            treeOfNode.notifyDomUpdate()
+        }
+
+        // IMPORTANT: If template action is async (e.g. linkNode -> sets lockId),
+        // wait for it before applying selection + switching tabs, so we don't briefly render
+        // this node under the previous tab (often 'create') and then jump again.
+        const maybePromise = node.template?.handleMenuOpen(node, menuItem)
+        const isThenable = !!maybePromise && typeof (maybePromise as any).then === 'function'
+
+        if (isThenable && nextTab) {
+            ;(maybePromise as Promise<void>)
+                .then(() => {
+                    applySelection()
+                    useToolPanelStore.getState().setActiveTab(nextTab!)
+                })
+                .catch((err) => {
+                    console.error('handleMenuOpen failed:', err)
+                })
+            return
+        }
+
+        // Sync path (or no tab switch): apply selection immediately.
+        applySelection()
+        if (nextTab) {
+            useToolPanelStore.getState().setActiveTab(nextTab)
+        }
     }, [privateTree, publicTree])
 
     const handleNodeRemove = useCallback((node: IResourceNode) => {

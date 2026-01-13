@@ -10,6 +10,8 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const convertPointCoordinate = async (originPoint: [number, number], fromEPSG: number, toEPSG: number): Promise<[number, number] | null> => {
+    console.log('convertPointCoordinate called with:', originPoint, fromEPSG, toEPSG)
+
     const lon = originPoint[0]
     const lat = originPoint[1]
 
@@ -322,16 +324,22 @@ export const adjustPatchBounds = async (
 
     const convertedBounds: [number, number, number, number] = [convertedSW[0], convertedSW[1], convertedNE[0], convertedNE[1]]  //toEPSG
 
-    const calcuSW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, 3857)      // 3857
-    const calcuNE = await convertPointCoordinate([bounds[2], bounds[3]], fromEPSG, 3857)      // 3857
-    const tempCalculatedBounds = [calcuSW![0], calcuSW![1], calcuNE![0], calcuNE![1]]
+    // const calcuSW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, 3857)      // 3857
+    // const calcuNE = await convertPointCoordinate([bounds[2], bounds[3]], fromEPSG, 3857)      // 3857
+    const tempCalculatedBounds = [convertedSW![0], convertedSW![1], convertedNE![0], convertedNE![1]]
 
-    const tempCalculatedAlignmentOrigin = await convertPointCoordinate(alignmentOrigin, fromEPSG, 3857) // 3857
-    const swX = tempCalculatedBounds[0]
-    const swY = tempCalculatedBounds[1]
+    // const tempCalculatedAlignmentOrigin = await convertPointCoordinate(alignmentOrigin, fromEPSG, 3857)  // 3857
 
-    const baseX = tempCalculatedAlignmentOrigin![0]
-    const baseY = tempCalculatedAlignmentOrigin![1]
+    // const swX = tempCalculatedBounds[0]
+    // const swY = tempCalculatedBounds[1]
+
+    const swX = convertedSW[0]
+    const swY = convertedSW[1]
+
+    // const baseX = tempCalculatedAlignmentOrigin![0]
+    // const baseY = tempCalculatedAlignmentOrigin![1]
+    const baseX = alignmentOrigin![0]
+    const baseY = alignmentOrigin![1]
 
     const dX = swX - baseX
     const dY = swY - baseY
@@ -348,10 +356,16 @@ export const adjustPatchBounds = async (
     const tempAlignSW = [tempCalculatedBounds[0] + offsetX, tempCalculatedBounds[1] + offsetY]
     const tempAlignNE = [tempAlignSW[0] + rectWidth, tempAlignSW[1] + rectHeight]
 
-    const alignSW = await convertPointCoordinate([tempAlignSW[0], tempAlignSW[1]], 3857, toEPSG)      // toEPSG
-    const alignNE = await convertPointCoordinate([tempAlignNE[0], tempAlignNE[1]], 3857, toEPSG)      // toEPSG
+    console.log('tempAlignSW', tempAlignSW)
+    console.log('tempAlignNE', tempAlignNE)
 
-    const alignedBounds: [number, number, number, number] = [alignSW![0], alignSW![1], alignNE![0], alignNE![1]]  //toEPSG
+    // const alignSW = await convertPointCoordinate([tempAlignSW[0], tempAlignSW[1]], 3857, toEPSG)      // toEPSG
+    // const alignNE = await convertPointCoordinate([tempAlignNE[0], tempAlignNE[1]], 3857, toEPSG)      // toEPSG
+
+    // console.log('alignSW', alignSW)
+    // console.log('alignNE', alignNE)
+
+    const alignedBounds: [number, number, number, number] = [tempAlignSW![0], tempAlignSW![1], tempAlignNE![0], tempAlignNE![1]]  //toEPSG
 
     const expandedRectWidth = Math.ceil(rectWidth / gridWidth) * gridWidth
     const expandedRectHeight = Math.ceil(rectHeight / gridHeight) * gridHeight
@@ -359,10 +373,10 @@ export const adjustPatchBounds = async (
     const tempExpandSW = tempAlignSW
     const tempExpandNE = [tempExpandSW[0] + expandedRectWidth, tempExpandSW[1] + expandedRectHeight]
 
-    const expandSW = await convertPointCoordinate([tempExpandSW[0], tempExpandSW[1]], 3857, toEPSG)      // toEPSG
-    const expandNE = await convertPointCoordinate([tempExpandNE[0], tempExpandNE[1]], 3857, toEPSG)      // toEPSG
+    // const expandSW = await convertPointCoordinate([tempExpandSW[0], tempExpandSW[1]], 3857, toEPSG)      // toEPSG
+    // const expandNE = await convertPointCoordinate([tempExpandNE[0], tempExpandNE[1]], 3857, toEPSG)      // toEPSG
 
-    const expandedBounds: [number, number, number, number] = [expandSW![0], expandSW![1], expandNE![0], expandNE![1]]  //toEPSG
+    const expandedBounds: [number, number, number, number] = [tempExpandSW![0], tempExpandSW![1], tempExpandNE![0], tempExpandNE![1]]  //toEPSG
 
     return {
         convertedBounds: convertedBounds,
@@ -370,6 +384,30 @@ export const adjustPatchBounds = async (
         expandedBounds: expandedBounds,
     }
 }
+
+// export const temp = async (
+//     bounds: [number, number, number, number],
+//     gridLevel: [number, number],
+//     fromEPSG: number,
+//     toEPSG: number,
+//     alignmentOrigin: [number, number]
+// ): Promise<{
+//     convertedBounds: [number, number, number, number]
+//     alignedBounds: [number, number, number, number]
+//     expandedBounds: [number, number, number, number]
+// }> => {
+//     const gridWidth = gridLevel[0]
+//     const gridHeight = gridLevel[1]
+
+//     const convertedSW: [number, number] = [bounds[0], bounds[1]]
+//     const convertedNE: [number, number] = [bounds[2], bounds[3]]
+
+//     return {
+//         convertedBounds: convertedBounds,
+//         alignedBounds: alignedBounds,
+//         expandedBounds: expandedBounds,
+//     }
+// }
 
 export const calculateGridCounts = (
     southWest: [number, number],

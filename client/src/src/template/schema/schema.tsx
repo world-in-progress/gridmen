@@ -10,6 +10,7 @@ import { IViewContext } from "@/views/IViewContext"
 import { ResourceNode, ResourceTree } from "../scene/scene"
 import { Delete, Edit3, FilePlusCorner, Info } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
+import { linkNode } from '../noodle/node'
 
 enum SchemaMenuItem {
     CREATE_SCHEMA = 'Create Schema',
@@ -74,13 +75,21 @@ export default class SchemaTemplate implements ITemplate {
 
                 break
             case SchemaMenuItem.CHECK_SCHEMA: {
-                const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-                    ; (node as ResourceNode).mountParams = schemaInfo
+                if (!(node as ResourceNode).lockId) {
+                    const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                    (node as ResourceNode).lockId = linkResponse.lock_id
+                }
+                const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                (node as ResourceNode).mountParams = schemaInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
             case SchemaMenuItem.EDIT_SCHEMA:
                 {
+                    if (!(node as ResourceNode).lockId) {
+                        const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                        (node as ResourceNode).lockId = linkResponse.lock_id
+                    }
                     const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
                         ; (node as ResourceNode).mountParams = schemaInfo
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)

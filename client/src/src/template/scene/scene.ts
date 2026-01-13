@@ -43,7 +43,7 @@ export class ResourceNode implements IResourceNode {
         }
         delete (this.context as any).__cleanup
 
-        const unlinkResponse = await unlinkNode(this.key, this.lockId!, this.tree.leadIP !== undefined ? true : false)
+        await unlinkNode(this.key, this.lockId!, this.tree.leadIP !== undefined ? true : false)
         this.lockId = null
     }
 }

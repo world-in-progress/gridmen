@@ -67,9 +67,8 @@ export default function ToolPanel({
                 ? (CheckComponent || CreateComponent)
                 : CreateComponent
 
-
-    console.log('ToolPanel Render', { activeTab, ActiveComponent })
-    console.log('ToolPanel Render', { selectedNode })
+    // console.log('ToolPanel Render', { activeTab, ActiveComponent })
+    // console.log('ToolPanel Render', { selectedNode })
 
     return (
         <div className="flex flex-col h-full w-full bg-gray-900">

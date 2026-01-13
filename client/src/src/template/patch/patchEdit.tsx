@@ -14,11 +14,13 @@ import { useSettingStore } from '@/store/storeSet'
 import store from '@/store/store'
 import { ResourceNode } from '../scene/scene'
 import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
-import { linkNode } from '../noodle/node'
+import { getNodeParams, linkNode } from '../noodle/node'
 import { GridContext } from '@/core/grid/types'
 import { boundingBox2D } from '@/core/util/boundingBox2D'
 import GridCore from '@/core/grid/NHGridCore'
 import { convertBoundsCoordinates } from '@/utils/utils'
+import * as api from '@/template/noodle/apis'
+import { SchemaData } from '../schema/types'
 
 interface PatchEditProps {
     node: IResourceNode
@@ -27,14 +29,13 @@ interface PatchEditProps {
 
 interface patchInfo {
     name: string
-    epsg: number
     bounds: [number, number, number, number]
-    subdivide_rules: [number, number][]
+    schema: SchemaData
 }
 
 interface PageContext {
-    name: string
     patch: patchInfo | null
+    schema: SchemaData | null
     topologyLayer: TopologyLayer | null
     gridCore: GridCore | null
     isChecking: boolean
@@ -97,8 +98,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const map = mapContext.map
 
     const pageContext = useRef<PageContext>({
-        name: '',
         patch: null,
+        schema: null,
         topologyLayer: null,
         gridCore: null,
         isChecking: false,
@@ -125,6 +126,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     useEffect(() => {
         loadContext(node as ResourceNode)
+
         return () => {
             unloadContext(node as ResourceNode)
         }
@@ -133,8 +135,30 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const loadContext = async (node: ResourceNode) => {
         if (!map) return
 
-        // 加载中
-        await linkNode('cc/IPatch/0.1.0', node.key, 'r', node.tree.leadIP !== undefined ? true : false);
+        if (!(node as ResourceNode).lockId) {
+            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            (node as ResourceNode).lockId = linkResponse.lock_id
+        }
+
+        if ((node as ResourceNode).context !== undefined) {
+            pageContext.current = { ...(node as ResourceNode).context }
+        }
+
+        if ((node as ResourceNode).mountParams === null) {
+            const patchNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            (node as ResourceNode).mountParams = patchNode
+            pageContext.current.patch = JSON.parse(patchNode.mount_params)
+            console.log('patch', pageContext.current.patch)
+        } else {
+            pageContext.current.patch = JSON.parse((node as ResourceNode).mountParams.mount_params)
+            console.log('patch', pageContext.current.patch)
+        }
+
+        // TODO: 移入点击菜单的瞬间
+        if (pageContext.current.schema === null) {
+            const schemaNode = await getNodeParams(pageContext.current.patch!.schema_node_key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+            pageContext.current.schema = JSON.parse(schemaNode.mount_params) as SchemaData
+        }
 
         const waitForMapLoad = () => {
             return new Promise<void>((resolve) => {
@@ -205,138 +229,165 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             duration: 1000,
             padding: { top: 50, bottom: 50, left: 100, right: 100 }
         });
+
+        (node as ResourceNode).context = {
+            ...((node as ResourceNode).context ?? {}),
+            __cleanup: {
+                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
+                topology: () => {
+                    try {
+                        const clg = store.get<CustomLayerGroup>('clg')
+                        clg?.removeLayer('TopologyLayer')
+                    } catch (err) {
+                        console.error('PatchEdit cleanup failed to remove TopologyLayer:', err)
+                    }
+
+                    // Restore map interactions/cursor (safe no-ops if map is gone)
+                    try {
+                        map.dragPan.enable()
+                        map.scrollZoom.enable()
+                        if (map.getCanvas()) map.getCanvas().style.cursor = ''
+                    } catch {
+                        // ignore
+                    }
+
+                    pageContext.current.topologyLayer = null
+                    pageContext.current.gridCore = null
+                },
+            },
+        }
     }
 
     const unloadContext = (node: ResourceNode) => {
-        const core: GridCore = pageContext.current.gridCore!
-        core.save(() => { })
+        // const core: GridCore = pageContext.current.gridCore!
+        // core.save(() => { })
 
-        const clg = store.get<CustomLayerGroup>('clg')!
-        clg.removeLayer('TopologyLayer')
+        // const clg = store.get<CustomLayerGroup>('clg')!
+        // clg.removeLayer('TopologyLayer')
 
         pageContext.current.editingState.select = selectTab
         pageContext.current.editingState.pick = pickingTab
         pageContext.current.isChecking = checkSwitchOn
     }
 
-    useEffect(() => {
-        if (!map) return
+    // useEffect(() => {
+    //     if (!map) return
 
-        const canvas = map.getCanvas()
+    //     const canvas = map.getCanvas()
 
-        const localIsMouseDown = { current: false }
-        const localMouseDownPos = { current: [0, 0] as [number, number] }
-        const localMouseMovePos = { current: [0, 0] as [number, number] }
+    //     const localIsMouseDown = { current: false }
+    //     const localMouseDownPos = { current: [0, 0] as [number, number] }
+    //     const localMouseMovePos = { current: [0, 0] as [number, number] }
 
-        const onMouseDown = (e: MouseEvent) => {
-            if (!e.shiftKey) return
-            localIsMouseDown.current = true
-            map.dragPan.disable()
-            map.scrollZoom.disable()
-            const rect = canvas.getBoundingClientRect()
-            const x = e.clientX - rect.left
-            const y = e.clientY - rect.top
-            localMouseDownPos.current = [x, y]
+    //     const onMouseDown = (e: MouseEvent) => {
+    //         if (!e.shiftKey) return
+    //         localIsMouseDown.current = true
+    //         map.dragPan.disable()
+    //         map.scrollZoom.disable()
+    //         const rect = canvas.getBoundingClientRect()
+    //         const x = e.clientX - rect.left
+    //         const y = e.clientY - rect.top
+    //         localMouseDownPos.current = [x, y]
 
-            if (checkSwitchOn) {
-                gridInfo.current = topologyLayer!.executeCheckGrid([x, y])
-                triggerRepaint()
-            }
-        }
+    //         if (checkSwitchOn) {
+    //             gridInfo.current = topologyLayer!.executeCheckGrid([x, y])
+    //             triggerRepaint()
+    //         }
+    //     }
 
-        const onMouseMove = (e: MouseEvent) => {
-            if (!e.shiftKey || !localIsMouseDown.current) return
-            if (checkSwitchOn) return
-            const rect = canvas.getBoundingClientRect()
-            const x = e.clientX - rect.left
-            const y = e.clientY - rect.top
-            localMouseMovePos.current = [x, y]
+    //     const onMouseMove = (e: MouseEvent) => {
+    //         if (!e.shiftKey || !localIsMouseDown.current) return
+    //         if (checkSwitchOn) return
+    //         const rect = canvas.getBoundingClientRect()
+    //         const x = e.clientX - rect.left
+    //         const y = e.clientY - rect.top
+    //         localMouseMovePos.current = [x, y]
 
-            if (selectTab === 'brush') {
-                topologyLayer!.executePickGrids(
-                    selectTab,
-                    pickingTab,
-                    [localMouseMovePos.current[0], localMouseMovePos.current[1]]
-                )
-            } else {
-                map!.dragPan.disable();
-                if (map!.getCanvas()) {
-                    map!.getCanvas().style.cursor = 'crosshair'
-                }
+    //         if (selectTab === 'brush') {
+    //             topologyLayer!.executePickGrids(
+    //                 selectTab,
+    //                 pickingTab,
+    //                 [localMouseMovePos.current[0], localMouseMovePos.current[1]]
+    //             )
+    //         } else {
+    //             map!.dragPan.disable();
+    //             if (map!.getCanvas()) {
+    //                 map!.getCanvas().style.cursor = 'crosshair'
+    //             }
 
-                topologyLayer!.executeDrawBox(
-                    [localMouseDownPos.current[0], localMouseDownPos.current[1]],
-                    [localMouseMovePos.current[0], localMouseMovePos.current[1]]
-                )
-            }
-        }
+    //             topologyLayer!.executeDrawBox(
+    //                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
+    //                 [localMouseMovePos.current[0], localMouseMovePos.current[1]]
+    //             )
+    //         }
+    //     }
 
-        const onMouseUp = (e: MouseEvent) => {
-            if (!localIsMouseDown.current) return
-            localIsMouseDown.current = false
+    //     const onMouseUp = (e: MouseEvent) => {
+    //         if (!localIsMouseDown.current) return
+    //         localIsMouseDown.current = false
 
-            if (map) {
-                map.dragPan.enable();
-                map.scrollZoom.enable();
-                topologyLayer!.executeClearDrawBox();
-                if (map.getCanvas()) {
-                    map.getCanvas().style.cursor = '';
-                }
-            }
+    //         if (map) {
+    //             map.dragPan.enable();
+    //             map.scrollZoom.enable();
+    //             topologyLayer!.executeClearDrawBox();
+    //             if (map.getCanvas()) {
+    //                 map.getCanvas().style.cursor = '';
+    //             }
+    //         }
 
-            if (!e.shiftKey) return
-            if (checkSwitchOn) return
+    //         if (!e.shiftKey) return
+    //         if (checkSwitchOn) return
 
-            const rect = canvas.getBoundingClientRect()
-            const x = e.clientX - rect.left
-            const y = e.clientY - rect.top
-            const localMouseUpPos = [x, y]
+    //         const rect = canvas.getBoundingClientRect()
+    //         const x = e.clientX - rect.left
+    //         const y = e.clientY - rect.top
+    //         const localMouseUpPos = [x, y]
 
-            topologyLayer!.executePickGrids(
-                selectTab,
-                pickingTab,
-                [localMouseDownPos.current[0], localMouseDownPos.current[1]],
-                [localMouseUpPos[0], localMouseUpPos[1]]
-            )
-        }
+    //         topologyLayer!.executePickGrids(
+    //             selectTab,
+    //             pickingTab,
+    //             [localMouseDownPos.current[0], localMouseDownPos.current[1]],
+    //             [localMouseUpPos[0], localMouseUpPos[1]]
+    //         )
+    //     }
 
-        const onMouseOut = (e: MouseEvent) => {
-            if (checkSwitchOn) return
-            if (map) {
-                map.dragPan.enable()
-                map.scrollZoom.enable()
-                topologyLayer!.executeClearDrawBox()
-                if (map.getCanvas()) {
-                    map.getCanvas().style.cursor = ''
-                }
-            }
-            if (!e.shiftKey) return
+    //     const onMouseOut = (e: MouseEvent) => {
+    //         if (checkSwitchOn) return
+    //         if (map) {
+    //             map.dragPan.enable()
+    //             map.scrollZoom.enable()
+    //             topologyLayer!.executeClearDrawBox()
+    //             if (map.getCanvas()) {
+    //                 map.getCanvas().style.cursor = ''
+    //             }
+    //         }
+    //         if (!e.shiftKey) return
 
-            const rect = canvas.getBoundingClientRect()
-            const x = e.clientX - rect.left
-            const y = e.clientY - rect.top
-            const mouseUpPos = [x, y]
+    //         const rect = canvas.getBoundingClientRect()
+    //         const x = e.clientX - rect.left
+    //         const y = e.clientY - rect.top
+    //         const mouseUpPos = [x, y]
 
-            topologyLayer!.executePickGrids(
-                selectTab,
-                pickingTab,
-                [localMouseDownPos.current[0], localMouseDownPos.current[1]],
-                [mouseUpPos[0], mouseUpPos[1]]
-            )
-        }
+    //         topologyLayer!.executePickGrids(
+    //             selectTab,
+    //             pickingTab,
+    //             [localMouseDownPos.current[0], localMouseDownPos.current[1]],
+    //             [mouseUpPos[0], mouseUpPos[1]]
+    //         )
+    //     }
 
-        canvas.addEventListener('mousedown', onMouseDown)
-        canvas.addEventListener('mousemove', onMouseMove)
-        canvas.addEventListener('mouseup', onMouseUp)
-        canvas.addEventListener('mouseout', onMouseOut)
+    //     canvas.addEventListener('mousedown', onMouseDown)
+    //     canvas.addEventListener('mousemove', onMouseMove)
+    //     canvas.addEventListener('mouseup', onMouseUp)
+    //     canvas.addEventListener('mouseout', onMouseOut)
 
-        return () => {
-            canvas.removeEventListener('mousedown', onMouseDown)
-            canvas.removeEventListener('mousemove', onMouseMove)
-            canvas.removeEventListener('mouseup', onMouseUp)
-            canvas.removeEventListener('mouseout', onMouseOut)
-        }
-    }, [selectTab, pickingTab, checkSwitchOn, topologyLayer, map])
+    //     return () => {
+    //         canvas.removeEventListener('mousedown', onMouseDown)
+    //         canvas.removeEventListener('mousemove', onMouseMove)
+    //         canvas.removeEventListener('mouseup', onMouseUp)
+    //         canvas.removeEventListener('mouseout', onMouseOut)
+    //     }
+    // }, [selectTab, pickingTab, checkSwitchOn, topologyLayer, map])
 
     const handleConfirmSelectAll = useCallback(() => {
         setSelectAllDialogOpen(false)
