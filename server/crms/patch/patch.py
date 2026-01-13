@@ -60,8 +60,8 @@ class Patch(IPatch):
                 raise KeyError("Missing 'schema' object in patch meta")
             
             epsg: int = schema_data['epsg']
-            first_size: list[float] = grid_info[0]
             grid_info: list[list[float]] = schema_data['grid_info']
+            first_size: list[float] = grid_info[0]
             alignment_origin: list[float] = schema_data['alignment_origin']
         except (KeyError, IndexError) as e:
             raise ValueError(f"Failed to decode patch meta file: {e}")
