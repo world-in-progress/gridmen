@@ -74,7 +74,7 @@ class GridMeta(BaseModel):
         patch_name = APP_CONTEXT['current_patch']
         return GridMeta.from_patch(project_name, patch_name)
     
-class MultiGridInfo(BaseModel):
+class MultiCellInfo(BaseModel):
     levels: list[int]
     global_ids: list[int]
     
@@ -116,7 +116,7 @@ class MultiGridInfo(BaseModel):
         levels = list(np.frombuffer(level_bytes, dtype=np.uint8))
         global_ids = list(np.frombuffer(global_id_bytes, dtype=np.uint32))
         
-        return MultiGridInfo(levels=levels, global_ids=global_ids)
+        return MultiCellInfo(levels=levels, global_ids=global_ids)
 
 class MultiGridInfoResponse(BaseResponse):
     """Standard response schema for grid operations"""

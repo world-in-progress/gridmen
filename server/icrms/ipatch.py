@@ -3,14 +3,14 @@ import pyarrow as pa
 
 # Define transferables ##################################################
 
-class GridSchema:
+class PatchSchema:
     """
-    Grid Schema
+    Patch Schema
     ---
-    - epsg (int): the EPSG code of the grid
-    - bounds (list[float]): the bounds of the grid in the format [min_x, min_y, max_x, max_y]
-    - first_size (float): the size of the first grid (unit: m)
-    - subdivide_rules (list[tuple[int, int]]): the subdivision rules of the grid in the format [(sub_width, sub_height)]
+    - epsg (int): the EPSG code of the patch
+    - bounds (list[float]): the bounds of the patch in the format [min_x, min_y, max_x, max_y]
+    - first_size (float): the size of the first patch (unit: m)
+    - subdivide_rules (list[tuple[int, int]]): the subdivision rules of the patch in the format [(sub_width, sub_height)]
     """
     epsg: int
     bounds: list[float]  # [min_x, min_y, max_x, max_y]
@@ -19,21 +19,21 @@ class GridSchema:
     alignment_origin: tuple[float, float] # [lon, lat], base point of the patch
 
 @cc.transferable
-class GridAttribute:
+class CellAttribute:
     """
-    Attributes of Grid
+    Attributes of a Cell
     ---
-    - level (uint8): the level of the grid
-    - type (uint8): the type of the grid, default to 0
-    - activate (bool), the subdivision status of the grid
-    - deleted (bool): the deletion status of the grid, default to False
-    - elevation (float64): the elevation of the grid, default to -9999.0
-    - global_id (uint32): the global id within the bounding box that subdivided by grids all in the level of this grid
-    - local_id (uint32): the local id within the parent grid that subdivided by child grids all in the level of this grid
-    - min_x (float64): the min x coordinate of the grid
-    - min_y (float64): the min y coordinate of the grid
-    - max_x (float64): the max x coordinate of the grid
-    - max_y (float64): the max y coordinate of the grid
+    - level (uint8): the level of the cell
+    - type (uint8): the type of the cell, default to 0
+    - activate (bool), the subdivision status of the cell
+    - deleted (bool): the deletion status of the cell, default to False
+    - elevation (float64): the elevation of the cell, default to -9999.0
+    - global_id (uint32): the global id within the bounding box that subdivided by cells all in the level of this cell
+    - local_id (uint32): the local id within the parent cell that subdivided by child cells all in the level of this cell
+    - min_x (float64): the min x coordinate of the cell
+    - min_y (float64): the min y coordinate of the cell
+    - max_x (float64): the max x coordinate of the cell
+    - max_y (float64): the max y coordinate of the cell
     """
     level: int
     type: int
@@ -47,7 +47,7 @@ class GridAttribute:
     max_x: float | None = None
     max_y: float | None = None
     
-    def serialize(data: 'GridAttribute') -> bytes:
+    def serialize(data: 'CellAttribute') -> bytes:
         schema = pa.schema([
             pa.field('deleted', pa.bool_()),
             pa.field('activate', pa.bool_()),
@@ -65,9 +65,9 @@ class GridAttribute:
         table = pa.Table.from_pylist([data.__dict__], schema=schema)
         return serialize_from_table(table)
     
-    def deserialize(arrow_bytes: bytes) -> 'GridAttribute':
+    def deserialize(arrow_bytes: bytes) -> 'CellAttribute':
         row = deserialize_to_rows(arrow_bytes)[0]
-        return GridAttribute(
+        return CellAttribute(
             deleted=row['deleted'],
             activate=row['activate'],
             type=row['type'],
@@ -82,7 +82,7 @@ class GridAttribute:
         )
 
 @cc.transferable
-class GridInfo:
+class CellInfo:
     def serialize(level: int, global_id: int) -> bytes:
         schema = pa.schema([
             pa.field('level', pa.uint8()),
@@ -105,7 +105,7 @@ class GridInfo:
         )
 
 @cc.transferable
-class PeerGridInfos:
+class PeerCellInfos:
     def serialize(level: int, global_ids: list[int]) -> bytes:
         schema = pa.schema([
             pa.field('level', pa.uint8()),
@@ -128,7 +128,7 @@ class PeerGridInfos:
         )
 
 @cc.transferable
-class GridInfos:
+class CellInfos:
     def serialize(levels: list[int], global_ids: list[int]) -> bytes:
         schema = pa.schema([
             pa.field('levels', pa.uint8()),
@@ -150,28 +150,28 @@ class GridInfos:
         return levels, global_ids
 
 @cc.transferable
-class GridAttributes:
-    def serialize(data: list[GridAttribute]) -> bytes:
+class CellAttributes:
+    def serialize(data: list[CellAttribute]) -> bytes:
         schema = pa.schema([
             pa.field('attribute_bytes', pa.list_(pa.binary())),
         ])
 
         data_dict = {
-            'attribute_bytes': [GridAttribute.serialize(grid) for grid in data]
+            'attribute_bytes': [CellAttribute.serialize(cell) for cell in data]
         }
         
         table = pa.Table.from_pylist([data_dict], schema=schema)
         return serialize_from_table(table)
 
-    def deserialize(arrow_bytes: bytes) -> list[GridAttribute]:
+    def deserialize(arrow_bytes: bytes) -> list[CellAttribute]:
         table = deserialize_to_table(arrow_bytes)
         
-        grid_bytes = table.column('attribute_bytes').to_pylist()[0]
+        cell_bytes = table.column('attribute_bytes').to_pylist()[0]
         
-        return [GridAttribute.deserialize(grid_byte) for grid_byte in grid_bytes]
+        return [CellAttribute.deserialize(cell_byte) for cell_byte in cell_bytes]
 
 @cc.transferable
-class GridKeys:
+class CellKeys:
     def serialize(keys: list[str | None]) -> bytes:
         schema = pa.schema([pa.field('keys', pa.string())])
         data = {'keys': keys}
@@ -184,7 +184,7 @@ class GridKeys:
         return keys
 
 @cc.transferable
-class GridCenter:
+class CellCenter:
     def serialize(lon: float, lat: float) -> bytes:
         schema = pa.schema([
             pa.field('lon', pa.float64()),
@@ -207,7 +207,7 @@ class GridCenter:
         )
 
 @cc.transferable
-class MultiGridCenters:
+class MultiCellCenters:
     def serialize(centers: list[tuple[float, float]]) -> bytes:
         schema = pa.schema([
             pa.field('lon', pa.float64()),
@@ -244,11 +244,11 @@ class FloatArray:
         return data
 
 @cc.transferable
-class TopoSaveInfo:
+class PatchSaveInfo:
     success: bool
     message: str
     
-    def serialize(info: 'TopoSaveInfo') -> bytes:
+    def serialize(info: 'PatchSaveInfo') -> bytes:
         schema = pa.schema([
             pa.field('success', pa.bool_()),
             pa.field('message', pa.string()),
@@ -257,9 +257,9 @@ class TopoSaveInfo:
         table = pa.Table.from_pylist([info.__dict__], schema=schema)
         return serialize_from_table(table)
     
-    def deserialize(arrow_bytes: bytes) -> 'TopoSaveInfo':
+    def deserialize(arrow_bytes: bytes) -> 'PatchSaveInfo':
         row = deserialize_to_rows(arrow_bytes)[0]
-        return TopoSaveInfo(
+        return PatchSaveInfo(
             success=row['success'],
             message=row['message'],
         )
@@ -273,46 +273,37 @@ class IPatch:
     =
     Interface of Core Resource Model (ICRM) specifies how to interact with CRM. 
     """
-    def get_schema_info(self) -> GridSchema:
+    def get_meta(self) -> PatchSchema:
         """
         Get the schema of the patch
         
         Returns:
-            GridSchema: Grid schema information
+            PatchSchema: Patch schema information
         """
         ...
     
-    def get_local_id(self, level: int, global_id: int) -> int:
-        ...
-    
-    def subdivide_grids(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
+    def subdivide_cells(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
         ...
         
-    def delete_grids(self, levels: list[int], global_ids: list[int]):
-        ...
-    
-    def get_parents(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
+    def merge_cells(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
         ...
         
-    def get_status(self, index: int) -> int:
-        ...
-    
-    def get_active_grid_infos(self) -> tuple[list[int], list[int]]:
-        ...
-    
-    def get_deleted_grid_infos(self) -> tuple[list[int], list[int]]:
-        ...
-    
-    def get_multi_grid_bboxes(self, levels: list[int], global_ids: list[int]) -> list[float]:
+    def delete_cells(self, levels: list[int], global_ids: list[int]):
         ...
         
-    def merge_multi_grids(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
+    def recover_cells(self, levels: list[int], global_ids: list[int]):
+        ...
+    
+    def get_active_cell_infos(self) -> tuple[list[int], list[int]]:
+        ...
+    
+    def get_deleted_cell_infos(self) -> tuple[list[int], list[int]]:
+        ...
+    
+    def get_cell_bboxes(self, levels: list[int], global_ids: list[int]) -> list[float]:
         ...
         
-    def recover_multi_grids(self, levels: list[int], global_ids: list[int]):
-        ...
-        
-    def save(self) -> TopoSaveInfo:
+    def save(self) -> PatchSaveInfo:
         ...
 
 # Helpers ##################################################

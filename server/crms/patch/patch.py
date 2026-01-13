@@ -2,14 +2,13 @@ import os
 import math
 import json
 import logging
-import c_two as cc
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 from pathlib import Path
 import pyarrow.parquet as pq
 from collections import Counter
-from icrms.ipatch import IPatch, GridSchema, GridAttribute, TopoSaveInfo
+from icrms.ipatch import IPatch, PatchSchema, PatchSaveInfo
 
 logger = logging.getLogger(__name__)
 
@@ -19,25 +18,14 @@ ATTR_DELETED = 'deleted'
 ATTR_ACTIVATE = 'activate'
 ATTR_INDEX_KEY = 'index_key'
 
-GRID_SCHEMA: pa.Schema = pa.schema([
+PATCH_SCHEMA: pa.Schema = pa.schema([
     (ATTR_DELETED, pa.bool_()),
     (ATTR_ACTIVATE, pa.bool_()), 
     (ATTR_INDEX_KEY, pa.uint64())
 ])
 
 class Patch(IPatch):
-    """
-    CRM
-    =
-    The Grid Resource.  
-    Grid is a 2D grid system that can be subdivided into smaller grids by pre-declared subdivide rules.  
-    """
-    def __init__(self, resource_space: str, **kwargs):
-        """Method to initialize Grid
-
-        Args:
-            resource_space (str): Path to the resource directory of grid patch
-        """
+    def __init__(self, resource_space: str):
         # Get info from schema file 
         self.resource_space = Path(resource_space)
         self.meta_file = self.resource_space / 'patch.meta.json'
@@ -106,8 +94,8 @@ class Patch(IPatch):
         # Load existing data if file exists
         self._load_from_file()
 
-    def get_schema_info(self) -> GridSchema:
-        schema =  GridSchema()
+    def get_meta(self) -> PatchSchema:
+        schema =  PatchSchema()
         schema.epsg = self.epsg
         schema.bounds = tuple(self.bounds)
         schema.first_size = tuple(self.first_size)
@@ -187,7 +175,7 @@ class Patch(IPatch):
         if self.grid_file_path and not self.grids.empty:
             try:
                 grid_reset = self.grids.reset_index(drop=False)
-                grid_table = pa.Table.from_pandas(grid_reset, schema=GRID_SCHEMA)
+                grid_table = pa.Table.from_pandas(grid_reset, schema=PATCH_SCHEMA)
                 pq.write_table(grid_table, self.grid_file_path)
                 grid_save_message = f'Successfully saved grid data to {self.grid_file_path}'
             except Exception as e:
@@ -213,7 +201,7 @@ class Patch(IPatch):
             logger.error(f'Error saving data: {str(e)}')
             return False
 
-    def save(self) -> TopoSaveInfo:
+    def save(self) -> PatchSaveInfo:
         """
         Save the grid data to an Parquet file with optimized memory usage.
         This method writes the grid dataframe to disk using Parquet format.
@@ -229,7 +217,7 @@ class Patch(IPatch):
         """
         save_info_dict = self._save()
         logger.info(save_info_dict['message'])
-        save_info = TopoSaveInfo(
+        save_info = PatchSaveInfo(
             success=save_info_dict.get('success', False),
             message=save_info_dict.get('message', '')
         )
@@ -309,13 +297,13 @@ class Patch(IPatch):
         
         return child_global_ids
     
-    def get_schema(self) -> GridSchema:
+    def get_schema(self) -> PatchSchema:
         """Method to get grid schema
 
         Returns:
             GridSchema: grid schema
         """
-        return GridSchema(
+        return PatchSchema(
             epsg=self.epsg,
             bounds=self.bounds,
             first_size=self.first_size,
@@ -346,25 +334,8 @@ class Patch(IPatch):
             return ([], [])
         
         return tuple(map(list, zip(*parent_set)))
-    
-    def get_status(self, index: int) -> int:
-        """Method to get grid status for provided grid
-        Args:
-            index (int): index key of provided grid, encoded by _encode_index(level, global_id)
-        Returns:
-            int: grid status, 0b00 for not deleted, 0b01 for deleted, 0b10 for activated, 0b11 for invalid grid
-        """
-        self._load_patch()
         
-        try: 
-            is_deleted = self.grids.at[index, ATTR_DELETED]
-            is_activate = self.grids.at[index, ATTR_ACTIVATE]
-            
-            return (is_deleted | (is_activate << 1))
-        except KeyError:
-            return 0b11 # invalid grid
-        
-    def subdivide_grids(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
+    def subdivide_cells(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
         """
         Subdivide grids by turning off parent grids' activate flag and activating children's activate flags
         if the parent grid is activate and not deleted.
@@ -478,7 +449,7 @@ class Patch(IPatch):
 
         return all_child_levels.tolist(), all_child_global_ids.tolist()
     
-    def delete_grids(self, levels: list[int], global_ids: list[int]):
+    def delete_cells(self, levels: list[int], global_ids: list[int]):
         """Method to delete grids.
 
         Args:
@@ -503,7 +474,7 @@ class Patch(IPatch):
         self.grids.loc[valid_grids.index, ATTR_DELETED] = True
         self.grids.loc[valid_grids.index, ATTR_ACTIVATE] = False
     
-    def get_active_grid_infos(self) -> tuple[list[int], list[int]]:
+    def get_active_cell_infos(self) -> tuple[list[int], list[int]]:
         """Method to get all active grids' global ids and levels
 
         Returns:
@@ -515,7 +486,7 @@ class Patch(IPatch):
         levels, global_ids = _decode_index_batch(active_grids.index.values)
         return levels.tolist(), global_ids.tolist()
     
-    def get_deleted_grid_infos(self) -> tuple[list[int], list[int]]:
+    def get_deleted_cell_infos(self) -> tuple[list[int], list[int]]:
         """Method to get all deleted grids' global ids and levels
 
         Returns:
@@ -527,7 +498,7 @@ class Patch(IPatch):
         levels, global_ids = _decode_index_batch(deleted_grids.index.values)
         return levels.tolist(), global_ids.tolist()
     
-    def get_multi_grid_bboxes(self, levels: list[int], global_ids: list[int]) -> list[float]:
+    def get_cell_bboxes(self, levels: list[int], global_ids: list[int]) -> list[float]:
         """Method to get bounding boxes of multiple grids
 
         Args:
@@ -558,7 +529,7 @@ class Patch(IPatch):
             
         return result_array.flatten().tolist() 
 
-    def merge_multi_grids(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
+    def merge_cells(self, levels: list[int], global_ids: list[int]) -> tuple[list[int], list[int]]:
         """Merges multiple child grids into their respective parent grid
 
         This operation typically deactivates the specified child grids and
@@ -630,7 +601,7 @@ class Patch(IPatch):
         result_levels, result_global_ids = zip(*activated_parents)
         return list(result_levels), list(result_global_ids)
     
-    def recover_multi_grids(self, levels: list[int], global_ids: list[int]):
+    def recover_cells(self, levels: list[int], global_ids: list[int]):
         """Recovers multiple deleted grids by activating them
 
         Args:
