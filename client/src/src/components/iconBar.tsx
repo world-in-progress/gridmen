@@ -7,7 +7,7 @@ export interface IconBarClickHandlers {
 }
 
 interface IconBarProps {
-    currentActiveId: string
+    currentActiveId?: string | null
     clickHandlers: IconBarClickHandlers
     isLoggedIn: boolean
 }

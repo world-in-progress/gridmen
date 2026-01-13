@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from "react"
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react"
 import LoginPage from "./loginPage/loginPage"
 import { useSettingStore, useToolPanelStore } from "@/store/storeSet"
 import SettingView from "./settingView/settingView"
@@ -10,14 +10,25 @@ import { ResourceNode, ResourceTree } from "@/template/scene/scene"
 import MapViewComponent from "@/views/mapView/mapViewComponent"
 import TableViewComponent from "@/views/tableView/tableViewComponent"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom"
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom"
+import Hello from "./helloPage/hello"
 
 export default function Framework() {
 
+    return (
+        <Router>
+            <FrameworkShell />
+        </Router>
+    )
+}
+
+function FrameworkShell() {
+
+    const location = useLocation()
+    const navigate = useNavigate()
+
     const [triggerFocus, setTriggerFocus] = useState(0)
-    const [activeIconID, setActiveIconID] = useState('map-view')
-    // const [activeIconID, setActiveIconID] = useState('user')
-    // const [isLoggedIn, setIsLoggedIn] = useState(false)
+    const [activeIconID, setActiveIconID] = useState<'map-view' | 'table-view'>('map-view')
     const [isLoggedIn, setIsLoggedIn] = useState(true)
 
     const [privateTree, setPrivateTree] = useState<ResourceTree | null>(null)
@@ -27,16 +38,55 @@ export default function Framework() {
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
-    const iconClickHandlers: IconBarClickHandlers = {}
-    ICON_REGISTRY.forEach(icon => {
-        iconClickHandlers[icon.id] = (iconID: string) => {
-            setActiveIconID(iconID)
+    const handleIconClick = useCallback((iconID: string) => {
+        switch (iconID) {
+            case 'map-view':
+                setActiveIconID('map-view')
+                if (!isLoggedIn) {
+                    navigate('/login')
+                    return
+                }
+                navigate('/framework')
+                return
+            case 'table-view':
+                setActiveIconID('table-view')
+                if (!isLoggedIn) {
+                    navigate('/login')
+                    return
+                }
+                navigate('/framework')
+                return
+            case 'settings':
+                navigate('/settings')
+                return
+            case 'user':
+                navigate('/login')
+                return
+            default:
+                // keep existing behavior for other icons (e.g. languages)
+                return
         }
-    })
+    }, [isLoggedIn, navigate])
+
+    const iconClickHandlers: IconBarClickHandlers = useMemo(() => {
+        const handlers: IconBarClickHandlers = {}
+        ICON_REGISTRY.forEach(icon => {
+            handlers[icon.id] = handleIconClick
+        })
+        return handlers
+    }, [handleIconClick])
+
+    const currentActiveId = useMemo(() => {
+        const path = location.pathname
+        if (path.startsWith('/framework')) return activeIconID
+        if (path.startsWith('/settings')) return 'settings'
+        if (path.startsWith('/login')) return 'user'
+        // /hello (and others): no active icon
+        return null
+    }, [activeIconID, location.pathname])
 
     // Login route wrapper to perform navigation after login
     function LoginRoute({ onLogin }: { onLogin: () => void }) {
-        const navigate = useNavigate()
         const handleLogin = () => {
             onLogin()
             navigate('/framework')
@@ -73,7 +123,7 @@ export default function Framework() {
         const isThenable = !!maybePromise && typeof (maybePromise as any).then === 'function'
 
         if (isThenable && nextTab) {
-            ;(maybePromise as Promise<void>)
+            ; (maybePromise as Promise<void>)
                 .then(() => {
                     applySelection()
                     useToolPanelStore.getState().setActiveTab(nextTab!)
@@ -138,6 +188,11 @@ export default function Framework() {
     }, [privateTree, publicTree])
 
     useEffect(() => {
+        // Only initialize resource trees when actually entering /framework and logged in.
+        if (!isLoggedIn) return
+        if (!location.pathname.startsWith('/framework')) return
+        if (privateTree || publicTree) return
+
         const initTree = async () => {
             try {
                 /// PRIVATE ///
@@ -155,7 +210,7 @@ export default function Framework() {
             }
         }
         initTree()
-    }, [publicIP])
+    }, [isLoggedIn, location.pathname, privateTree, publicTree, publicIP])
 
     // 获取当前选中节点的 templateName，默认为 'default'
     const getCurrentTemplateName = (): string => {
@@ -178,8 +233,6 @@ export default function Framework() {
                 return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} getResourceNodeByKey={getResourceNodeByKey} />
             case 'table-view':
                 return <TableViewComponent />
-            case 'settings':
-                return <SettingView />
             default:
                 return <MapViewComponent templateName={currentTemplateName} selectedNode={selectedNode} getResourceNodeByKey={getResourceNodeByKey} />
         }
@@ -188,40 +241,53 @@ export default function Framework() {
     return (
         <div className='w-screen h-screen bg-[#1E1E1E] flex'>
             <IconBar
-                currentActiveId={activeIconID}
+                currentActiveId={currentActiveId}
                 clickHandlers={iconClickHandlers}
                 isLoggedIn={isLoggedIn}
             />
-            <Router>
-                <Routes>
-                    {/* <Route path='/' element={<Navigate to="/login" replace />} /> */}
-                    <Route path='/' element={<Navigate to="/framework" replace />} />
-                    <Route path='login' element={<LoginRoute onLogin={() => setIsLoggedIn(true)} />} />
-                    <Route path="framework" element={
-                        <ResizablePanelGroup
-                            direction="horizontal"
-                            className="h-full w-[98%] text-white"
-                        >
-                            <ResizablePanel defaultSize={11}>
-                                <ResourceTreeComponent
-                                    privateTree={privateTree}
-                                    publicTree={publicTree}
-                                    focusNode={focusNode}
-                                    triggerFocus={triggerFocus}
-                                    onNodeMenuOpen={handleNodeMenuOpen}
-                                    onNodeRemove={handleNodeRemove}
-                                    onNodeClick={handleNodeClick}
-                                    onNodeDoubleClick={handleNodeDoubleClick}
-                                />
-                            </ResizablePanel>
-                            <ResizableHandle className="opacity-0 hover:bg-blue-200" />
-                            <ResizablePanel defaultSize={89}>
-                                {renderActiveView()}
-                            </ResizablePanel>
-                        </ResizablePanelGroup>
-                    } />
-                </Routes>
-            </Router>
+            <Routes>
+                <Route path='/' element={<Navigate to="/hello" replace />} />
+                <Route path='hello' element={<Hello />} />
+                <Route
+                    path='login'
+                    element={
+                        isLoggedIn
+                            ? <Navigate to="/framework" replace />
+                            : <LoginRoute onLogin={() => setIsLoggedIn(true)} />
+                    }
+                />
+                <Route path='settings' element={<SettingView />} />
+                <Route
+                    path="framework"
+                    element={
+                        isLoggedIn
+                            ? (
+                                <ResizablePanelGroup
+                                    direction="horizontal"
+                                    className="h-full w-[98%] text-white"
+                                >
+                                    <ResizablePanel defaultSize={11}>
+                                        <ResourceTreeComponent
+                                            privateTree={privateTree}
+                                            publicTree={publicTree}
+                                            focusNode={focusNode}
+                                            triggerFocus={triggerFocus}
+                                            onNodeMenuOpen={handleNodeMenuOpen}
+                                            onNodeRemove={handleNodeRemove}
+                                            onNodeClick={handleNodeClick}
+                                            onNodeDoubleClick={handleNodeDoubleClick}
+                                        />
+                                    </ResizablePanel>
+                                    <ResizableHandle className="opacity-0 hover:bg-blue-200" />
+                                    <ResizablePanel defaultSize={89}>
+                                        {renderActiveView()}
+                                    </ResizablePanel>
+                                </ResizablePanelGroup>
+                            )
+                            : <Navigate to="/login" replace />
+                    }
+                />
+            </Routes>
         </div>
     )
 }
