@@ -62,6 +62,7 @@ class Patch(IPatch):
             epsg: int = schema_data['epsg']
             grid_info: list[list[float]] = schema_data['grid_info']
             first_size: list[float] = grid_info[0]
+            alignment_origin: list[float] = meta['alignment_origin']
         except (KeyError, IndexError) as e:
             raise ValueError(f"Failed to decode patch meta file: {e}")
 
@@ -88,6 +89,7 @@ class Patch(IPatch):
         self.grid_info = grid_info
         self.bounds: list = bounds
         self.first_size: list[float] = first_size
+        self.alignment_origin: list[float] = alignment_origin
         self.subdivide_rules: list[list[int]] = subdivide_rules
         self.grid_file_path = Path(resource_space) / 'patch.topo.parquet'
         self.grids = pd.DataFrame(columns=[ATTR_DELETED, ATTR_ACTIVATE, ATTR_INDEX_KEY])
@@ -105,12 +107,13 @@ class Patch(IPatch):
         self._load_from_file()
 
     def get_schema_info(self) -> GridSchema:
-        return GridSchema(
-            epsg=self.epsg,
-            bounds=self.bounds,
-            first_size=self.first_size,
-            subdivide_rules=self.subdivide_rules
-        )
+        schema =  GridSchema()
+        schema.epsg = self.epsg
+        schema.bounds = tuple(self.bounds)
+        schema.first_size = tuple(self.first_size)
+        schema.subdivide_rules = self.subdivide_rules
+        schema.alignment_origin = tuple(self.alignment_origin)
+        return schema
 
     def _load_from_file(self):
         """Load grid data from file streaming

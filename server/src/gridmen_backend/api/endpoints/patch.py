@@ -69,21 +69,22 @@ def check_patch_ready():
 #         success=True,
 #         message='Grid patch set successfully'
 #     )
-
-@router.get('/{schema_name}/{patch_name}/meta', response_model=GridMeta)
-def get_patch_meta(schema_name: str, patch_name: str):
-    """
-    Get grid meta information from a specific patch.
-    """
-    # Check if the patch directory exists
-    grid_patch_path = Path(settings.GRID_SCHEMA_DIR, schema_name, 'patches', patch_name)
-    if not grid_patch_path.exists():
-        raise HTTPException(status_code=404, detail=f'Grid patch ({patch_name}) belonging to schema ({schema_name}) not found')
     
-    try:
-        return GridMeta.from_patch(schema_name, patch_name)
-    except ValueError as e:
-        raise HTTPException(status_code=500, detail=f'Failed to read project meta file: {str(e)}')
+
+# @router.get('/{schema_name}/{patch_name}/meta', response_model=GridMeta)
+# def get_patch_meta(schema_name: str, patch_name: str):
+#     """
+#     Get grid meta information from a specific patch.
+#     """
+#     # Check if the patch directory exists
+#     grid_patch_path = Path(settings.GRID_SCHEMA_DIR, schema_name, 'patches', patch_name)
+#     if not grid_patch_path.exists():
+#         raise HTTPException(status_code=404, detail=f'Grid patch ({patch_name}) belonging to schema ({schema_name}) not found')
+    
+#     try:
+#         return GridMeta.from_patch(schema_name, patch_name)
+#     except ValueError as e:
+#         raise HTTPException(status_code=500, detail=f'Failed to read project meta file: {str(e)}')
 
 # @router.post('/{schema_name}', response_model=BaseResponse)
 # def create_patch(schema_name: str, patch_data: PatchMeta):
@@ -213,6 +214,22 @@ def deleted_grid_infos(node_key: str, lock_id: str = None):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get deleted grid information: {str(e)}')
+
+
+@router.get('/meta', response_model=GridMeta)
+def get_patch_meta(node_key: str, lock_id: str):
+    try:
+        with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
+            patch_meta = patch.get_schema_info()
+            return PatchMeta(
+                name=node_key.split('.')[-1],
+                epsg=patch_meta.epsg,
+                bounds=patch_meta.bounds,
+                alignment_origin=patch_meta.alignment_origin,
+                subdivide_rules=patch_meta.subdivide_rules,
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to get patch meta information: {str(e)}')
 
 @router.post('/subdivide', response_class=Response, response_description='Returns subdivided grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
 def subdivide_grids(node_key: str, lock_id: str, grid_info_bytes: bytes = Body(..., description='Grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):

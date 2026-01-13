@@ -3,7 +3,6 @@ import pyarrow as pa
 
 # Define transferables ##################################################
 
-@cc.transferable
 class GridSchema:
     """
     Grid Schema
@@ -17,33 +16,7 @@ class GridSchema:
     bounds: list[float]  # [min_x, min_y, max_x, max_y]
     first_size: list[float] # [width, height]
     subdivide_rules: list[list[int]]  # [(sub_width, sub_height), ...]
-        
-    def serialize(grid_schema: 'GridSchema') -> bytes:
-        arrow_schema = pa.schema([
-            pa.field('epsg', pa.int32()),
-            pa.field('bounds', pa.list_(pa.float64())),
-            pa.field('first_size', pa.list_(pa.float64())),
-            pa.field('subdivide_rules', pa.list_(pa.list_(pa.int32())))
-        ])
-        
-        data = {
-            'epsg': grid_schema.epsg,
-            'bounds': grid_schema.bounds,
-            'first_size': grid_schema.first_size,
-            'subdivide_rules': grid_schema.subdivide_rules
-        }
-        
-        table = pa.Table.from_pylist([data], schema=arrow_schema)
-        return serialize_from_table(table)
-
-    def deserialize(arrow_bytes: bytes) -> 'GridSchema':
-        row = deserialize_to_rows(arrow_bytes)[0]
-        return GridSchema(
-            epsg=row['epsg'],
-            bounds=row['bounds'],
-            first_size=row['first_size'],
-            subdivide_rules=row['subdivide_rules']
-        )
+    alignment_origin: tuple[float, float] # [lon, lat], base point of the patch
 
 @cc.transferable
 class GridAttribute:
