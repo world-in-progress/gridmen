@@ -69,66 +69,6 @@ def check_patch_ready():
 #         success=True,
 #         message='Grid patch set successfully'
 #     )
-    
-
-# @router.get('/{schema_name}/{patch_name}/meta', response_model=GridMeta)
-# def get_patch_meta(schema_name: str, patch_name: str):
-#     """
-#     Get grid meta information from a specific patch.
-#     """
-#     # Check if the patch directory exists
-#     grid_patch_path = Path(settings.GRID_SCHEMA_DIR, schema_name, 'patches', patch_name)
-#     if not grid_patch_path.exists():
-#         raise HTTPException(status_code=404, detail=f'Grid patch ({patch_name}) belonging to schema ({schema_name}) not found')
-    
-#     try:
-#         return GridMeta.from_patch(schema_name, patch_name)
-#     except ValueError as e:
-#         raise HTTPException(status_code=500, detail=f'Failed to read project meta file: {str(e)}')
-
-# @router.post('/{schema_name}', response_model=BaseResponse)
-# def create_patch(schema_name: str, patch_data: PatchMeta):
-#     """
-#     Description
-#     --
-#     Create a patch belonging to a specified schema.
-#     """
-
-#     # Check if the schema directory exists
-#     grid_schema_path = Path(settings.GRID_SCHEMA_DIR, schema_name, 'schema.json')
-#     if not grid_schema_path.exists():
-#         raise HTTPException(status_code=404, detail=f'Grid schema ({schema_name}) not found')
-    
-#     try:
-#         grid_patch_path = Path(settings.GRID_SCHEMA_DIR, schema_name, 'patches', patch_data.name)
-#         if grid_patch_path.exists():
-#             return BaseResponse(
-#                 success=False,
-#                 message='Grid patch already exists. Please use a different name.'
-#             )
-
-#         # Write the patch meta information to a file
-#         grid_patch_path.mkdir(parents=True, exist_ok=True)
-#         patch_meta_file = grid_patch_path / settings.GRID_PATCH_META_FILE_NAME
-        
-#         with open(patch_meta_file, 'w') as f:
-#             f.write(patch_data.model_dump_json(indent=4))
-#             node_key = f'root.topo.schemas.{schema_name}.patches.{patch_data.name}'
-
-#             # Mount the patch node
-#             BT.instance.mount_node('patch', node_key,
-#                                    {
-#                                        'schema_file_path': str(grid_schema_path),
-#                                        'grid_patch_path': str(grid_patch_path),
-#                                    })
-            
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f'Failed to create grid patch: {str(e)}')
-
-#     return BaseResponse(
-#         success=True,
-#         message='Grid patch created successfully'
-#     )
 
 @router.put('/{schema_name}/{patch_name}', response_model=BaseResponse)
 def update_patch(schema_name: str, patch_name: str, data: PatchMeta):
@@ -155,37 +95,6 @@ def update_patch(schema_name: str, patch_name: str, data: PatchMeta):
         success=True,
         message='Grid patch updated successfully'
     )
-
-# @router.delete('/{schema_name}/{patch_name}', response_model=BaseResponse)
-# def delete_patch(schema_name: str, patch_name: str):
-#     """
-#     Description
-#     --
-#     Delete a patch by specific name of schema and patch.
-#     """
-
-#     # Check if the patch directory exists
-#     grid_patch_dir = Path(settings.GRID_SCHEMA_DIR, schema_name, 'patches', patch_name)
-#     if not grid_patch_dir.exists():
-#         raise HTTPException(status_code=404, detail='Patch not found')
-
-#     # Delete the patch directory
-#     try:
-#         for item in grid_patch_dir.iterdir():
-#             item.unlink()
-#         grid_patch_dir.rmdir()
-
-#         # Unmount the patch node
-#         node_key = f'root.topo.schemas.{schema_name}.patches.{patch_name}'
-#         BT.instance.unmount_node(node_key)
-        
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f'Failed to delete patch ({patch_name}) belonging to schema ({schema_name}): {str(e)}')
-
-#     return BaseResponse(
-#         success=True,
-#         message='Patch deleted successfully'
-#     )
 
 @router.get('/activate-info', response_class=Response, response_description='Returns active grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
 def activate_grid_info(node_key: str, lock_id: str = None):
@@ -216,7 +125,7 @@ def deleted_grid_infos(node_key: str, lock_id: str = None):
         raise HTTPException(status_code=500, detail=f'Failed to get deleted grid information: {str(e)}')
 
 
-@router.get('/meta', response_model=GridMeta)
+@router.get('/meta', response_model=PatchMeta)
 def get_patch_meta(node_key: str, lock_id: str):
     try:
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
