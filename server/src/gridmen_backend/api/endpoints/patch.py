@@ -61,11 +61,11 @@ def get_patch_meta(node_key: str, lock_id: str = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get patch meta information: {str(e)}')
 
-@router.get('/activate-info', response_class=Response, response_description='Returns active grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def activate_grid_info(node_key: str, lock_id: str = None):
+@router.get('/activate-info', response_class=Response, response_description='Returns active cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
+def activated_cell_infos(node_key: str, lock_id: str = None):
     try:
         with noodle.connect(IPatch, node_key, 'pr', lock_id=lock_id) as patch:
-            levels, global_ids = patch.get_active_cell_infos()
+            levels, global_ids = patch.get_activated_cell_infos()
         cell_infos = MultiCellInfo(levels=levels, global_ids=global_ids)
         
         return Response(
@@ -75,24 +75,24 @@ def activate_grid_info(node_key: str, lock_id: str = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get active grid information: {str(e)}')
 
-@router.get('/deleted-info', response_class=Response, response_description='Returns deleted grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def deleted_grid_infos(node_key: str, lock_id: str = None):
+@router.get('/deleted-info', response_class=Response, response_description='Returns deleted cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
+def deleted_cell_infos(node_key: str, lock_id: str = None):
     try:
         with noodle.connect(IPatch, node_key, 'pr', lock_id=lock_id) as patch:
             levels, global_ids = patch.get_deleted_cell_infos()
-        grid_infos = MultiCellInfo(levels=levels, global_ids=global_ids)
+        cell_infos = MultiCellInfo(levels=levels, global_ids=global_ids)
         
         return Response(
-            content=grid_infos.combine_bytes(),
+            content=cell_infos.combine_bytes(),
             media_type='application/octet-stream'
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to get deleted grid information: {str(e)}')
+        raise HTTPException(status_code=500, detail=f'Failed to get deleted cell information: {str(e)}')
 
-@router.post('/subdivide', response_class=Response, response_description='Returns subdivided grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def subdivide_grids(node_key: str, lock_id: str, grid_info_bytes: bytes = Body(..., description='Grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
+@router.post('/subdivide', response_class=Response, response_description='Returns subdivided cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
+def subdivide_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(..., description='Cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
     try:
-        grid_info = MultiCellInfo.from_bytes(grid_info_bytes)
+        grid_info = MultiCellInfo.from_bytes(cell_info_bytes)
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
             levels, global_ids = patch.subdivide_cells(grid_info.levels, grid_info.global_ids)
         subdivide_info = MultiCellInfo(levels=levels, global_ids=global_ids)
@@ -102,17 +102,17 @@ def subdivide_grids(node_key: str, lock_id: str, grid_info_bytes: bytes = Body(.
             media_type='application/octet-stream'
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to subdivide grids: {str(e)}')
+        raise HTTPException(status_code=500, detail=f'Failed to subdivide cells: {str(e)}')
 
-@router.post('/merge', response_class=Response, response_description='Returns merged grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def merge_grids(node_key: str, lock_id: str,grid_info_bytes: bytes = Body(..., description='Grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
+@router.post('/merge', response_class=Response, response_description='Returns merged cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
+def merge_cells(node_key: str, lock_id: str,cell_info_bytes: bytes = Body(..., description='Cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
     """
-    Merge grids based on the provided grid information
+    Merge cells based on the provided cell information
     """
     try:
-        grid_info = MultiCellInfo.from_bytes(grid_info_bytes)
+        cell_info = MultiCellInfo.from_bytes(cell_info_bytes)
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
-            levels, global_ids = patch.merge_cells(grid_info.levels, grid_info.global_ids)
+            levels, global_ids = patch.merge_cells(cell_info.levels, cell_info.global_ids)
             merge_info = MultiCellInfo(levels=levels, global_ids=global_ids)
 
         return Response(
@@ -123,44 +123,44 @@ def merge_grids(node_key: str, lock_id: str,grid_info_bytes: bytes = Body(..., d
         raise HTTPException(status_code=500, detail=f'Failed to merge grids: {str(e)}')
         
 @router.post('/delete', response_model=BaseResponse)
-def delete_grids(node_key: str, lock_id: str, grid_info_bytes: bytes = Body(..., description='Grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
+def delete_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(..., description='Cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
     """
-    Delete grids based on the provided grid information
+    Delete cells based on the provided cell information
     """
     try:
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
-            grid_info = MultiCellInfo.from_bytes(grid_info_bytes)
-            patch.delete_cells(grid_info.levels, grid_info.global_ids)
+            cell_info = MultiCellInfo.from_bytes(cell_info_bytes)
+            patch.delete_cells(cell_info.levels, cell_info.global_ids)
 
         return BaseResponse(
             success=True,
-            message='Grids deleted successfully'
+            message='Cells deleted successfully'
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to delete grids: {str(e)}')
-
+        raise HTTPException(status_code=500, detail=f'Failed to delete cells: {str(e)}')
+    
 @router.post('/recover', response_model=BaseResponse)
-def recover_grids(node_key: str, lock_id: str, grid_info_bytes: bytes = Body(..., description='Grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
+def restore_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(..., description='Cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
     """
-    Recover grids based on the provided grid information
+    Recover cells based on the provided cell information
     """
     try:
-        grid_info = MultiCellInfo.from_bytes(grid_info_bytes)
+        cell_info = MultiCellInfo.from_bytes(cell_info_bytes)
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
-            patch.recover_cells(grid_info.levels, grid_info.global_ids)
+            patch.restore_cells(cell_info.levels, cell_info.global_ids)
 
         return BaseResponse(
             success=True,
-            message='Grids recovered successfully'
+            message='Cells recovered successfully'
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to recover grids: {str(e)}')
+        raise HTTPException(status_code=500, detail=f'Failed to recover cells: {str(e)}')
 
-@router.get('/pick', response_class=Response, response_description='Returns picked grid information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def pick_grids_by_feature(node_key: str, feature_dir: str, lock_id: str):
+@router.get('/pick', response_class=Response, response_description='Returns picked cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
+def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
     """
-    Pick grids based on features from a .shp or .geojson file.
+    Pick cells based on features from a .shp or .geojson file.
     The feature_dir parameter should be a path to the feature file accessible by the server.
     """
     # Validate the feature_dir parameter
@@ -223,7 +223,7 @@ def pick_grids_by_feature(node_key: str, feature_dir: str, lock_id: str):
 
         # Step 3: Get centers of all active grids
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
-            active_levels, active_global_ids = patch.get_active_cell_infos()
+            active_levels, active_global_ids = patch.get_activated_cell_infos()
 
             if not active_levels or not active_global_ids:
                 logging.info(f'No active grids found to check against features from {feature_dir}')

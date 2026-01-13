@@ -291,10 +291,10 @@ class IPatch:
     def delete_cells(self, levels: list[int], global_ids: list[int]):
         ...
         
-    def recover_cells(self, levels: list[int], global_ids: list[int]):
+    def restore_cells(self, levels: list[int], global_ids: list[int]):
         ...
     
-    def get_active_cell_infos(self) -> tuple[list[int], list[int]]:
+    def get_activated_cell_infos(self) -> tuple[list[int], list[int]]:
         ...
     
     def get_deleted_cell_infos(self) -> tuple[list[int], list[int]]:
