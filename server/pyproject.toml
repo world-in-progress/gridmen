@@ -16,6 +16,7 @@ dependencies = [
     "numpy>=2.2.6",
     "pandas>=2.3.3",
     "pyarrow>=22.0.0",
+    "gdal>=3.10.2",
 ]
 
 [dependency-groups]
@@ -27,7 +28,22 @@ dev = [
 [tool.uv.sources]
 c-two = { git = "https://github.com/world-in-progress/c-two.git", branch = "main" }
 py-noodle = { path = "py-noodle", editable = true }
+gdal = [
+  { index = "gdal-wheels", marker = "sys_platform == 'linux'" },
+  { index = "geospatial_wheels", marker = "sys_platform == 'win32'" },
+]
 
 [build-system]
 requires = ["setuptools>=40.8.0"]
 build-backend = "setuptools.build_meta"
+
+[[tool.uv.index]]
+name = "geospatial_wheels"
+url = "https://nathanjmcdougall.github.io/geospatial-wheels-index/"
+explicit = true
+
+[[tool.uv.index]]
+name = "gdal-wheels"
+url = "https://gitlab.com/api/v4/projects/61637378/packages/pypi/simple"
+explicit = true
+
