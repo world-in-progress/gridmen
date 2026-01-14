@@ -62,9 +62,6 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
             'resource_space': str(resource_dir),
         }
         
-        if mount_params and isinstance(mount_params, dict):
-            launch_params.update(mount_params)
-        
         return launch_params
         
     except Exception as e:

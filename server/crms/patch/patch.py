@@ -125,7 +125,7 @@ class Patch(IPatch):
         df = pd.DataFrame(grid_data)
         df.set_index([ATTR_INDEX_KEY], inplace=True)
 
-        self.cache = df
+        self._pd_cache = df
         print(f'Successfully initialized patch data with {num_cells} cells at level 1')
    
     def _load_patch(self):
