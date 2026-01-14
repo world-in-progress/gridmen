@@ -34,15 +34,13 @@ export class ResourceNode implements IResourceNode {
     }
 
     async close(): Promise<void> {
-        // Generic cleanup hook:
-        // Any view (check/create/edit) may register cleanup callbacks into node.context.__cleanup.
-        // close() will execute and clear them without knowing resource-specific details.
         const cleanup = (this.context as any)?.__cleanup as Record<string, (() => void)>
         for (const dispose of Object.values(cleanup)) {
             dispose?.()
         }
         delete (this.context as any).__cleanup
 
+        console.log(`ResourceNode.close: unlinking node ${this.key} with lockId ${this.lockId}`)
         await unlinkNode(this.key, this.lockId!, this.tree.leadIP !== undefined ? true : false)
         this.lockId = null
     }
