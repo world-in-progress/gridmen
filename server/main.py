@@ -7,6 +7,19 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 
+# TODO (Dsssyc): Optimization
+# Inject necessary environment variables for c-two
+# This mechanism maybe better optimized in the future
+settings.inject_env([
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'SQLITE_PATH',
+    'MEMORY_TEMP_PATH',
+    'NOODLE_CONFIG_PATH',
+])
+
+print(settings.MEMORY_TEMP_PATH)
+
 if __name__ == '__main__':
     import os
     import sys

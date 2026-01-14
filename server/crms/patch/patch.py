@@ -390,7 +390,7 @@ class Patch(IPatch):
         """
         Merges multiple child cells into their respective parent cell
 
-        This operation typically deactivates the specified child cells and
+        This operation typically deletes the specified child cell records and
         activates their common parent cell.  
         Merging is only possible if all child cells are provided.
         Args:
@@ -437,7 +437,7 @@ class Patch(IPatch):
             self.cache.loc[keys_to_activate, ATTR_ACTIVATE] = True
         
         # Get all children of activated parents
-        keys_to_deactivate = []
+        keys_to_delete = []
         for parent_level, parent_global_id in activated_parents:
             child_level = parent_level + 1
             child_global_ids = self._get_children_global_ids(parent_level, parent_global_id)
@@ -445,11 +445,11 @@ class Patch(IPatch):
                 for child_global_id in child_global_ids:
                     encoded_idx = _encode_index(child_level, child_global_id)
                     if encoded_idx in self.cache.index:
-                        keys_to_deactivate.append(encoded_idx)
+                        keys_to_delete.append(encoded_idx)
         
-        # Batch deactivate child cells
-        if keys_to_deactivate:
-            self.cache.loc[keys_to_deactivate, ATTR_ACTIVATE] = False
+        # Batch delete child cell records
+        if keys_to_delete:
+            self.cache.drop(index=keys_to_delete, inplace=True)
         
         result_levels, result_global_ids = zip(*activated_parents)
         return list(result_levels), list(result_global_ids)

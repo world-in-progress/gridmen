@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
@@ -11,21 +12,18 @@ APP_CONTEXT: dict[str, str] = {
 class Settings(BaseSettings):
     # Server configuration
     DEBUG: bool = True
-    APP_NAME: str = 'NH Grid Server'
-    ROOT_DIR: Path = ROOT_DIR
-    TEMPLATES_DIR: str = str(ROOT_DIR / 'templates/')
-    
-    # Memory temp directory
-    MEMORY_TEMP_DIR: str | None = None
-    PRE_REMOVE_MEMORY_TEMP_DIR: bool = False
+    SERVER_PORT: int = 8000
+    APP_NAME: str = 'Gridmen Calculation Backend'
     
     # Proxy configuration
-    HTTP_PROXY: str = ""
-    HTTPS_PROXY: str = ""
+    HTTP_PROXY: str = ''
+    HTTPS_PROXY: str = ''
     
-    # Treeger meta configuration
-    SCENARIO_META_PATH: str = ""
-    TREEGER_SERVER_ADDRESS: str = 'thread://gridman_bstreeger'
+    # Noodle configuration
+    ROOT_DIR: Path = ROOT_DIR
+    SQLITE_PATH: str = str(ROOT_DIR / 'noodle.db')
+    MEMORY_TEMP_PATH: str = str(ROOT_DIR / 'temp')
+    NOODLE_CONFIG_PATH: str = str(ROOT_DIR / 'noodle.config.yaml')
     
     # Grid schema related constants
     GRID_SCHEMA_DIR: str = 'resource/topo/schemas/'
@@ -33,11 +31,6 @@ class Settings(BaseSettings):
     # Grid-related constants
     GRID_PATCH_META_FILE_NAME: str = 'patch.meta.json'
     GRID_PATCH_TOPOLOGY_FILE_NAME: str = 'patch.topo.arrow'
-    
-    # AI MCP configuration
-    DEEPSEEK_API_KEY: str = ""
-    ANTHROPIC_API_KEY: str = ""
-    MCP_SERVER_SCRIPT_PATH: str = str(ROOT_DIR / 'scripts/grid_mcp_server.py')
 
     # CORS
     CORS_ORIGINS: list[str] = ['*']
@@ -45,17 +38,11 @@ class Settings(BaseSettings):
     CORS_METHODS: list[str] = ['*']
     CORS_CREDENTIALS: bool = True
 
-    # Solution related constants
-    SOLUTION_DIR: str = 'resource/solutions/'
-
-    DEM_DIR: str = 'resource/dems/'
-    LUM_DIR: str = 'resource/lums/'
-
-    FEATURE_DIR: str = 'resource/vectors/'
-
-    PERSISTENCE_DIR: str = 'persistence/'
-
-    SERVER_PORT: int = 8000
+    def inject_env(self, keys: list[str]):
+        """Inject specific settings into environment variables"""
+        for key in keys:
+            if value := getattr(self, key, None):
+                os.environ[key] = str(value)
 
     class Config:
         env_file = '.env'
