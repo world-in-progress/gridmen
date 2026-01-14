@@ -1,6 +1,6 @@
 import { useSettingStore } from "@/store/storeSet"
 import { extractIPFromUrl, getApiBaseUrl } from "./utils"
-import { PatchMeta } from "./types"
+import IAPI, { MultiGridBaseInfo, PatchMeta } from "./types"
 import { MultiGridInfoParser } from "@/core/grid/types"
 
 const API_PREFIX = `/api/patch`
@@ -62,5 +62,30 @@ export const deletedGridInfo = async (node_key: string, lock_id: string) => {
         return MultiGridInfoParser.fromBuffer(buffer)
     } catch (error) {
         throw new Error(`Failed to activate info: ${error}`)
+    }
+}
+
+export const subdivideGrids: IAPI<MultiGridBaseInfo, MultiGridBaseInfo> = {
+    fetch: async (query: MultiGridBaseInfo, node_key: string, lock_id: string): Promise<MultiGridBaseInfo> => {
+        try {
+            const baseUrl = getApiBaseUrl(false)
+            const url = `${baseUrl}${API_PREFIX}/subdivide?node_key=${node_key}&lock_id=${lock_id}`
+            const buffer = MultiGridInfoParser.toBuffer(query)
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream' },
+                body: buffer,
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`)
+            }
+
+            const resBuffer = await response.arrayBuffer()
+            return MultiGridInfoParser.fromBuffer(resBuffer)
+
+        } catch (error) {
+            throw new Error(`Failed to subdivide grids: ${error}`)
+        }
     }
 }
