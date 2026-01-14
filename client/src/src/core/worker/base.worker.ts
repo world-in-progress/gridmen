@@ -2,8 +2,6 @@ import Actor from "../message/actor"
 import { Callback, WorkerSelf } from "../types"
 
 // Base Worker Types //////////////////////////////////////////////////
-
-type FuncModule = { [key: string]: Function }
 declare const self: WorkerSelf
 
 // Base Worker Members /////////////////////////////////////////////////
@@ -24,9 +22,6 @@ function register(module: any) {
 }
 
 // Register all functions from the module //////////////////////////////
-
-import * as func from "./func.worker"
-register(func)
 
 import * as gridUtils from "../grid/util.worker"
 register(gridUtils)

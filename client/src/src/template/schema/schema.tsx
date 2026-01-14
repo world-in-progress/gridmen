@@ -76,10 +76,10 @@ export default class SchemaTemplate implements ITemplate {
                 break
             case SchemaMenuItem.CHECK_SCHEMA: {
                 if (!(node as ResourceNode).lockId) {
-                    const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                    const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
-                const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                const schemaInfo = await api.node.getNodeParams(node.nodeInfo);
                 (node as ResourceNode).mountParams = schemaInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
@@ -87,10 +87,10 @@ export default class SchemaTemplate implements ITemplate {
             case SchemaMenuItem.EDIT_SCHEMA:
                 {
                     if (!(node as ResourceNode).lockId) {
-                        const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'w', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+                        const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
                         (node as ResourceNode).lockId = linkResponse.lock_id
                     }
-                    const schemaInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                    const schemaInfo = await api.node.getNodeParams(node.nodeInfo)
                         ; (node as ResourceNode).mountParams = schemaInfo
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
                 }
@@ -104,7 +104,7 @@ export default class SchemaTemplate implements ITemplate {
                         return
                     }
 
-                    await api.node.unmountNode(node.key)
+                    await api.node.unmountNode(node.nodeInfo)
                     toast.success(`Schema ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()
                 }

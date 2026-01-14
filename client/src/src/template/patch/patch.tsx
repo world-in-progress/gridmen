@@ -86,7 +86,7 @@ export default class PatchTemplate implements ITemplate {
                 break
             case PatchMenuItem.EDIT_PATCH: {
                 if (!(node as ResourceNode).lockId) {
-                    const linkResponse = await linkNode('cc/IPatch/0.1.0', node.nodeInfo, 'w');
+                    const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
                 // const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
@@ -104,7 +104,7 @@ export default class PatchTemplate implements ITemplate {
                         return
                     }
 
-                    await api.node.unmountNode(node.key)
+                    await api.node.unmountNode(node.nodeInfo)
                     toast.success(`Patch ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()
                 }

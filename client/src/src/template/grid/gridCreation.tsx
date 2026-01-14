@@ -19,7 +19,7 @@ import { IResourceNode } from '../scene/iscene'
 import { IViewContext } from '@/views/IViewContext'
 import { toast } from 'sonner'
 import * as apis from '@/template/api/apis'
-import { GridInfo } from '@/core/grid/NHGridManager'
+import { GridInfo } from '@/core/grid/patchManager'
 import { ResourceNode, ResourceTree } from '../scene/scene'
 
 interface GridCreationProps {

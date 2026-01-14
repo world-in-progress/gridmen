@@ -344,6 +344,7 @@ const NodeRenderer = ({
         if (!isFolder) {
             const payload = {
                 nodeKey: node.key,
+                nodeInfo: node.nodeInfo,
                 templateName: node.template_name,
                 sourceTreeTitle: sourceTreeTitle || ''
             }
@@ -415,6 +416,7 @@ const NodeRenderer = ({
                 }
             }
 
+            // TODO (Dsssyc): how to get public address of source/target node?
             // private -> public
             if (sourceTitle === 'WorkSpace' && targetTitle === 'Public') {
 

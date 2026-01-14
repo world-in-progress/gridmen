@@ -2,9 +2,9 @@ import { Map } from 'mapbox-gl'
 import { mat4 } from 'gl-matrix'
 
 import '@/App.css'
-import GridCore from '@/core/grid/NHGridCore'
+import PatchCore from '@/core/grid/patchCore'
 import VibrantColorGenerator from '@/core/util/vibrantColorGenerator'
-import { GridCheckingInfo, MultiGridBaseInfo } from '@/core/grid/types'
+import { CellCheckInfo, MultiCellBaseInfo } from '@/core/grid/types'
 
 import gll from '@/core/gl/glLib'
 import HitBuffer from './hitBuffer'
@@ -28,7 +28,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
     // Grid-related /////////////////////////////////////////////////////////
 
-    private _gridCore: GridCore | null = null
+    private _gridCore: PatchCore | null = null
 
     // Interaction-related //////////////////////////////////////////////////
 
@@ -130,10 +130,10 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     }
 
     get maxGridNum(): number {
-        return this._gridCore?.maxGridNum || DEFAULT_MAX_GRID_NUM
+        return this._gridCore?.maxCellNum || DEFAULT_MAX_GRID_NUM
     }
 
-    set gridCore(core: GridCore) {
+    set gridCore(core: PatchCore) {
         const currentMaxGridNum = this.maxGridNum
         this._gridCore = core // after setting, this.maxGridNum will be updated
         this.startCallback()
@@ -160,7 +160,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         }
     }
 
-    get gridCore(): GridCore {
+    get gridCore(): PatchCore {
         if (!this._gridCore) {
             const err = new Error('GridCore is not initialized')
             console.error(err)
@@ -171,7 +171,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
     get isReady() {
         // Check if the grid core is initialized
-        if (!this._gridCore || !this._gridCore.gridNum) return false
+        if (!this._gridCore || !this._gridCore.cellNum) return false
         // Check if GPU resources are initialized
         if (!this.initialized) return false
         return true
@@ -386,7 +386,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform4fv(gl.getUniformLocation(this._pickingShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
         gl.uniformMatrix4fv(gl.getUniformLocation(this._pickingShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
 
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.gridNum)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.cellNum)
 
         gl.flush()
 
@@ -444,7 +444,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform4fv(gl.getUniformLocation(this._pickingShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
         gl.uniformMatrix4fv(gl.getUniformLocation(this._pickingShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
 
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.gridNum)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.cellNum)
 
         gl.flush()
 
@@ -476,7 +476,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const ids = Array.isArray(storageIds) ? storageIds : [storageIds]
         if (addMode) {
             // Highlight all grids
-            if (ids.length === this.gridCore.gridNum) {
+            if (ids.length === this.gridCore.cellNum) {
 
                 this.hitBuffer.all = ids
                 gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Uint8Array(this.maxGridNum).fill(this.hitFlag[0]))
@@ -539,7 +539,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.endCallback()
     }
 
-    executeCheckGrid(startPos: [number, number]): GridCheckingInfo | null {
+    executeCheckGrid(startPos: [number, number]): CellCheckInfo | null {
         // Clear hit set
         this.executeClearSelection()
 
@@ -552,12 +552,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.map.triggerRepaint()
 
         // Check information
-        return this.gridCore.checkGrid(storageId)
+        return this.gridCore.check(storageId)
     }
 
     executePickGridsByFeature(path: string) {
         this.startCallback()
-        this.gridCore.getGridInfoByFeature(path, (storageIds: number[]) => {
+        this.gridCore.getCellInfoByFeature(path, (storageIds: number[]) => {
             this._hit(storageIds)
             this.endCallback()
             store.get<{ on: Function; off: Function }>('isLoading')!.off();
@@ -567,7 +567,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     executePickAllGrids() {
         this.startCallback()
         const storageIds = new Array<number>()
-        for (let i = 0; i < this.gridCore.gridNum; i++) {
+        for (let i = 0; i < this.gridCore.cellNum; i++) {
             storageIds.push(i)
         }
         this._hit(storageIds)
@@ -593,12 +593,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
         if (storageIds.length === 1) {
             // Fast delete for single grid
-            this.gridCore.deleteGridLocally(storageIds[0], (info: [sourceStorageId: number, targetStorageId: number]) => {
+            this.gridCore.deleteCellLocally(storageIds[0], (info: [sourceStorageId: number, targetStorageId: number]) => {
                 this.copyGPUGrid(info[0], info[1])
                 this.endCallback()
             })
         } else {
-            this.gridCore.deleteGridsLocally(storageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
+            this.gridCore.deleteCellsLocally(storageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
                 for (let i = 0; i < infos[0].length; i++) {
                     this.copyGPUGrid(infos[0][i], infos[1][i])
                 }
@@ -608,14 +608,14 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
     }
 
-    deleteGrids(storageIds: number[]) {
+    deleteCells(storageIds: number[]) {
         if (storageIds.length === 0) return
         this.startCallback()
 
         const gl = this._gl
 
         // Set grids deleted
-        this.gridCore.markGridsAsDeleted(storageIds, () => {
+        this.gridCore.markCellsAsDeleted(storageIds, () => {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._gridSignalBuffer)
             storageIds.forEach(storageId => {
                 gl.bufferSubData(gl.ARRAY_BUFFER, this.maxGridNum + storageId, this.deletedFlag, 0)
@@ -626,14 +626,14 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         })
     }
 
-    recoverGrids(storageIds: number[]) {
+    restoreCells(storageIds: number[]) {
         if (storageIds.length === 0) return
         this.startCallback()
 
         const gl = this._gl
 
         // Set grids undeleted
-        this.gridCore.recoverGrids(storageIds, () => {
+        this.gridCore.restoreCells(storageIds, () => {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._gridSignalBuffer)
             storageIds.forEach(storageId => {
                 gl.bufferSubData(gl.ARRAY_BUFFER, this.maxGridNum + storageId, this.undeletedFlag, 0)
@@ -646,14 +646,14 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
     executeDeleteGrids() {
         const removableStorageIds = this.executeClearSelection()
-            .filter(removableStorageId => !this._gridCore!.isGridDeleted(removableStorageId))
-        this.deleteGrids(removableStorageIds)
+            .filter(removableStorageId => !this._gridCore!.isDeleted(removableStorageId))
+        this.deleteCells(removableStorageIds)
     }
 
     executeRecoverGrids() {
         const recoverableStorageIds = this.executeClearSelection()
-            .filter(recoverableStorageId => this._gridCore!.isGridDeleted(recoverableStorageId))
-        this.recoverGrids(recoverableStorageIds)
+            .filter(recoverableStorageId => this._gridCore!.isDeleted(recoverableStorageId))
+        this.restoreCells(recoverableStorageIds)
     }
 
     // Subdivide grids  //////////////////////////////////////////////////
@@ -662,7 +662,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         if (subdivideInfos.levels.length === 0) return
         this.startCallback()
 
-        this.gridCore.subdivideGrids(subdivideInfos, (renderInfos: any) => {
+        this.gridCore.subdivideCells(subdivideInfos, (renderInfos: any) => {
             this.updateGPUGrids(renderInfos)
             const [fromStorageId, levels] = renderInfos
             const storageIds = Array.from(
@@ -679,21 +679,21 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.startCallback()
 
         // Merge grids
-        this.gridCore.mergeGrids(mergeableStorageIds, (info: { childStorageIds: number[], parentInfo: MultiGridBaseInfo }) => {
+        this.gridCore.mergeCells(mergeableStorageIds, (info: { childStorageIds: number[], parentInfo: MultiCellBaseInfo }) => {
             // If no parent grid is provided, just hit the mergable grids and do nothing
             if (info.parentInfo.levels.length === 0) {
                 this._hit(mergeableStorageIds)
                 this.endCallback()
             }
             // Delete child grids
-            this.gridCore.deleteGridsLocally(info.childStorageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
+            this.gridCore.deleteCellsLocally(info.childStorageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
                 for (let i = 0; i < infos[0].length; i++) {
                     this.copyGPUGrid(infos[0][i], infos[1][i])
                 }
 
-                const fromStorageId = this.gridCore.gridNum
+                const fromStorageId = this.gridCore.cellNum
                 // Update parent grid in grid core and GPU resources
-                this.gridCore.updateMultiGridRenderInfo(info.parentInfo, (renderInfo: any) => {
+                this.gridCore.updateMultiCellRenderInfo(info.parentInfo, (renderInfo: any) => {
                     this.updateGPUGrids(renderInfo)
 
                     // Pick all merged grids
@@ -713,11 +713,11 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const subdivideGlobalIds: number[] = []
         const subdividableStorageIds = this.executeClearSelection()
             .filter(removableStorageId => {
-                const level = this.gridCore.getGridInfoByStorageId(removableStorageId)[0]
-                const isValid = (level !== this.gridCore.maxLevel) && (!this._gridCore!.isGridDeleted(removableStorageId))
+                const level = this.gridCore.getInfoByStorageId(removableStorageId)[0]
+                const isValid = (level !== this.gridCore.maxLevel) && (!this._gridCore!.isDeleted(removableStorageId))
                 if (isValid) {
                     subdivideLevels.push(level)
-                    const globalId = this.gridCore.getGridInfoByStorageId(removableStorageId)[1]
+                    const globalId = this.gridCore.getInfoByStorageId(removableStorageId)[1]
                     subdivideGlobalIds.push(globalId)
                 }
                 return isValid
@@ -732,7 +732,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
     executeMergeGrids() {
         const mergeableStorageIds = this.executeClearSelection()
-            .filter(mergeableStorageId => !this._gridCore!.isGridDeleted(mergeableStorageId))
+            .filter(mergeableStorageId => !this._gridCore!.isDeleted(mergeableStorageId))
         this._mergeGrids(mergeableStorageIds)
     }
 
@@ -777,7 +777,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform4fv(gl.getUniformLocation(this._gridMeshShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
         gl.uniformMatrix4fv(gl.getUniformLocation(this._gridMeshShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
 
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.gridNum)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.cellNum)
 
         gl.disable(gl.BLEND)
     }
@@ -799,7 +799,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniformMatrix4fv(gl.getUniformLocation(this._gridLineShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
         gl.uniform4fv(gl.getUniformLocation(this._gridLineShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
 
-        gl.drawArraysInstanced(gl.LINE_LOOP, 0, 4, this.gridCore.gridNum)
+        gl.drawArraysInstanced(gl.LINE_LOOP, 0, 4, this.gridCore.cellNum)
 
         gl.disable(gl.BLEND)
     }

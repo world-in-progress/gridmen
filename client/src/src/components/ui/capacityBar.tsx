@@ -8,13 +8,13 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip'
-import GridCore from '@/core/grid/NHGridCore';
+import PatchCore from '@/core/grid/patchCore';
 
 interface CapacityBarProps {
     className?: string
     animateOnChange?: boolean;
     animationDuration?: number;
-    gridCore: GridCore
+    gridCore: PatchCore
 }
 
 export default function CapacityBar({
@@ -24,20 +24,20 @@ export default function CapacityBar({
     gridCore
 }: CapacityBarProps) {
     // 直接追踪gridNum和maxGridNum值而非gridCore对象
-    const [gridNum, setGridNum] = useState(gridCore?.gridNum || 0);
-    const [maxGridNum, setMaxGridNum] = useState(gridCore?.maxGridNum || 100);
+    const [gridNum, setGridNum] = useState(gridCore?.cellNum || 0);
+    const [maxGridNum, setMaxGridNum] = useState(gridCore?.maxCellNum || 100);
 
     // 监听gridCore内部数值变化
     useEffect(() => {
         // 初始化值
-        setGridNum(gridCore?.gridNum || 0);
-        setMaxGridNum(gridCore?.maxGridNum || 100);
+        setGridNum(gridCore?.cellNum || 0);
+        setMaxGridNum(gridCore?.maxCellNum || 100);
 
         // 设置轮询检查gridNum变化
         const intervalId = setInterval(() => {
-            if (gridCore && (gridCore.gridNum !== gridNum || gridCore.maxGridNum !== maxGridNum)) {
-                setGridNum(gridCore.gridNum);
-                setMaxGridNum(gridCore.maxGridNum);
+            if (gridCore && (gridCore.cellNum !== gridNum || gridCore.maxCellNum !== maxGridNum)) {
+                setGridNum(gridCore.cellNum);
+                setMaxGridNum(gridCore.maxCellNum);
             }
         }, 500); // 每500ms检查一次
 
@@ -189,10 +189,10 @@ export default function CapacityBar({
                     <TooltipContent side="bottom">
                         <div className="text-sm text-center justify-between p-1">
                             <p className="font-bold mb-1 text-black">
-                                Current Grid Number : {gridCore?.gridNum}
+                                Current Grid Number : {gridCore?.cellNum}
                             </p>
                             <p className="font-bold text-red-500">
-                                Max Grid Number : {gridCore?.maxGridNum}
+                                Max Grid Number : {gridCore?.maxCellNum}
                             </p>
                         </div>
                     </TooltipContent>

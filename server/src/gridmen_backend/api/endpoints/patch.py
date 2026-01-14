@@ -112,7 +112,7 @@ def delete_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(...,
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to delete cells: {str(e)}')
     
-@router.post('/recover', response_model=BaseResponse)
+@router.post('/restore', response_model=BaseResponse)
 def restore_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(..., description='Cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')):
     """
     Recover cells based on the provided cell information

@@ -78,13 +78,13 @@ export default class GridTemplate implements ITemplate {
                 useToolPanelStore.getState().setActiveTab('create')
                 break
             case GridMenuItem.CHECK_GRID: {
-                const gridInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                const gridInfo = await api.node.getNodeParams(node.nodeInfo)
                     ; (node as ResourceNode).mountParams = gridInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
             case GridMenuItem.EDIT_GRID: {
-                const gridInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
+                const gridInfo = await api.node.getNodeParams(node.nodeInfo)
                     ; (node as ResourceNode).mountParams = gridInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
@@ -98,7 +98,7 @@ export default class GridTemplate implements ITemplate {
                         return
                     }
 
-                    await api.node.unmountNode(node.key)
+                    await api.node.unmountNode(node.nodeInfo)
                     toast.success(`Grid ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()
                 }

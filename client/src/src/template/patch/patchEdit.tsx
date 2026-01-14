@@ -31,10 +31,10 @@ import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
 import { SchemaData } from '../schema/types'
 import { ResourceNode } from '../scene/scene'
-import GridCore from '@/core/grid/NHGridCore'
+import PatchCore from '@/core/grid/patchCore'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { GridContext } from '@/core/grid/types'
+import { PatchContext } from '@/core/grid/types'
 import { IResourceNode } from '../scene/iscene'
 import { useSettingStore } from '@/store/storeSet'
 import { IViewContext } from '@/views/IViewContext'
@@ -57,7 +57,7 @@ interface PatchEditProps {
 interface PageContext {
     patch: PatchMeta | null
     topologyLayer: TopologyLayer | null
-    gridCore: GridCore | null
+    gridCore: PatchCore | null
     isChecking: boolean
     editingState: {
         pick: boolean,
@@ -157,7 +157,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (!map) return
 
         if (!(node as ResourceNode).lockId) {
-            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'w', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
             (node as ResourceNode).lockId = linkResponse.lock_id
         }
 
@@ -166,7 +166,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         if ((node as ResourceNode).mountParams === null) {
-            const patchInfo = await api.patch.getPatchMeta(node.key, (node as ResourceNode).lockId!, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
             (node as ResourceNode).mountParams = patchInfo
             pageContext.current.patch = patchInfo
         } else {
@@ -203,8 +203,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
         const clg = await waitForClg()
 
-        const gridContext: GridContext = {
-            noodleKey: node.nodeInfo,
+        const gridContext: PatchContext = {
+            nodeInfo: node.nodeInfo,
             lockId: node.lockId!,
             srcCS: `EPSG:${pageContext.current.patch?.epsg}`,
             targetCS: 'EPSG:4326',
@@ -215,12 +215,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         const gridLayer = new TopologyLayer(map)
         clg.addLayer(gridLayer)
 
-        const gridCore: GridCore = new GridCore(gridContext)
+        const patchCore: PatchCore = new PatchCore(gridContext)
         await gridLayer.initialize(map, map.painter.context.gl)
 
         pageContext.current.topologyLayer = gridLayer
-        gridLayer.gridCore = gridCore
-        pageContext.current.gridCore = gridCore
+        gridLayer.gridCore = patchCore
+        pageContext.current.gridCore = patchCore
 
         setTopologyLayer(pageContext.current.topologyLayer)
         setPickingTab(pageContext.current.editingState.pick)
@@ -604,7 +604,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }
 
     const handleSaveTopologyState = () => {
-        const core: GridCore = pageContext.current.gridCore!
+        const core: PatchCore = pageContext.current.gridCore!
         core.save(() => {
             toast.success(`Topology edit state of ${pageContext.current.patch?.name} saved successfully`)
         })

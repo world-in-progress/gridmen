@@ -27,12 +27,12 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
 
     const loadContext = async () => {
         if (!(node as ResourceNode).lockId) {
-            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
             (node as ResourceNode).lockId = linkResponse.lock_id
         }
 
         if ((node as ResourceNode).mountParams === null) {
-            const schemaNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            const schemaNode: any = await api.node.getNodeParams(node.nodeInfo);
             (node as ResourceNode).mountParams = schemaNode
             const parsed = JSON.parse(schemaNode.mount_params) as SchemaData
             const alignmentOriginOn4326 = await convertPointCoordinate(parsed.alignment_origin, parsed.epsg, 4326)

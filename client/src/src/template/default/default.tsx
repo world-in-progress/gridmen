@@ -84,7 +84,7 @@ export default class DefaultTemplate implements ITemplate {
                 console.log('NEW_FOLDER')
                 break
             case DefaultMenuItem.DELETE_FOLDER:
-                await api.node.unmountNode(node.key)
+                await api.node.unmountNode(node.nodeInfo)
                 toast.success(`Folder ${node.name} deleted successfully`)
                 await (node.tree as ResourceTree).refresh()
                 break

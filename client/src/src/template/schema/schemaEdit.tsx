@@ -32,8 +32,8 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
         // }
 
         if ((node as ResourceNode).mountParams !== null) {
-            const schemaNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-            const parsed = JSON.parse(schemaNode.mount_params) as SchemaData
+            const schemaNode = await api.node.getNodeParams(node.nodeInfo)
+            const parsed = JSON.parse((schemaNode as unknown as any).mount_params) as SchemaData
             (node as ResourceNode).mountParams = parsed
 
             const alignmentOriginOn4326 = await convertPointCoordinate(parsed.alignment_origin, parsed.epsg, 4326)

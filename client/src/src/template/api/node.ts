@@ -57,12 +57,6 @@ export const mountNode = async ({ nodeInfo, templateName, mountParamsString }: M
 }
 
 export const unmountNode = async (nodeInfo: string) => {
-    // if (leadIP) {
-    //     const publicIP = useSettingStore.getState().publicIP
-    //     const ipPrefix = extractIPFromUrl(publicIP || '127.0.0.1:8000')
-    //     node_key = `${ipPrefix}::${node_key}`
-    // }
-
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
     const url = `${address}${API_PREFIX}/unmount?node_key=${nodeKey}`
 

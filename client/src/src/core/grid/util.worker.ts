@@ -1,92 +1,92 @@
 import * as api from '@/template/api/apis'
-import GridManager from './NHGridManager'
+import PatchManager from './patchManager'
 import { Callback, WorkerSelf } from '../types'
-import { GridContext, MultiGridBaseInfo } from './types'
+import { PatchContext, MultiCellBaseInfo } from './types'
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
 
-type WorkerContext = WorkerSelf & Record<'gridManager', GridManager>
+type WorkerContext = WorkerSelf & Record<'patchManager', PatchManager>
 
-export function setGridManager(
+export function setPatchManager(
     this: WorkerContext,
-    context: GridContext,
+    context: PatchContext,
     callback: Callback<any>
 ) {
-    this.gridManager = new GridManager(context)
+    this.patchManager = new PatchManager(context)
     callback()
 }
 
-export async function subdivideGrids(
+export async function subdivideCells(
     this: WorkerContext,
-    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
     callback: Callback<any>
 ) {
-    const renderInfo = await api.patch.subdivideGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    const renderInfo = await api.patch.subdivideCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback(null, renderInfo)
 }
 
-export async function mergeGrids(
+export async function mergeCells(
     this: WorkerContext,
-    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
     callback: Callback<any>
 ) {
-    const renderInfo = await api.patch.mergeGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    const renderInfo = await api.patch.mergeCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback(null, renderInfo)
 }
 
-export async function deleteGrids(
-    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+export async function deleteCells(
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
     callback: Callback<any>
 ) {
-    await api.patch.deleteGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    await api.patch.deleteCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback()
 }
 
-export async function recoverGrids(
-    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+export async function restoreCells(
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
     callback: Callback<any>
 ) {
-    await api.patch.recoverGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    await api.patch.restoreCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback()
 }
 
-export async function getGridInfoByFeature(
-    pickInfo: { path: string, node_key: string, lock_id: string },
+export async function getCellInfoByFeature(
+    pickInfo: { path: string, nodeInfo: string, lockId: string },
     callback: Callback<any>
 ) {
-    const result = await api.patch.pickGridsByFeature.fetch(pickInfo.path, pickInfo.node_key, pickInfo.lock_id)
+    const result = await api.patch.pickByFeature(pickInfo.path, pickInfo.nodeInfo, pickInfo.lockId)
     callback(null, {
         levels: result.levels,
         globalIds: result.globalIds
     })
 }
 
-export async function saveGrids(node_key: string, lock_id: string, callback: Callback<any>) {
-    const result = await api.patch.saveGrids.fetch(api.VOID_VALUE, node_key, lock_id)
+export async function savePatch(nodeInfo: string, lockId: string, callback: Callback<any>) {
+    const result = await api.patch.savePatch(nodeInfo, lockId)
     callback(null, result)
 }
 
-export async function getMultiGridRenderVertices(
-    this: WorkerSelf & Record<'gridManager', GridManager>,
-    gridInfo: MultiGridBaseInfo,
+export async function getMultiCellRenderVertices(
+    this: WorkerSelf & Record<'patchManager', PatchManager>,
+    gridInfo: MultiCellBaseInfo,
     callback: Callback<any>
 ) {
-    const result = this.gridManager.createStructuredGridRenderVertices(gridInfo.levels, gridInfo.globalIds)
+    const result = this.patchManager.createStructuredCellRenderVertices(gridInfo.levels, gridInfo.globalIds)
     callback(null, result)
 }
 
-export async function getGridInfo(
-    this: WorkerSelf & Record<'gridManager', GridManager>,
+export async function getPatchInfo(
+    this: WorkerSelf & Record<'patchManager', PatchManager>,
     data: {
-        node_key: string
-        lock_id: string
+        nodeInfo: string
+        lockId: string
     },
     callback: Callback<any>
 ) {
     const [activateInfoResponse, deletedInfoResponse] = await Promise.all([
-        api.patch.activateGridInfo(data.node_key, data.lock_id),
-        api.patch.deletedGridInfo(data.node_key, data.lock_id)
+        api.patch.activateCellInfo(data.nodeInfo, data.lockId),
+        api.patch.deletedCellInfo(data.nodeInfo, data.lockId)
     ])
 
     // Create combined levels for activate and deleted grids
@@ -109,5 +109,5 @@ export async function getGridInfo(
         globalIds: combinedGlobalIds,
         deleted: combinedDeleted,
     }
-    callback(null, renderInfo);
+    callback(null, renderInfo)
 }

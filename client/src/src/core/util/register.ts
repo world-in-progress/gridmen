@@ -1,8 +1,5 @@
 import { Class, Klass } from '../types'
 
-import BoundingBox2D from './boundingBox2D'
-import { GridNode } from '../grid/types'
-
 export type Registry = {
     [ key: string ]: {
         klass: Klass
@@ -36,5 +33,3 @@ export default registry
 
 register(Error, 'Error')
 register(Object, 'Object')
-register(GridNode, 'GridNode')
-register(BoundingBox2D, 'BoundingBox2D')

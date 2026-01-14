@@ -205,18 +205,18 @@ export default function PatchCreation({
 
         const payload = JSON.parse(raw) as {
             nodeKey: string
+            nodeInfo: string
             templateName: string
             sourceTreeTitle: string
         }
 
-        const { nodeKey: dragNodeKey, templateName, sourceTreeTitle } = payload
+        const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, templateName, sourceTreeTitle } = payload
 
         if (!dragNodeKey || templateName !== 'schema') {
             toast.error('Please drag a schema node')
             return
         } else {
-            const schemaNodeParams = await api.node.getNodeParams(dragNodeKey, sourceTreeTitle === 'Public' ? true : false)
-            const { template_name, mount_params } = schemaNodeParams
+            const { mount_params } = await (api.node.getNodeParams(dragNodeInfo) as any)
             const schemaMountParams = JSON.parse(mount_params) as SchemaData
             const schema: Schema = {
                 ...schemaMountParams,

@@ -1,11 +1,4 @@
-import { Callback } from "@/core/types"
-
-export default interface IAPI<Q, R> {
-    fetch: (query: Q, node_key: string, lock_id: string) => Promise<R>
-    fetchWithCallback?: (query: Q, callback: Callback<R>) => void
-}
-
-export type MultiGridBaseInfo = {
+export type MultiCellBaseInfo = {
     levels: Uint8Array;
     globalIds: Uint32Array;
     deleted?: Uint8Array;

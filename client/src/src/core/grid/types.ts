@@ -1,263 +1,49 @@
-import BoundingBox2D from '../util/boundingBox2D';
+import BoundingBox2D from '../util/boundingBox2D'
 import type { Converter } from 'proj4/dist/lib/core'
-import { MercatorCoordinate } from '../math/mercatorCoordinate';
-import { ResourceNode } from '@/template/scene/scene';
+import { MercatorCoordinate } from '../math/mercatorCoordinate'
 
-export const EDGE_CODE_INVALID = -1;
-export const EDGE_CODE_NORTH = 0b00;
-export const EDGE_CODE_WEST = 0b01;
-export const EDGE_CODE_SOUTH = 0b10;
-export const EDGE_CODE_EAST = 0b11;
-
-export type EDGE_CODE =
-    | typeof EDGE_CODE_NORTH
-    | typeof EDGE_CODE_WEST
-    | typeof EDGE_CODE_SOUTH
-    | typeof EDGE_CODE_EAST;
-
-
-export interface GridNodeParams {
-    level?: number;
-    globalId: number;
-    parent?: GridNode;
-    storageId: number;
-    globalRange?: [number, number];
-}
-
-export interface MultiGridRenderInfo {
-    levels: Uint8Array;
-    globalIds: Uint32Array;
-    deleted: Uint8Array;
-    vertices: Float32Array;
-    verticesLow: Float32Array;
-}
-
-export interface StructuredGridRenderVertices {
-    tl: Float32Array;
-    tr: Float32Array;
-    bl: Float32Array;
-    br: Float32Array;
-
-    tlLow: Float32Array;
-    trLow: Float32Array;
-    blLow: Float32Array;
-    brLow: Float32Array;
-}
-
-export type GridContext = {
-    noodleKey: string
+export type PatchContext = {
+    nodeInfo: string
     lockId: string
-    srcCS: string;
-    targetCS: string;
-    bBox: BoundingBox2D;
-    rules: [number, number][];
+    srcCS: string
+    targetCS: string
+    bBox: BoundingBox2D
+    rules: [number, number][]
 }
 
-export type MultiGridBaseInfo = {
-    levels: Uint8Array;
-    globalIds: Uint32Array;
-    deleted?: Uint8Array;
+export interface StructuredCellRenderVertices {
+    tl: Float32Array
+    tr: Float32Array
+    bl: Float32Array
+    br: Float32Array
+
+    tlLow: Float32Array
+    trLow: Float32Array
+    blLow: Float32Array
+    brLow: Float32Array
 }
 
-export type GridSaveInfo = {
-    success: boolean;
-    message: string;
+export type MultiCellBaseInfo = {
+    levels: Uint8Array
+    globalIds: Uint32Array
+    deleted?: Uint8Array
 }
 
-export type GridCheckingInfo = {
-    storageId: number;
-    level: number;
-    globalId: number;
-    localId: number;
-    deleted: boolean;
+export type PatchSaveInfo = {
+    success: boolean
+    message: string
 }
 
-export type GridTopologyInfo = [
-    edgeKeys: string[],
-    adjGrids: number[][],
-    storageId_edgeId_set: Array<
-        [Set<number>, Set<number>, Set<number>, Set<number>]
-    >
-];
-
-export type GPUMultiGridUpdateInfo = [
-    fromStorageId: number,
-    levels: Uint8Array,
-    vertices: Float32Array,
-    verticesLow: Float32Array,
-    deleted: Uint8Array,
-]
-
-export class GridNode {
-    level: number;
-    globalId: number;
-    storageId: number;
-
-    xMinPercent: [number, number];
-    xMaxPercent: [number, number];
-    yMinPercent: [number, number];
-    yMaxPercent: [number, number];
-
-    edges: [Set<number>, Set<number>, Set<number>, Set<number>];
-    neighbours: [Set<number>, Set<number>, Set<number>, Set<number>];
-
-    constructor(options: GridNodeParams) {
-        this.globalId = options.globalId;
-        this.storageId = options.storageId;
-
-        if (options.level === undefined) {
-            this.level =
-                options.parent !== undefined ? options.parent.level + 1 : 0;
-        } else {
-            this.level = options.level === undefined ? 0 : options.level;
-        }
-
-        // Division Coordinates [ numerator, denominator ]
-        // Use integer numerators and denominators to avoid coordinate precision issue
-        this.xMinPercent = [0, 1];
-        this.xMaxPercent = [1, 1];
-        this.yMinPercent = [0, 1];
-        this.yMaxPercent = [1, 1];
-
-        this.edges = [
-            new Set<number>(),
-            new Set<number>(),
-            new Set<number>(),
-            new Set<number>(),
-        ];
-
-        this.neighbours = [
-            new Set<number>(),
-            new Set<number>(),
-            new Set<number>(),
-            new Set<number>(),
-        ];
-
-        // Update division coordinates if globalRange provided
-        if (options.globalRange) {
-            const [width, height] = options.globalRange;
-            const globalU = this.globalId % width;
-            const globalV = Math.floor(this.globalId / width);
-
-            this.xMinPercent = simplifyFraction(globalU, width);
-            this.xMaxPercent = simplifyFraction(globalU + 1, width);
-            this.yMinPercent = simplifyFraction(globalV, height);
-            this.yMaxPercent = simplifyFraction(globalV + 1, height);
-        }
-    }
-
-    get uuId(): string {
-        return `${this.level}-${this.globalId}`;
-    }
-
-    get xMin(): number {
-        return this.xMinPercent[0] / this.xMinPercent[1];
-    }
-
-    get xMax(): number {
-        return this.xMaxPercent[0] / this.xMaxPercent[1];
-    }
-
-    get yMin(): number {
-        return this.yMinPercent[0] / this.yMinPercent[1];
-    }
-
-    get yMax(): number {
-        return this.yMaxPercent[0] / this.yMaxPercent[1];
-    }
-
-    resetEdges(): void {
-        this.edges.forEach((edge) => edge.clear());
-    }
-
-    addEdge(edgeIndex: number, edgeCode: number): void {
-        this.edges[edgeCode].add(edgeIndex);
-    }
-
-    get edgeKeys(): number[] {
-        return [
-            ...this.edges[EDGE_CODE_NORTH],
-            ...this.edges[EDGE_CODE_WEST],
-            ...this.edges[EDGE_CODE_SOUTH],
-            ...this.edges[EDGE_CODE_EAST],
-        ];
-    }
-
-    get serialization() {
-        return {
-            xMinPercent: this.xMinPercent,
-            yMinPercent: this.yMinPercent,
-            xMaxPercent: this.xMaxPercent,
-            yMaxPercent: this.yMaxPercent,
-        };
-    }
-
-    getVertices(converter: Converter, bBox: BoundingBox2D) {
-        const xMin = lerp(bBox.xMin, bBox.xMax, this.xMin);
-        const yMin = lerp(bBox.yMin, bBox.yMax, this.yMin);
-        const xMax = lerp(bBox.xMin, bBox.xMax, this.xMax);
-        const yMax = lerp(bBox.yMin, bBox.yMax, this.yMax);
-
-        const targetTL = converter.forward([xMin, yMax]); // srcTL
-        const targetTR = converter.forward([xMax, yMax]); // srcTR
-        const targetBL = converter.forward([xMin, yMin]); // srcBL
-        const targetBR = converter.forward([xMax, yMin]); // srcBR
-
-        const renderTL = MercatorCoordinate.fromLonLat(
-            targetTL as [number, number]
-        );
-        const renderTR = MercatorCoordinate.fromLonLat(
-            targetTR as [number, number]
-        );
-        const renderBL = MercatorCoordinate.fromLonLat(
-            targetBL as [number, number]
-        );
-        const renderBR = MercatorCoordinate.fromLonLat(
-            targetBR as [number, number]
-        );
-
-        return new Float32Array([
-            ...renderTL,
-            ...renderTR,
-            ...renderBL,
-            ...renderBR,
-        ]);
-    }
-
-    release(): null {
-        this.level = -1;
-        this.globalId = -1;
-        this.storageId = -1;
-
-        this.xMinPercent = [0, 0];
-        this.xMaxPercent = [0, 0];
-        this.yMinPercent = [0, 0];
-        this.yMaxPercent = [0, 0];
-
-        this.edges = null as any;
-        this.neighbours = null as any;
-
-        return null;
-    }
-
-    equal(grid: GridNode): boolean {
-        return this.level === grid.level && this.globalId === grid.globalId;
-    }
-
-    within(bBox: BoundingBox2D, lon: number, lat: number): boolean {
-        const xMin = lerp(bBox.xMin, bBox.xMax, this.xMin);
-        const yMin = lerp(bBox.yMin, bBox.yMax, this.yMin);
-        const xMax = lerp(bBox.xMin, bBox.xMax, this.xMax);
-        const yMax = lerp(bBox.yMin, bBox.yMax, this.yMax);
-
-        if (lon < xMin || lat < yMin || lon > xMax || lat > yMax) return false;
-        return true;
-    }
+export type CellCheckInfo = {
+    level: number
+    globalId: number
+    localId: number
+    deleted: boolean
+    storageId: number
 }
 
-export class MultiGridInfoParser {
-
-    static fromBuffer(buffer: ArrayBuffer): MultiGridBaseInfo {
+export class MultiCellInfoParser {
+    static fromBuffer(buffer: ArrayBuffer): MultiCellBaseInfo {
         if (buffer.byteLength < 4) {
             return {
                 levels: new Uint8Array(0),
@@ -266,10 +52,10 @@ export class MultiGridInfoParser {
         }
 
         const prefixView = new DataView(buffer, 0, 4);
-        const gridNum = prefixView.getUint32(0, true);
-        const alignedOffset = 4 + gridNum + ((4 - (gridNum % 4 || 4)) % 4);
+        const cellNum = prefixView.getUint32(0, true);
+        const alignedOffset = 4 + cellNum + ((4 - (cellNum % 4 || 4)) % 4);
 
-        const levels = new Uint8Array(buffer, 4, gridNum);
+        const levels = new Uint8Array(buffer, 4, cellNum);
         const globalIds = new Uint32Array(buffer, alignedOffset);
 
         return {
@@ -278,19 +64,19 @@ export class MultiGridInfoParser {
         }
     }
 
-    static toBuffer(gridInfo: MultiGridBaseInfo): ArrayBuffer {
-        const gridNum = gridInfo.levels.length;
-        const buffer = new ArrayBuffer(4 + gridNum + ((4 - (gridNum % 4 || 4)) % 4) + gridNum * 4);
+    static toBuffer(cellInfo: MultiCellBaseInfo): ArrayBuffer {
+        const cellNum = cellInfo.levels.length;
+        const buffer = new ArrayBuffer(4 + cellNum + ((4 - (cellNum % 4 || 4)) % 4) + cellNum * 4);
         const prefixView = new DataView(buffer, 0, 4);
-        prefixView.setUint32(0, gridNum, true);
-        const levelsView = new Uint8Array(buffer, 4, gridNum);
-        levelsView.set(gridInfo.levels);
-        const globalIdsView = new Uint32Array(buffer, 4 + gridNum + ((4 - (gridNum % 4 || 4)) % 4), gridNum);
-        globalIdsView.set(gridInfo.globalIds);
+        prefixView.setUint32(0, cellNum, true);
+        const levelsView = new Uint8Array(buffer, 4, cellNum);
+        levelsView.set(cellInfo.levels);
+        const globalIdsView = new Uint32Array(buffer, 4 + cellNum + ((4 - (cellNum % 4 || 4)) % 4), cellNum);
+        globalIdsView.set(cellInfo.globalIds);
         return buffer;
     }
 
-    static async fromGetUrl(url: string): Promise<MultiGridBaseInfo> {
+    static async fromGetUrl(url: string): Promise<MultiCellBaseInfo> {
         const response = await fetch(url, { method: 'GET' });
 
         if (!response.ok) {
@@ -298,10 +84,10 @@ export class MultiGridInfoParser {
         }
 
         const buffer = await response.arrayBuffer();
-        return MultiGridInfoParser.fromBuffer(buffer);
+        return MultiCellInfoParser.fromBuffer(buffer);
     }
 
-    static async fromPostUrl(url: string, data: any): Promise<MultiGridBaseInfo> {
+    static async fromPostUrl(url: string, data: any): Promise<MultiCellBaseInfo> {
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -314,16 +100,16 @@ export class MultiGridInfoParser {
             }
 
             const buffer = await response.arrayBuffer();
-            return MultiGridInfoParser.fromBuffer(buffer);
+            return MultiCellInfoParser.fromBuffer(buffer);
 
         } catch (error) {
-            console.error('Failed to fetch MultiGridInfo:', error);
+            console.error('Failed to fetch MultiCellInfo:', error);
             throw error;
         }
     }
 
-    static async fromPostUrlByBuffer(url: string, gridInfo: MultiGridBaseInfo): Promise<MultiGridBaseInfo> {
-        const buffer = MultiGridInfoParser.toBuffer(gridInfo);
+    static async fromPostUrlByBuffer(url: string, cellInfo: MultiCellBaseInfo): Promise<MultiCellBaseInfo> {
+        const buffer = MultiCellInfoParser.toBuffer(cellInfo);
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -336,16 +122,16 @@ export class MultiGridInfoParser {
             }
 
             const resBuffer = await response.arrayBuffer();
-            return MultiGridInfoParser.fromBuffer(resBuffer);
+            return MultiCellInfoParser.fromBuffer(resBuffer);
         } catch (error) {
-            console.error('Failed to post MultiGridInfo:', error);
+            console.error('Failed to post MultiCellInfo:', error);
             throw error;
         }
     }
 
-    static async toPostUrl(url: string, gridInfo: MultiGridBaseInfo): Promise<void> {
+    static async toPostUrl(url: string, cellInfo: MultiCellBaseInfo): Promise<void> {
         try {
-            const buffer = MultiGridInfoParser.toBuffer(gridInfo);
+            const buffer = MultiCellInfoParser.toBuffer(cellInfo);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/octet-stream' },
@@ -356,15 +142,15 @@ export class MultiGridInfoParser {
                 throw new Error(`HTTP error! Status: ${response.status}`);
             }
         } catch (error) {
-            console.error('Failed to post MultiGridInfo:', error);
+            console.error('Failed to post MultiCellInfo:', error);
             throw error;
         }
     }
 }
 
-export class GridKeyHashTable {
-    private _gridKeyHashTable: Uint32Array
-    private _gridStorageIdTable: Uint32Array
+export class CellKeyHashTable {
+    private _keyHashTable: Uint32Array
+    private _storageIdTable: Uint32Array
     private _hashTableSize: number
     private _hashTableMask: number
 
@@ -373,9 +159,9 @@ export class GridKeyHashTable {
         this._hashTableSize = Math.pow(2, Math.ceil(Math.log2(this._hashTableSize)))
         this._hashTableMask = this._hashTableSize - 1
 
-        this._gridKeyHashTable = new Uint32Array(this._hashTableSize * 2)
-        this._gridStorageIdTable = new Uint32Array(this._hashTableSize)
-        this._gridStorageIdTable.fill(0xFFFFFFFF)
+        this._keyHashTable = new Uint32Array(this._hashTableSize * 2)
+        this._storageIdTable = new Uint32Array(this._hashTableSize)
+        this._storageIdTable.fill(0xFFFFFFFF)
     }
 
     private _hash(level: number, globalId: number): number {
@@ -391,9 +177,9 @@ export class GridKeyHashTable {
     private _findSlot(level: number, globalId: number): number {
         let hash = this._hash(level, globalId)
 
-        while (this._gridStorageIdTable[hash] !== 0xFFFFFFFF) {
-            const storedLevel = this._gridKeyHashTable[hash * 2]
-            const storedGlobalId = this._gridKeyHashTable[hash * 2 + 1]
+        while (this._storageIdTable[hash] !== 0xFFFFFFFF) {
+            const storedLevel = this._keyHashTable[hash * 2]
+            const storedGlobalId = this._keyHashTable[hash * 2 + 1]
 
             if (storedLevel === level && storedGlobalId === globalId) {
                 return hash
@@ -408,12 +194,12 @@ export class GridKeyHashTable {
     get(level: number, globalId: number): number | undefined {
         let hash = this._hash(level, globalId)
 
-        while (this._gridStorageIdTable[hash] !== 0xFFFFFFFF) {
-            const storedLevel = this._gridKeyHashTable[hash * 2]
-            const storedGlobalId = this._gridKeyHashTable[hash * 2 + 1]
+        while (this._storageIdTable[hash] !== 0xFFFFFFFF) {
+            const storedLevel = this._keyHashTable[hash * 2]
+            const storedGlobalId = this._keyHashTable[hash * 2 + 1]
 
             if (storedLevel === level && storedGlobalId === globalId) {
-                return this._gridStorageIdTable[hash]
+                return this._storageIdTable[hash]
             }
 
             hash = (hash + 1) & this._hashTableMask
@@ -424,28 +210,28 @@ export class GridKeyHashTable {
 
     update(storageId: number, level: number, globalId: number) {
         const slot = this._findSlot(level, globalId)
-        this._gridKeyHashTable[slot * 2] = level
-        this._gridKeyHashTable[slot * 2 + 1] = globalId
-        this._gridStorageIdTable[slot] = storageId
+        this._keyHashTable[slot * 2] = level
+        this._keyHashTable[slot * 2 + 1] = globalId
+        this._storageIdTable[slot] = storageId
     }
 
     delete(level: number, globalId: number) {
         let hash = this._hash(level, globalId)
 
-        while (this._gridStorageIdTable[hash] !== 0xFFFFFFFF) {
-            const storedLevel = this._gridKeyHashTable[hash * 2]
-            const storedGlobalId = this._gridKeyHashTable[hash * 2 + 1]
+        while (this._storageIdTable[hash] !== 0xFFFFFFFF) {
+            const storedLevel = this._keyHashTable[hash * 2]
+            const storedGlobalId = this._keyHashTable[hash * 2 + 1]
 
             if (storedLevel === level && storedGlobalId === globalId) {
-                this._gridStorageIdTable[hash] = 0xFFFFFFFF
+                this._storageIdTable[hash] = 0xFFFFFFFF
 
                 let nextHash = (hash + 1) & this._hashTableMask
-                while (this._gridStorageIdTable[nextHash] !== 0xFFFFFFFF) {
-                    const nextLevel = this._gridKeyHashTable[nextHash * 2]
-                    const nextGlobalId = this._gridKeyHashTable[nextHash * 2 + 1]
-                    const nextStorageId = this._gridStorageIdTable[nextHash]
+                while (this._storageIdTable[nextHash] !== 0xFFFFFFFF) {
+                    const nextLevel = this._keyHashTable[nextHash * 2]
+                    const nextGlobalId = this._keyHashTable[nextHash * 2 + 1]
+                    const nextStorageId = this._storageIdTable[nextHash]
 
-                    this._gridStorageIdTable[nextHash] = 0xFFFFFFFF
+                    this._storageIdTable[nextHash] = 0xFFFFFFFF
                     this.update(nextStorageId, nextLevel, nextGlobalId)
 
                     nextHash = (nextHash + 1) & this._hashTableMask
