@@ -120,7 +120,6 @@ export default class GridCore {
         this._dispatcher.broadcast('setGridManager', this.context, () => {
             // Get activate grid information
             this._dispatcher.actor.send('getGridInfo', { node_key: this.key, lock_id: this._lockId }, (_, baseInfo: MultiGridBaseInfo) => {
-                console.log('GridCore init getGridInfo', baseInfo)
                 this.updateMultiGridRenderInfo(baseInfo, callback)
             })
         })

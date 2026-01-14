@@ -24,7 +24,7 @@ export interface NodeMeta {
     children: NodeMeta[] | null
 }
 
-export interface baseResponse {
+export interface BaseResponse {
     success: boolean
     message: string
 }
@@ -41,7 +41,7 @@ export interface PushPullNodeParams {
     target_node_key: string
 }
 
-export interface PullResponse extends baseResponse {
+export interface PullResponse extends BaseResponse {
     target_node_key: string
 }
 

@@ -26,46 +26,46 @@ export async function subdivideGrids(
     callback(null, renderInfo)
 }
 
-// export async function mergeGrids(
-//     this: WorkerContext,
-//     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, isRemote: boolean },
-//     callback: Callback<any>
-// ) {
-//     const renderInfo = await api.patch.mergeGrids.fetch(gridInfo, gridInfo.isRemote)
-//     callback(null, renderInfo)
-// }
+export async function mergeGrids(
+    this: WorkerContext,
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+    callback: Callback<any>
+) {
+    const renderInfo = await api.patch.mergeGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    callback(null, renderInfo)
+}
 
-// export async function deleteGrids(
-//     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, isRemote: boolean },
-//     callback: Callback<any>
-// ) {
-//     await api.patch.deleteGrids.fetch(gridInfo, gridInfo.isRemote)
-//     callback()
-// }
+export async function deleteGrids(
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+    callback: Callback<any>
+) {
+    await api.patch.deleteGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    callback()
+}
 
-// export async function recoverGrids(
-//     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, isRemote: boolean },
-//     callback: Callback<any>
-// ) {
-//     await api.patch.recoverGrids.fetch(gridInfo, gridInfo.isRemote)
-//     callback()
-// }
+export async function recoverGrids(
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+    callback: Callback<any>
+) {
+    await api.patch.recoverGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    callback()
+}
 
-// export async function getGridInfoByFeature(
-//     pickInfo: { path: string, isRemote: boolean },
-//     callback: Callback<any>
-// ) {
-//     const result = await api.patch.pickGridsByFeature.fetch(pickInfo.path, pickInfo.isRemote)
-//     callback(null, {
-//         levels: result.levels,
-//         globalIds: result.globalIds
-//     })
-// }
+export async function getGridInfoByFeature(
+    pickInfo: { path: string, node_key: string, lock_id: string },
+    callback: Callback<any>
+) {
+    const result = await api.patch.pickGridsByFeature.fetch(pickInfo.path, pickInfo.node_key, pickInfo.lock_id)
+    callback(null, {
+        levels: result.levels,
+        globalIds: result.globalIds
+    })
+}
 
-// export async function saveGrids(isRemote: boolean, callback: Callback<any>) {
-//     const result = await api.patch.saveGrids.fetch(api.VOID_VALUE, isRemote)
-//     callback(null, result)
-// }
+export async function saveGrids(node_key: string, lock_id: string, callback: Callback<any>) {
+    const result = await api.patch.saveGrids.fetch(api.VOID_VALUE, node_key, lock_id)
+    callback(null, result)
+}
 
 export async function getMultiGridRenderVertices(
     this: WorkerSelf & Record<'gridManager', GridManager>,
@@ -84,7 +84,6 @@ export async function getGridInfo(
     },
     callback: Callback<any>
 ) {
-    console.log('Worker getGridInfo', data.node_key, data.lock_id)
     const [activateInfoResponse, deletedInfoResponse] = await Promise.all([
         api.patch.activateGridInfo(data.node_key, data.lock_id),
         api.patch.deletedGridInfo(data.node_key, data.lock_id)

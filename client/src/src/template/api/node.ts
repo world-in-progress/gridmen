@@ -1,5 +1,5 @@
 import {
-    baseResponse,
+    BaseResponse,
     GetNodeInfoParams,
     LinkNodeParams,
     LinkNodeResponse,
@@ -109,7 +109,7 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
             body: JSON.stringify({ template_name, source_node_key, remoteTargetNodeKey }),
         })
 
-        const responseData: baseResponse = await response.json()
+        const responseData: BaseResponse = await response.json()
         return responseData
     } catch (error) {
         throw new Error(`Failed to push node: ${error}`)
@@ -179,7 +179,7 @@ export const unlinkNode = async (node_key: string, lock_id: string, leadIP?: boo
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`)
         }
-        const responseData: baseResponse = await response.json()
+        const responseData: BaseResponse = await response.json()
         return responseData
     } catch (error) {
         throw new Error(`Failed to unlink node: ${error}`)

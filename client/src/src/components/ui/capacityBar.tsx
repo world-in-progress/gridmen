@@ -8,12 +8,13 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip'
+import GridCore from '@/core/grid/NHGridCore';
 
 interface CapacityBarProps {
     className?: string
     animateOnChange?: boolean;
     animationDuration?: number;
-    gridCore: any; // GridCore类型
+    gridCore: GridCore
 }
 
 export default function CapacityBar({
@@ -25,13 +26,13 @@ export default function CapacityBar({
     // 直接追踪gridNum和maxGridNum值而非gridCore对象
     const [gridNum, setGridNum] = useState(gridCore?.gridNum || 0);
     const [maxGridNum, setMaxGridNum] = useState(gridCore?.maxGridNum || 100);
-    
+
     // 监听gridCore内部数值变化
     useEffect(() => {
         // 初始化值
         setGridNum(gridCore?.gridNum || 0);
         setMaxGridNum(gridCore?.maxGridNum || 100);
-        
+
         // 设置轮询检查gridNum变化
         const intervalId = setInterval(() => {
             if (gridCore && (gridCore.gridNum !== gridNum || gridCore.maxGridNum !== maxGridNum)) {
@@ -39,10 +40,10 @@ export default function CapacityBar({
                 setMaxGridNum(gridCore.maxGridNum);
             }
         }, 500); // 每500ms检查一次
-        
+
         return () => clearInterval(intervalId);
     }, [gridCore]);
-    
+
     const normalizedValue = Math.max(0, Math.min(gridNum, maxGridNum));
     const targetPercentage = Math.round((normalizedValue / maxGridNum) * 100);
 
@@ -80,29 +81,29 @@ export default function CapacityBar({
         };
 
         requestAnimationFrame(animateChange);
-        
+
     }, [targetPercentage, animateOnChange, animationDuration]);
 
     // 修改 getColorClass 函数，为背景和指示器分别返回不同深度的颜色
     const getColorClass = (percentage: number) => {
         if (percentage < 40) {
             return {
-                text: 'text-green-600',
+                text: 'text-green-500',
                 bg: 'bg-green-100',
-                indicator: 'bg-green-600',
+                indicator: 'bg-green-500',
             };
         }
         if (percentage < 80) {
             return {
-                text: 'text-amber-600',
+                text: 'text-amber-500',
                 bg: 'bg-amber-100',
-                indicator: 'bg-amber-600',
+                indicator: 'bg-amber-500',
             };
         }
         return {
-            text: 'text-red-600',
+            text: 'text-red-500',
             bg: 'bg-red-100',
-            indicator: 'bg-red-600',
+            indicator: 'bg-red-500',
         };
     };
 
@@ -141,17 +142,12 @@ export default function CapacityBar({
     };
 
     return (
-        <div className="absolute flex flex-row gap-4 top-0 left-0 z-5">
+        <div className="flex flex-row gap-4">
             <TooltipProvider>
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <div className="p-2 w-[200px] bg-white/50  backdrop-blur-md rounded-br-lg rounded-tl-lg space-y-6 z-200">
-                            <div
-                                className={cn(
-                                    'flex items-center gap-3',
-                                    className
-                                )}
-                            >
+                        <div className="p-2 w-[150px] bg-gray-700 rounded-md space-y-6">
+                            <div className={cn('flex items-center gap-3', className)}>
                                 <div className="flex-shrink-0 relative">
                                     {getIcon(displayPercentage)}
                                     {isAnimating && (
@@ -202,6 +198,6 @@ export default function CapacityBar({
                     </TooltipContent>
                 </Tooltip>
             </TooltipProvider>
-        </div>
+        </div >
     );
 }

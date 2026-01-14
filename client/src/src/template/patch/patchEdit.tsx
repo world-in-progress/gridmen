@@ -1,27 +1,53 @@
-import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { IViewContext } from '@/views/IViewContext'
-import { MapViewContext } from '@/views/mapView/mapView'
-import { IResourceNode } from '../scene/iscene'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Brush, CircleOff, Delete, FolderOpen, Grip, Save, SquareDashed, SquareDashedMousePointer, SquareMousePointer, SquaresIntersect } from 'lucide-react'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
-import { useSettingStore } from '@/store/storeSet'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import {
+    Grip,
+    Save,
+    Brush,
+    Delete,
+    ArrowUp,
+    ArrowLeft,
+    ArrowDown,
+    CircleOff,
+    ArrowRight,
+    FolderOpen,
+    SquareDashed,
+    SquareMousePointer,
+    SquareDashedMousePointer,
+} from 'lucide-react'
 import store from '@/store/store'
-import { ResourceNode } from '../scene/scene'
-import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
-import { getNodeParams, linkNode } from '../api/node'
-import { GridContext } from '@/core/grid/types'
-import { boundingBox2D } from '@/core/util/boundingBox2D'
-import GridCore from '@/core/grid/NHGridCore'
-import { convertBoundsCoordinates } from '@/utils/utils'
+import {
+    AlertDialog,
+    AlertDialogTitle,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTrigger,
+    AlertDialogContent,
+    AlertDialogDescription,
+} from '@/components/ui/alert-dialog'
+import { linkNode } from '../api/node'
+import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
 import { SchemaData } from '../schema/types'
-import { PatchMeta } from '../api/types'
+import { ResourceNode } from '../scene/scene'
+import GridCore from '@/core/grid/NHGridCore'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { GridContext } from '@/core/grid/types'
+import { IResourceNode } from '../scene/iscene'
+import { useSettingStore } from '@/store/storeSet'
+import { IViewContext } from '@/views/IViewContext'
+import { Separator } from '@/components/ui/separator'
+import { MapViewContext } from '@/views/mapView/mapView'
+import { convertBoundsCoordinates } from '@/utils/utils'
+import { boundingBox2D } from '@/core/util/boundingBox2D'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
+import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
+import CapacityBar from '@/components/ui/capacityBar'
 
 interface PatchEditProps {
     node: IResourceNode
@@ -30,7 +56,6 @@ interface PatchEditProps {
 
 interface PageContext {
     patch: PatchMeta | null
-    schema: SchemaData | null
     topologyLayer: TopologyLayer | null
     gridCore: GridCore | null
     isChecking: boolean
@@ -41,11 +66,11 @@ interface PageContext {
 }
 
 interface GridCheckingInfo {
-    storageId: number;
-    level: number;
-    globalId: number;
-    localId: number;
-    deleted: boolean;
+    storageId: number
+    level: number
+    globalId: number
+    localId: number
+    deleted: boolean
 }
 
 type TopologyOperationType = 'subdivide' | 'merge' | 'delete' | 'recover' | null
@@ -94,7 +119,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const pageContext = useRef<PageContext>({
         patch: null,
-        schema: null,
         topologyLayer: null,
         gridCore: null,
         isChecking: false,
@@ -109,7 +133,9 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const highSpeedMode = useSettingStore(state => state.highSpeedMode)
 
     const [topologyLayer, setTopologyLayer] = useState<TopologyLayer | null>(null)
+
     const [checkSwitchOn, setCheckSwitchOn] = useState(false)
+
     const [selectAllDialogOpen, setSelectAllDialogOpen] = useState(false)
     const [deleteSelectDialogOpen, setDeleteSelectDialogOpen] = useState(false)
 
@@ -140,23 +166,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         if ((node as ResourceNode).mountParams === null) {
-            // const patchNode = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
-            // (node as ResourceNode).mountParams = patchNode
             const patchInfo = await api.patch.getPatchMeta(node.key, (node as ResourceNode).lockId!, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
             (node as ResourceNode).mountParams = patchInfo
-            // pageContext.current.patch = JSON.parse(patchInfo)
             pageContext.current.patch = patchInfo
-            console.log('patch', pageContext.current.patch)
         } else {
             pageContext.current.patch = (node as ResourceNode).mountParams
-            console.log('patch', pageContext.current.patch)
         }
-
-        // TODO: 移入点击菜单的瞬间
-        // if (pageContext.current.schema === null) {
-        //     const schemaNode = await getNodeParams(pageContext.current.patch!.schema_node_key, (node as ResourceNode).tree.leadIP !== undefined ? true : false)
-        //     pageContext.current.schema = JSON.parse(schemaNode.mount_params) as SchemaData
-        // }
 
         const waitForMapLoad = () => {
             return new Promise<void>((resolve) => {
@@ -249,6 +264,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 },
             },
         }
+
+        triggerRepaint()
     }
 
     const unloadContext = (node: ResourceNode) => {
@@ -266,6 +283,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     // TODO: 优化事件绑定解绑
     useEffect(() => {
         if (!map) return
+        if (!topologyLayer) return
 
         const canvas = map.getCanvas()
 
@@ -284,7 +302,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localMouseDownPos.current = [x, y]
 
             if (checkSwitchOn) {
-                gridInfo.current = topologyLayer!.executeCheckGrid([x, y])
+                gridInfo.current = topologyLayer.executeCheckGrid([x, y])
                 triggerRepaint()
             }
         }
@@ -298,18 +316,19 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localMouseMovePos.current = [x, y]
 
             if (selectTab === 'brush') {
-                topologyLayer!.executePickGrids(
+                console.log(selectTab, pickingTab, localMouseMovePos.current)
+                topologyLayer.executePickGrids(
                     selectTab,
                     pickingTab,
                     [localMouseMovePos.current[0], localMouseMovePos.current[1]]
                 )
             } else {
-                map!.dragPan.disable();
+                map!.dragPan.disable()
                 if (map!.getCanvas()) {
                     map!.getCanvas().style.cursor = 'crosshair'
                 }
 
-                topologyLayer!.executeDrawBox(
+                topologyLayer.executeDrawBox(
                     [localMouseDownPos.current[0], localMouseDownPos.current[1]],
                     [localMouseMovePos.current[0], localMouseMovePos.current[1]]
                 )
@@ -321,11 +340,11 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localIsMouseDown.current = false
 
             if (map) {
-                map.dragPan.enable();
-                map.scrollZoom.enable();
-                topologyLayer!.executeClearDrawBox();
+                map.dragPan.enable()
+                map.scrollZoom.enable()
+                topologyLayer.executeClearDrawBox()
                 if (map.getCanvas()) {
-                    map.getCanvas().style.cursor = '';
+                    map.getCanvas().style.cursor = ''
                 }
             }
 
@@ -337,7 +356,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             const localMouseUpPos = [x, y]
 
-            topologyLayer!.executePickGrids(
+            topologyLayer.executePickGrids(
                 selectTab,
                 pickingTab,
                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
@@ -350,7 +369,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             if (map) {
                 map.dragPan.enable()
                 map.scrollZoom.enable()
-                topologyLayer!.executeClearDrawBox()
+                topologyLayer.executeClearDrawBox()
                 if (map.getCanvas()) {
                     map.getCanvas().style.cursor = ''
                 }
@@ -362,7 +381,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             const mouseUpPos = [x, y]
 
-            topologyLayer!.executePickGrids(
+            topologyLayer.executePickGrids(
                 selectTab,
                 pickingTab,
                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
@@ -381,7 +400,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             canvas.removeEventListener('mouseup', onMouseUp)
             canvas.removeEventListener('mouseout', onMouseOut)
         }
-    }, [selectTab, pickingTab, checkSwitchOn])
+    }, [map, topologyLayer, selectTab, pickingTab, checkSwitchOn])
 
     const handleConfirmSelectAll = useCallback(() => {
         setSelectAllDialogOpen(false)
@@ -389,7 +408,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }, [topologyLayer])
 
     const handleConfirmDeleteSelect = useCallback(() => {
-        setDeleteSelectDialogOpen(false);
+        setDeleteSelectDialogOpen(false)
         topologyLayer!.executeClearSelection()
     }, [topologyLayer])
 
@@ -397,16 +416,16 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         switch (activeTopologyOperation) {
             case 'subdivide':
                 topologyLayer!.executeSubdivideGrids()
-                break;
+                break
             case 'merge':
                 topologyLayer!.executeMergeGrids()
-                break;
+                break
             case 'delete':
                 topologyLayer!.executeDeleteGrids()
-                break;
+                break
             case 'recover':
                 topologyLayer!.executeRecoverGrids()
-                break;
+                break
             default:
                 console.warn('No active topology operation to confirm.')
         }
@@ -415,10 +434,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const handleSelectAllClick = () => {
         if (highSpeedMode) {
-            handleConfirmSelectAll();
-            return;
+            handleConfirmSelectAll()
+            return
         }
-        setSelectAllDialogOpen(true);
+        setSelectAllDialogOpen(true)
     }
 
     const handleDeleteSelectClick = () => {
@@ -434,22 +453,22 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         setSelectTab('feature')
         if (window.electronAPI && typeof window.electronAPI.openFileDialog === 'function') {
             try {
-                const filePath = await window.electronAPI.openFileDialog();
+                const filePath = await window.electronAPI.openFileDialog()
                 if (filePath) {
-                    console.log('Selected file path:', filePath);
-                    store.get<{ on: Function; off: Function }>('isLoading')!.on();
-                    topologyLayer!.executePickGridsByFeature(filePath);
+                    console.log('Selected file path:', filePath)
+                    store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                    topologyLayer!.executePickGridsByFeature(filePath)
                     setSelectTab(currentTab)
                 } else {
-                    console.log('No file selected');
+                    console.log('No file selected')
                     setSelectTab(currentTab)
                 }
             } catch (error) {
-                console.error('Error opening file dialog:', error);
+                console.error('Error opening file dialog:', error)
                 setSelectTab(currentTab)
             }
         } else {
-            console.warn('Electron API not available');
+            console.warn('Electron API not available')
             setSelectTab(currentTab)
         }
     }, [selectTab, topologyLayer])
@@ -473,8 +492,122 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     console.warn('Unknown topology operation type:', operationType)
             }
         } else {
-            setActiveTopologyOperation(operationType as TopologyOperationType);
+            setActiveTopologyOperation(operationType as TopologyOperationType)
         }
+    }
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (checkSwitchOn) return
+            if (event.ctrlKey || event.metaKey) {
+                if (event.key === 'P' || event.key === 'p') {
+                    event.preventDefault()
+                    setPickingTab(true)
+                }
+                if (event.key === 'U' || event.key === 'u') {
+                    event.preventDefault()
+                    setPickingTab(false)
+                }
+                if (event.key === 'A' || event.key === 'a') {
+                    event.preventDefault()
+                    if (highSpeedMode) {
+                        handleConfirmSelectAll()
+                    } else {
+                        setSelectAllDialogOpen(true)
+                    }
+                }
+                if (event.key === 'C' || event.key === 'c') {
+                    event.preventDefault()
+                    if (highSpeedMode) {
+                        handleConfirmDeleteSelect()
+                    } else {
+                        setDeleteSelectDialogOpen(true)
+                    }
+                }
+                if (event.key === '1') {
+                    event.preventDefault()
+                    pageContext.current!.editingState.select = 'brush'
+                    setSelectTab('brush')
+                }
+                if (event.key === '2') {
+                    event.preventDefault()
+                    pageContext.current!.editingState.select = 'box'
+                    setSelectTab('box')
+                }
+                if (event.key === '3') {
+                    event.preventDefault()
+                    pageContext.current!.editingState.select = 'feature'
+                    setSelectTab('feature')
+                    handleFeatureClick()
+                }
+                if (event.key === 'S' || event.key === 's') {
+                    event.preventDefault()
+                    if (highSpeedMode) {
+                        topologyLayer!.executeSubdivideGrids()
+                    } else {
+                        setActiveTopologyOperation('subdivide')
+                    }
+                }
+                if (event.key === 'M' || event.key === 'm') {
+                    event.preventDefault()
+                    if (highSpeedMode) {
+                        topologyLayer!.executeMergeGrids()
+                    } else {
+                        setActiveTopologyOperation('merge')
+                    }
+                }
+                if (event.key === 'D' || event.key === 'd') {
+                    event.preventDefault()
+                    if (highSpeedMode) {
+                        topologyLayer!.executeDeleteGrids()
+                    } else {
+                        setActiveTopologyOperation('delete')
+                    }
+                }
+                if (event.key === 'R' || event.key === 'r') {
+                    event.preventDefault()
+                    if (highSpeedMode) {
+                        topologyLayer!.executeRecoverGrids()
+                    } else {
+                        setActiveTopologyOperation('recover')
+                    }
+                }
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown)
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [
+        setPickingTab,
+        handleConfirmDeleteSelect,
+        handleConfirmSelectAll,
+        handleFeatureClick,
+        selectTab,
+        topologyLayer,
+        checkSwitchOn,
+        highSpeedMode
+    ])
+
+    const toggleCheckSwitch = () => {
+        if (checkSwitchOn === pageContext.current!.isChecking) {
+            const newCheckState = !checkSwitchOn
+            setCheckSwitchOn(newCheckState)
+            pageContext.current!.isChecking = newCheckState
+
+            if (topologyLayer) {
+                topologyLayer.setCheckMode(newCheckState)
+            }
+        }
+    }
+
+    const handleSaveTopologyState = () => {
+        const core: GridCore = pageContext.current.gridCore!
+        core.save(() => {
+            toast.success(`Topology edit state of ${pageContext.current.patch?.name} saved successfully`)
+        })
     }
 
     return (
@@ -510,51 +643,24 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                             ))}
                         </ul>
                     </div>
-                    <div className='text-sm w-full flex flex-row justify-between space-x-4 px-4'>
-                        <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                                <Button
-                                    variant='destructive'
-                                    className='bg-red-500 hover:bg-red-600 h-8 text-white cursor-pointer rounded-sm flex'
-                                >
-                                    <span>Delete</span>
-                                    <Separator orientation='vertical' className='h-4' />
-                                    <Delete className='w-4 h-4' />
-                                </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you sure to delete this patch?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        This action cannot be undone. This will permanently delete this patch and all its data.
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel className='cursor-pointer border border-gray-300'>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                        className='bg-red-500 hover:bg-red-600 cursor-pointer'
-                                    // onClick={handlePatchDelete}
-                                    >
-                                        Confirm
-                                    </AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
+                    <div className='text-sm w-full flex flex-row items-center justify-between space-x-2'>
+                        <CapacityBar gridCore={pageContext.current.gridCore!} />
                         <div
                             className='bg-sky-500 hover:bg-sky-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
-                        // onClick={toggleCheckSwitch}
+                            onClick={toggleCheckSwitch}
                         >
                             <span>Check</span>
                             <Separator orientation='vertical' className='h-4 mx-2' />
                             <Switch
                                 className='data-[state=checked]:bg-amber-300 data-[state=unchecked]:bg-gray-300 cursor-pointer'
                                 checked={checkSwitchOn}
-                            // onCheckedChange={toggleCheckSwitch}
+                                onCheckedChange={toggleCheckSwitch}
                             />
                         </div>
+
                         <Button
                             className='bg-green-500 hover:bg-green-600 h-8 text-white cursor-pointer rounded-sm flex'
-                        // onClick={handleSaveTopologyState}
+                            onClick={handleSaveTopologyState}
                         >
                             <span>Save</span>
                             <Separator orientation='vertical' className='h-4' />
@@ -583,8 +689,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                         pageContext.current?.patch?.subdivide_rules.map(
                                             (level: number[], index: number) => {
                                                 const color = topologyLayer!.paletteColorList ?
-                                                    [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null;
-                                                const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined;
+                                                    [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
+                                                const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined
 
                                                 return (
                                                     <div key={index} className='text-sm'
@@ -592,7 +698,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                     >
                                                         level {index + 1}: [{level.join(', ')}]
                                                     </div>
-                                                );
+                                                )
                                             }
                                         )
                                     )}
@@ -708,15 +814,15 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     </div>
                 </div>
                 <div className='w-full flex flex-col border-t-2 border-[#414141] relative mb-2'>
-                    {checkSwitchOn && (
-                        <div className='absolute w-5/7 inset-0 bg-black/10 z-10 flex items-center justify-center rounded-md backdrop-blur-sm'>
-                            <div className=' text-white px-6 py-3 rounded-lg text-center'>
-                                <span className='text-3xl font-bold'>Check Mode On</span>
-                                <p className='text-sm mt-1'>Please click the grid to view information</p>
+                    <div className='w-full mx-auto space-y-4 px-4 relative'>
+                        {checkSwitchOn && (
+                            <div className='absolute h-full -mb-2 inset-0 z-10 bg-black/10 flex items-center justify-center backdrop-blur-sm pointer-events-auto'>
+                                <div className=' text-white px-6 py-3 rounded-lg text-center'>
+                                    <span className='text-3xl font-bold'>Check Mode On</span>
+                                    <p className='text-sm mt-1'>Please click the grid to view information</p>
+                                </div>
                             </div>
-                        </div>
-                    )}
-                    <div className='w-full mx-auto space-y-4 px-4'>
+                        )}
                         <div className='space-y-2 p-2'>
                             <AlertDialog
                                 open={selectAllDialogOpen}
@@ -975,7 +1081,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     {/* ////////////////////////////////////////////////////////////////// */}
                     {/* ////////////////////////////////////////////////////////////////// */}
                     {/* ////////////////////////////////////////////////////////////////// */}
-                    <Separator className='my-2 bg-[#414141]' />
+                    <Separator className='mb-2 bg-[#414141]' />
                     <div className='w-full mx-auto space-y-4 px-4'>
                         <div className='space-y-2 p-2 mb-4'>
                             <h1 className='text-2xl font-bold text-white'>Checking</h1>
