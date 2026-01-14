@@ -6,10 +6,9 @@ import multiprocessing as mp
 from functools import partial
 from fastapi import APIRouter, HTTPException, Response, Body
 
-from ...schemas.patch import PatchMeta
 from ...schemas.base import BaseResponse
-from ...schemas.grid import MultiCellInfo
-from ...core.config import settings, APP_CONTEXT
+from ...schemas.patch import PatchMeta, MultiCellInfo
+
 from icrms.ipatch import IPatch, PatchSaveInfo, PatchSchema
 
 logging.basicConfig(level=logging.INFO)
@@ -18,33 +17,6 @@ logger = logging.getLogger(__name__)
 # APIs for grid patch ################################################
 
 router = APIRouter(prefix='/patch', tags=['patch-related apis'])
-
-# TODO (Dsssyc): modify this controller
-@router.put('/{schema_name}/{patch_name}', response_model=BaseResponse)
-def update_patch(schema_name: str, patch_name: str, data: PatchMeta):
-    """
-    Description
-    --
-    Update a specific patch by new meta information.
-    """
-
-    # Check if the patch directory exists
-    grid_patch_dir = Path(settings.GRID_SCHEMA_DIR, schema_name, 'patches', patch_name)
-    if not grid_patch_dir.exists():
-        raise HTTPException(status_code=404, detail=f'Patch ({patch_name}) belonging to schema ({schema_name}) not found')
-
-    # Write the updated patch meta information to a file
-    patch_meta_file = grid_patch_dir / settings.GRID_PATCH_META_FILE_NAME
-    try:
-        with open(patch_meta_file, 'w') as f:
-            f.write(data.model_dump_json(indent=4))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to update grid patch meta information: {str(e)}')
-
-    return BaseResponse(
-        success=True,
-        message='Grid patch updated successfully'
-    )
 
 @router.get('/meta', response_model=PatchMeta)
 def get_patch_meta(node_key: str, lock_id: str = None):
@@ -172,7 +144,9 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
         raise HTTPException(status_code=404, detail=f'Feature file not found: {feature_dir}')
 
     try:
-        # Step 1: Prepare target spatial reference
+        # Prepare target spatial reference
+        ##################################
+        
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
             schema: PatchSchema = patch.get_schema()
         target_epsg: int = schema.epsg
@@ -184,7 +158,9 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
         if int(osr.GetPROJVersionMajor()) >= 3:
             target_sr.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
         
-        # Step 2: Get all features from the file
+        # Get all features from the file
+        ################################
+        
         ogr_features = []
         ogr_geometries = []
         
@@ -221,34 +197,37 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
             logging.warning(f'No geometries found or extracted from feature file: {feature_dir}')
             raise HTTPException(status_code=400, detail=f'No geometries found in feature file: {feature_dir}')
 
-        # Step 3: Get centers of all active grids
+        # Get centers of all active grids
+        #################################
+        
         with noodle.connect(IPatch, node_key, 'pw', lock_id=lock_id) as patch:
             active_levels, active_global_ids = patch.get_activated_cell_infos()
 
             if not active_levels or not active_global_ids:
-                logging.info(f'No active grids found to check against features from {feature_dir}')
+                logging.info(f'No active cells found to check against features from {feature_dir}')
                 return Response(
                     content=MultiCellInfo(levels=[], global_ids=[]).combine_bytes(),
                     media_type='application/octet-stream'
                 )
             bboxes: list[float]  = patch.get_cell_bboxes(active_levels, active_global_ids)
 
-        # Step 3: Pick grids, centers of which are within the features, accelerate with multiprocessing
-        picked_grids_levels: list[int] = []
-        picked_grids_global_ids: list[int] = []
+        # Pick cells, centers of which are within the features, accelerate with multiprocessing
+        # #####################################################################################
+        
+        picked_levels: list[int] = []
+        picked_global_ids: list[int] = []
         
         # Batch processing
         n_cores = mp.cpu_count()
-        total_grids = len(bboxes) // 4
-        points_per_process = max(1000, total_grids // (n_cores * 2))
+        total_cells = len(bboxes) // 4
+        batch_size = max(100000, total_cells // (n_cores))
         batches = []
-        for i in range(0, total_grids, points_per_process):
-            end_idx = min(i + points_per_process, total_grids)
-            batch_indices = list(range(i, end_idx))
+        for i in range(0, total_cells, batch_size):
+            end_idx = min(i + batch_size, total_cells)
             batch_bboxes = bboxes[i * 4:end_idx * 4]
-            batch_levels = [active_levels[idx] for idx in batch_indices]
-            batch_global_ids = [active_global_ids[idx] for idx in batch_indices]
-            batches.append((batch_indices, batch_bboxes, batch_levels, batch_global_ids))
+            batch_levels = [active_levels[idx] for idx in range(i, end_idx)]
+            batch_global_ids = [active_global_ids[idx] for idx in range(i, end_idx)]
+            batches.append((batch_bboxes, batch_levels, batch_global_ids))
         
         geometry_wkts = [geom.ExportToWkt() for geom in ogr_geometries]    
         process_func = partial(_process_grid_batch, geometry_wkts=geometry_wkts)
@@ -256,17 +235,17 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
             results = pool.map(process_func, batches)
             
             for batch_levels, batch_global_ids in results:
-                picked_grids_levels.extend(batch_levels)
-                picked_grids_global_ids.extend(batch_global_ids)
+                picked_levels.extend(batch_levels)
+                picked_global_ids.extend(batch_global_ids)
 
-        if not picked_grids_levels:
-            logging.info(f'No active grid centers found within the features from {feature_dir}')
+        if not picked_levels:
+            logging.info(f'No activate cell centers found within the features from {feature_dir}')
             return Response(
                 content=MultiCellInfo(levels=[], global_ids=[]).combine_bytes(),
                 media_type='application/octet-stream'
             )
 
-        picked_info = MultiCellInfo(levels=picked_grids_levels, global_ids=picked_grids_global_ids)
+        picked_info = MultiCellInfo(levels=picked_levels, global_ids=picked_global_ids)
         return Response(
             content=picked_info.combine_bytes(),
             media_type='application/octet-stream'
@@ -274,6 +253,7 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to pick grids by feature: {str(e)}')
+    
     finally:
         # Clean up
         for feature in ogr_features:
@@ -305,15 +285,11 @@ def save_grids(node_key: str, lock_id: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to save grid: {str(e)}')
-    
+
 # Helpers ##################################################
 
-def _get_current_topo_node():
-    return APP_CONTEXT.get('current_patch')
-
 def _process_grid_batch(batch_data, geometry_wkts):
-    # _ is batch_indices
-    _, batch_boxes, batch_levels, batch_global_ids = batch_data
+    batch_boxes, batch_levels, batch_global_ids = batch_data
     
     geometries = [ogr.CreateGeometryFromWkt(wkt) for wkt in geometry_wkts]
     picked_levels = []

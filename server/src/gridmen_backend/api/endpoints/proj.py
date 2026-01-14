@@ -1,7 +1,7 @@
 import logging
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
-from ...core.config import settings
 from crms.proj.proj import Proj
 
 import pyproj
@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 # APIs for projection operations ##################################################
 
 router = APIRouter(prefix='/proj', tags=['projection-related apis'])
+
+class Proj4DefsResponse(BaseModel):
+    proj4_defs: str
 
 @router.get('/{epsg_code}')
 def get_proj4_defs(epsg_code: int):
@@ -29,15 +32,19 @@ def get_proj4_defs(epsg_code: int):
     """
     try:
         # Instantiate Proj CRM directly, without going through the noodle node system"
-        proj = Proj("") 
+        proj = Proj('') 
         proj4_defs = proj.get_proj4_string(epsg_code)
-        return {"proj4_defs": proj4_defs}
+        return Proj4DefsResponse(proj4_defs=proj4_defs)
+    
     except Exception as e:
         logger.warning(f"Failed to get proj4_defs from Proj CRM: {str(e)}")
         try:
             crs = pyproj.CRS.from_epsg(epsg_code)
             proj_string = crs.to_proj4()
-            return {"proj4_defs": proj_string}
+            return Proj4DefsResponse(proj4_defs=proj_string)
+        
         except Exception as e:
-            logger.error(f"Failed to get proj4_defs directly: {e}")
-            return {"proj4_defs": f"EPSG:{epsg_code}"}
+            err_msg = f'Error retrieving proj4 definitions for EPSG code {epsg_code}: {str(e)}'
+            logger.error(err_msg)
+            raise HTTPException(status_code=404, detail=err_msg)
+            

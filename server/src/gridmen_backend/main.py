@@ -11,10 +11,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'api', 'endpoints')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'py-noodle', 'src')))
 
-
-from icrms.ischema import ISchema
-from gridmen_backend.api import api_router as schema_router
-from pynoodle import noodle, NOODLE_INIT, NOODLE_TERMINATE
+from .core import settings
+from .api import api_router
+from pynoodle import NOODLE_INIT, NOODLE_TERMINATE
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,26 +24,19 @@ async def lifespan(app: FastAPI):
     NOODLE_TERMINATE()
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
     app = FastAPI(
-        title='Noodle_Schema_Test',
-        version='0.1.0',
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
         lifespan=lifespan,
     )
-    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=['*'],
-        allow_credentials=True,
-        allow_methods=['*'],
-        allow_headers=['*'],
+        allow_origins=settings.CORS_ORIGINS,
+        allow_methods=settings.CORS_METHODS,
+        allow_headers=settings.CORS_HEADERS,
+        allow_credentials=settings.CORS_CREDENTIALS,
     )
-    
-    app.include_router(schema_router)
-    
+    app.include_router(api_router)
     return app
 
 app = create_app()
-
-if __name__ == '__main__':
-    uvicorn.run('src.gridmen_backend.main:app', host='0.0.0.0', port=8001)

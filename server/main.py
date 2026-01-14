@@ -1,6 +1,6 @@
 import logging
 import uvicorn
-from src.gridmen_backend.core.config import settings
+from src.gridmen_backend.core import settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -8,8 +8,8 @@ logging.basicConfig(
 )
 
 # TODO (Dsssyc): Optimization
-# Inject necessary environment variables for c-two
-# This mechanism maybe better optimized in the future
+# Inject necessary environment variables for c-two and noodle configuration
+# This mechanism maybe better optimized in the future (especially imporving C-Two's config reading process)
 settings.inject_env([
     'HTTP_PROXY',
     'HTTPS_PROXY',
@@ -17,8 +17,6 @@ settings.inject_env([
     'MEMORY_TEMP_PATH',
     'NOODLE_CONFIG_PATH',
 ])
-
-print(settings.MEMORY_TEMP_PATH)
 
 if __name__ == '__main__':
     import os

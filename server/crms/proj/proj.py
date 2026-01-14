@@ -1,6 +1,5 @@
 import logging
 import pyproj
-from icrms.iproj import IProj
 
 logger = logging.getLogger(__name__)
 
