@@ -1,7 +1,7 @@
 import c_two as cc
 from typing import Any
 
-@cc.icrm()
+@cc.icrm(namespace='gridmen', version='1.0.0')
 class IProj:
     """
     ICRM

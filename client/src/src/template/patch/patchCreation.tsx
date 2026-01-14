@@ -358,9 +358,9 @@ export default function PatchCreation({
 
         try {
             await api.node.mountNode({
-                node_key: node.key,
-                template_name: 'patch',
-                mount_params_string: JSON.stringify(patchData)
+                nodeInfo: node.nodeInfo,
+                templateName: 'patch',
+                mountParamsString: JSON.stringify(patchData)
             })
 
             console.log('Submitting patch data:', JSON.stringify(patchData))

@@ -6,9 +6,10 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 from pathlib import Path
+from osgeo import ogr, osr
 import pyarrow.parquet as pq
 from collections import Counter
-from icrms.ipatch import IPatch, PatchSchema, PatchSaveInfo
+from icrms.ipatch import PatchSchema, PatchSaveInfo
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ PATCH_SCHEMA: pa.Schema = pa.schema([
     (ATTR_INDEX_KEY, pa.uint64())
 ])
 
-class Patch(IPatch):
+class Patch:
     def __init__(self, resource_space: str):
         # Check resource space validity
         self.resource_space = Path(resource_space)

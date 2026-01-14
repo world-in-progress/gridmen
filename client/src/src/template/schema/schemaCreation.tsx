@@ -405,9 +405,9 @@ export default function SchemaCreation({
 
         try {
             await api.node.mountNode({
-                node_key: node.key,
-                template_name: 'schema',
-                mount_params_string: JSON.stringify(schemaData)
+                nodeInfo: node.nodeInfo,
+                templateName: 'schema',
+                mountParamsString: JSON.stringify(schemaData)
             })
 
             clearMarkerByNodeKey(node.key)

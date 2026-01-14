@@ -204,7 +204,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         const clg = await waitForClg()
 
         const gridContext: GridContext = {
-            noodleKey: node.noodleKey,
+            noodleKey: node.nodeInfo,
             lockId: node.lockId!,
             srcCS: `EPSG:${pageContext.current.patch?.epsg}`,
             targetCS: 'EPSG:4326',

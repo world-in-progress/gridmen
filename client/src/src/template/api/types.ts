@@ -11,10 +11,10 @@ export type MultiGridBaseInfo = {
     deleted?: Uint8Array;
 }
 
-export interface GetNodeInfoParams {
-    node_key: string
-    child_start_index?: number
-    child_end_index?: number
+export interface GetNodeMetaInfoParams {
+    nodeInfo: string
+    childStartIndex?: number
+    childEndIndex?: number
 }
 
 export interface NodeMeta {
@@ -30,9 +30,9 @@ export interface BaseResponse {
 }
 
 export interface MountNodeParams {
-    node_key: string
-    template_name: string | null
-    mount_params_string: string | null
+    nodeInfo: string
+    templateName: string | null
+    mountParamsString: string | null
 }
 
 export interface PushPullNodeParams {

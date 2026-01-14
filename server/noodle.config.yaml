@@ -5,6 +5,6 @@ icrms:
     module_path: icrms.ipatch
 node_templates:
   - name: schema
-    module_path: crms.schema
+    module_path: templates.schema
   - name: patch
-    module_path: crms.patch
+    module_path: templates.patch

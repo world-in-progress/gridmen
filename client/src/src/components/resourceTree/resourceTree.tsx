@@ -215,9 +215,9 @@ function FolderCreationBar({ resourceTree, onCreated, onCancel }: { resourceTree
             }
 
             await api.node.mountNode({
-                node_key: newNodeKey,
-                template_name: '',
-                mount_params_string: ''
+                nodeInfo: resourceTree.leadIP ? `${resourceTree.leadIP}::${newNodeKey}` : newNodeKey,
+                templateName: '',
+                mountParamsString: ''
             })
 
             setSelectedNodeKey(newNodeKey)

@@ -266,7 +266,7 @@ class PatchSaveInfo:
 
 # Define ICRM ###########################################################
 
-@cc.icrm()
+@cc.icrm(namespace='gridmen', version='1.0.0')
 class IPatch:
     """
     ICRM

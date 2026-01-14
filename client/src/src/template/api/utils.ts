@@ -1,4 +1,4 @@
-import { useSettingStore } from "@/store/storeSet"
+// import { useSettingStore } from "@/store/storeSet"
 
 export function extractIPFromUrl(url: string): string {
     try {
@@ -9,30 +9,49 @@ export function extractIPFromUrl(url: string): string {
     }
 }
 
-// TODO:传入noodle key做字符串匹配
-export function getApiBaseUrl(useRemoteIP: boolean = false): string {
-    if (useRemoteIP) {
-        const publicIP = useSettingStore.getState().publicIP
-
-        if (publicIP && (publicIP.startsWith('http://') || publicIP.startsWith('https://'))) {
-            return publicIP
+export function decodeNodeInfo(nodeInfo: string): { address: string, nodeKey: string} {
+    const isRemote = nodeInfo.includes('::')
+    if (isRemote) {
+        const [address, nodeKey] = nodeInfo.split('::')
+        if (address.startsWith('http://') || address.startsWith('https://')) {
+            return { address, nodeKey }
+        } else {
+            throw new Error(`Invalid address format in nodeInfo: ${nodeInfo}`)
         }
-
-        if (publicIP && !publicIP.startsWith('http')) {
-            return `http://${publicIP}`
+    } else {
+        const address = import.meta.env.VITE_API_BASE_URL
+        if (address) {
+            return { address, nodeKey: nodeInfo }
+        } else {
+            return { address: 'http://127.0.0.1:8000', nodeKey: nodeInfo }
         }
-
-        const envUrl = import.meta.env.VITE_API_BASE_URL
-        if (envUrl) {
-            return envUrl
-        }
-
-        return 'http://127.0.0.1:8001'
     }
-
-    if (import.meta.env.DEV) {
-        return ''
-    }
-
-    return 'http://127.0.0.1:8000'
 }
+
+// TODO:传入noodle key做字符串匹配
+// export function getApiBaseUrl(useRemoteIP: boolean = false): string {
+//     if (useRemoteIP) {
+//         const publicIP = useSettingStore.getState().publicIP
+
+//         if (publicIP && (publicIP.startsWith('http://') || publicIP.startsWith('https://'))) {
+//             return publicIP
+//         }
+
+//         if (publicIP && !publicIP.startsWith('http')) {
+//             return `http://${publicIP}`
+//         }
+
+//         const envUrl = import.meta.env.VITE_API_BASE_URL
+//         if (envUrl) {
+//             return envUrl
+//         }
+
+//         return 'http://127.0.0.1:8001'
+//     }
+
+//     if (import.meta.env.DEV) {
+//         return ''
+//     }
+
+//     return 'http://127.0.0.1:8000'
+// }

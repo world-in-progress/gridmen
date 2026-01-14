@@ -1,5 +1,5 @@
 import { useSettingStore } from "@/store/storeSet"
-import { extractIPFromUrl, getApiBaseUrl } from "./utils"
+import { extractIPFromUrl, decodeNodeInfo } from "./utils"
 import IAPI, { BaseResponse, MultiGridBaseInfo, PatchMeta } from "./types"
 import { MultiGridInfoParser } from "@/core/grid/types"
 
@@ -13,7 +13,7 @@ export const getPatchMeta = async (node_key: string, lock_id: string, leadIP?: b
         node_key = `${ipPrefix}::${node_key}`
     }
 
-    const baseUrl = getApiBaseUrl(leadIP || false)
+    const baseUrl = decodeNodeInfo(leadIP || false)
     const url = `${baseUrl}${API_PREFIX}/meta?node_key=${node_key}&lock_id=${lock_id}`
 
     try {
@@ -31,7 +31,7 @@ export const getPatchMeta = async (node_key: string, lock_id: string, leadIP?: b
 export const activateGridInfo = async (node_key: string, lock_id: string) => {
 
 
-    const baseUrl = getApiBaseUrl(false)
+    const baseUrl = decodeNodeInfo(false)
     const url = `${baseUrl}${API_PREFIX}/activate-info?node_key=${node_key}&lock_id=${lock_id}`
     console.log('activateGridInfo url', url)
 
@@ -49,7 +49,7 @@ export const activateGridInfo = async (node_key: string, lock_id: string) => {
 
 export const deletedGridInfo = async (node_key: string, lock_id: string) => {
 
-    const baseUrl = getApiBaseUrl(false)
+    const baseUrl = decodeNodeInfo(false)
     const url = `${baseUrl}${API_PREFIX}/deleted-info?node_key=${node_key}&lock_id=${lock_id}`
 
     console.log('deletedGridInfo url', url)
@@ -69,7 +69,7 @@ export const deletedGridInfo = async (node_key: string, lock_id: string) => {
 export const subdivideGrids: IAPI<MultiGridBaseInfo, MultiGridBaseInfo> = {
     fetch: async (query: MultiGridBaseInfo, node_key: string, lock_id: string): Promise<MultiGridBaseInfo> => {
         try {
-            const baseUrl = getApiBaseUrl(false)
+            const baseUrl = decodeNodeInfo(false)
             const url = `${baseUrl}${API_PREFIX}/subdivide?node_key=${node_key}&lock_id=${lock_id}`
             const buffer = MultiGridInfoParser.toBuffer(query)
             const response = await fetch(url, {

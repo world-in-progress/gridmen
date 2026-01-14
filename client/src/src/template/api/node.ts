@@ -1,27 +1,24 @@
 import {
     BaseResponse,
-    GetNodeInfoParams,
-    LinkNodeParams,
+    GetNodeMetaInfoParams,
+    // LinkNodeParams,
     LinkNodeResponse,
     MountNodeParams,
     NodeMeta,
     PushPullNodeParams,
     PullResponse,
-    UnlinkNodeParams
+    // UnlinkNodeParams
 } from './types'
-import { useSettingStore } from '@/store/storeSet'
-import { extractIPFromUrl, getApiBaseUrl } from './utils'
+// import { useSettingStore } from '@/store/storeSet'
+import { decodeNodeInfo } from './utils'
 
 const API_PREFIX = `/noodle/node`
 
-
-
-export const getNodeInfo = async ({ node_key, child_start_index, child_end_index }: GetNodeInfoParams, leadIP?: boolean) => {
+export const getNodeBasicInfo = async ({ nodeInfo, childStartIndex, childEndIndex }: GetNodeMetaInfoParams) => {
     try {
-        const baseUrl = getApiBaseUrl(leadIP || false)
-        let url = `${baseUrl}${API_PREFIX}?node_key=${node_key}&child_start_index=${child_start_index || 0}`
-        if (child_end_index !== undefined) url += `&child_end_index=${child_end_index}`
-
+        const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+        let url = `${address}${API_PREFIX}?node_key=${nodeKey}&child_start_index=${childStartIndex || 0}`
+        if (childEndIndex !== undefined) url += `&child_end_index=${childEndIndex}`
         const response = await fetch(url, { method: "GET" })
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`)
@@ -35,15 +32,9 @@ export const getNodeInfo = async ({ node_key, child_start_index, child_end_index
     }
 }
 
-export const mountNode = async ({ node_key, template_name, mount_params_string }: MountNodeParams, leadIP?: boolean) => {
-    if (leadIP) {
-        const publicIP = useSettingStore.getState().publicIP
-        const ipPrefix = extractIPFromUrl(publicIP || '127.0.0.1:8000')
-        node_key = `${ipPrefix}::${node_key}`
-    }
-
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/mount`
+export const mountNode = async ({ nodeInfo, templateName, mountParamsString }: MountNodeParams) => {
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/mount`
 
     try {
         const response = await fetch(url, {
@@ -51,7 +42,7 @@ export const mountNode = async ({ node_key, template_name, mount_params_string }
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ node_key, template_name, mount_params_string }),
+            body: JSON.stringify({ node_key: nodeKey, template_name: templateName, mount_params_string: mountParamsString }),
         })
 
         if (!response.ok) {
@@ -62,19 +53,18 @@ export const mountNode = async ({ node_key, template_name, mount_params_string }
         return responseData
     } catch (error) {
         throw new Error(`Failed to mount node: ${error}`)
-
     }
 }
 
-export const unmountNode = async (node_key: string, leadIP?: boolean) => {
-    if (leadIP) {
-        const publicIP = useSettingStore.getState().publicIP
-        const ipPrefix = extractIPFromUrl(publicIP || '127.0.0.1:8000')
-        node_key = `${ipPrefix}::${node_key}`
-    }
+export const unmountNode = async (nodeInfo: string) => {
+    // if (leadIP) {
+    //     const publicIP = useSettingStore.getState().publicIP
+    //     const ipPrefix = extractIPFromUrl(publicIP || '127.0.0.1:8000')
+    //     node_key = `${ipPrefix}::${node_key}`
+    // }
 
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/unmount?node_key=${node_key}`
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/unmount?node_key=${nodeKey}`
 
     try {
         const response = await fetch(url, {
@@ -94,11 +84,9 @@ export const unmountNode = async (node_key: string, leadIP?: boolean) => {
     }
 }
 
-export const pushNode = async ({ template_name, source_node_key, target_node_key }: PushPullNodeParams) => {
-    const baseUrl = getApiBaseUrl(false)
-    const remoteUrl = getApiBaseUrl(true)
-    const remoteTargetNodeKey = `${remoteUrl}::${target_node_key}`
-    const url = `${baseUrl}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${source_node_key}&target_node_key=${remoteTargetNodeKey}`
+export const pushNode = async ({ template_name, source_node_key, target_node_key: targetNodeInfo }: PushPullNodeParams) => {
+    const { address: sourceAddress, nodeKey: sourceNodeKey } = decodeNodeInfo(source_node_key)
+    const url = `${sourceAddress}${API_PREFIX}/push?template_name=${template_name}&source_node_key=${sourceNodeKey}&target_node_key=${targetNodeInfo}`
 
     try {
         const response = await fetch(url, {
@@ -106,7 +94,6 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ template_name, source_node_key, remoteTargetNodeKey }),
         })
 
         const responseData: BaseResponse = await response.json()
@@ -116,10 +103,9 @@ export const pushNode = async ({ template_name, source_node_key, target_node_key
     }
 }
 
-export const pullNode = async ({ template_name, target_node_key, source_node_key }: PushPullNodeParams) => {
-    const baseUrl = getApiBaseUrl(false)
-    const remoteUrl = getApiBaseUrl(true)
-    const url = `${baseUrl}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${target_node_key}&source_node_key=${remoteUrl}::${source_node_key}`
+export const pullNode = async ({ template_name, target_node_key, source_node_key: sourceNodeInfo }: PushPullNodeParams) => {
+    const { address: targetAddress, nodeKey: targetNodeKey } = decodeNodeInfo(target_node_key)
+    const url = `${targetAddress}${API_PREFIX}/pull?template_name=${template_name}&target_node_key=${targetNodeKey}&source_node_key=${sourceNodeInfo}`
 
     try {
         const response = await fetch(url, {
@@ -127,7 +113,6 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ template_name, target_node_key, source_node_key }),
         })
 
         const responseData: PullResponse = await response.json()
@@ -138,25 +123,25 @@ export const pullNode = async ({ template_name, target_node_key, source_node_key
     }
 }
 
-export const getNodeParams = async (node_key: string, isRemote: boolean) => {
-    const baseUrl = getApiBaseUrl(isRemote)
-    const url = `${baseUrl}${API_PREFIX}/mount_params?node_key=${node_key}`
+export const getNodeParams = async (nodeInfo: string) => {
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/mount_params?node_key=${nodeKey}`
 
     try {
         const response = await fetch(url, { method: "GET" })
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`)
         }
-        const responseData: any = await response.json()
+        const responseData: unknown = await response.json()
         return responseData
     } catch (error) {
         throw new Error(`Failed to get node params: ${error}`)
     }
 }
 
-export const linkNode = async (icrm_tag: string, node_key: string, access_mode: 'r' | 'w', leadIP?: boolean) => {
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/link?icrm_tag=${icrm_tag}&node_key=${node_key}&access_mode=${access_mode}`
+export const linkNode = async (icrmTag: string, nodeInfo: string, accessMode: 'r' | 'w') => {
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/link?icrm_tag=${icrmTag}&node_key=${nodeKey}&access_mode=${accessMode}`
 
     try {
         const response = await fetch(url, { method: 'GET' })
@@ -170,9 +155,9 @@ export const linkNode = async (icrm_tag: string, node_key: string, access_mode: 
     }
 }
 
-export const unlinkNode = async (node_key: string, lock_id: string, leadIP?: boolean) => {
-    const baseUrl = getApiBaseUrl(leadIP || false)
-    const url = `${baseUrl}${API_PREFIX}/unlink?node_key=${node_key}&lock_id=${lock_id}`
+export const unlinkNode = async (nodeInfo: string, lock_id: string) => {
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/unlink?node_key=${nodeKey}&lock_id=${lock_id}`
 
     try {
         const response = await fetch(url, { method: 'GET' })

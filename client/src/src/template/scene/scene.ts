@@ -41,11 +41,11 @@ export class ResourceNode implements IResourceNode {
         delete (this.context as any).__cleanup
 
         console.log(`ResourceNode.close: unlinking node ${this.key} with lockId ${this.lockId}`)
-        await unlinkNode(this.key, this.lockId!, this.tree.leadIP !== undefined ? true : false)
+        await unlinkNode(this.nodeInfo, this.lockId!)
         this.lockId = null
     }
 
-    get noodleKey(): string {
+    get nodeInfo(): string {
         return this.tree.leadIP ? `${this.tree.leadIP}::${this.key}` : this.key
     }
 }
@@ -110,7 +110,7 @@ export class ResourceTree implements IResourceTree {
     async alignNodeInfo(node: IResourceNode, force: boolean = false): Promise<void> {
         if (node.aligned && !force) return
 
-        const meta = await api.node.getNodeInfo({ node_key: node.key }, this.leadIP ? true : false)
+        const meta = await api.node.getNodeBasicInfo({ nodeInfo: node.nodeInfo })
 
         const oldChildrenMap = node.children
         node.children = new Map()
@@ -293,8 +293,9 @@ export class ResourceTree implements IResourceTree {
     static async create(leadIP?: string): Promise<ResourceTree> {
         try {
             const tree = new ResourceTree(leadIP)
+            const nodeKey = leadIP ? `${leadIP}::.` : '.'
 
-            const rootNodeMeta = await api.node.getNodeInfo({ node_key: '.' }, leadIP ? true : false)
+            const rootNodeMeta = await api.node.getNodeBasicInfo({ nodeInfo: nodeKey })
             const rootNode = new ResourceNode(tree, rootNodeMeta.node_key, null, TEMPLATE_REGISTRY[rootNodeMeta.template_name])
 
             await tree.setRoot(rootNode)

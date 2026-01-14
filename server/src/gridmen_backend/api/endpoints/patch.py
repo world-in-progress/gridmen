@@ -230,7 +230,7 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
             batches.append((batch_bboxes, batch_levels, batch_global_ids))
         
         geometry_wkts = [geom.ExportToWkt() for geom in ogr_geometries]    
-        process_func = partial(_process_grid_batch, geometry_wkts=geometry_wkts)
+        process_func = partial(_process_picking_batch, geometry_wkts=geometry_wkts)
         with mp.Pool(processes=min(n_cores, len(batches))) as pool:
             results = pool.map(process_func, batches)
             
@@ -288,7 +288,7 @@ def save_grids(node_key: str, lock_id: str):
 
 # Helpers ##################################################
 
-def _process_grid_batch(batch_data, geometry_wkts):
+def _process_picking_batch(batch_data, geometry_wkts):
     batch_boxes, batch_levels, batch_global_ids = batch_data
     
     geometries = [ogr.CreateGeometryFromWkt(wkt) for wkt in geometry_wkts]

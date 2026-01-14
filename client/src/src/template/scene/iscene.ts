@@ -4,6 +4,7 @@ export interface IResourceNode {
     id: string
     key: string
     name: string
+    nodeInfo: string
     aligned: boolean
     isTemp?: boolean
     tree: IResourceTree

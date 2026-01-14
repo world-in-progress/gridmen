@@ -2,7 +2,7 @@ import logging
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
-from crms.proj.proj import Proj
+from crms.proj import Proj
 
 import pyproj
 
