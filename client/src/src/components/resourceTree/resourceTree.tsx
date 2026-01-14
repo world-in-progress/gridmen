@@ -86,7 +86,6 @@ function CreationBar({ resourceTree, onCreated, onCancel }: { resourceTree: Reso
                 : `${parentKey}.${localNewResourceName}`
 
             // TODO: 创建同名不同类型的Node
-            console.log(resourceTree.scene)
             if (resourceTree.scene.has(newNodeKey)) {
                 toast.error('Node already exists')
                 return

@@ -10,8 +10,6 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const convertPointCoordinate = async (originPoint: [number, number], fromEPSG: number, toEPSG: number): Promise<[number, number] | null> => {
-    console.log('convertPointCoordinate called with:', originPoint, fromEPSG, toEPSG)
-
     const lon = originPoint[0]
     const lat = originPoint[1]
 
@@ -47,7 +45,6 @@ export const clearMapAllMarkers = () => {
 }
 
 export const clearMarkerByNodeKey = (nodeKey: string) => {
-    console.log('clearMarkerByNodeKey执行了')
     const marker = markerMap.get(nodeKey)
     if (marker) {
         marker.remove()
