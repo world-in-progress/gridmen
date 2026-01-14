@@ -212,7 +212,6 @@ function FrameworkShell() {
         initTree()
     }, [isLoggedIn, location.pathname, privateTree, publicTree, publicIP])
 
-    // 获取当前选中节点的 templateName，默认为 'default'
     const getCurrentTemplateName = (): string => {
         const selectedNode = privateTree?.selectedNode || publicTree?.selectedNode
         return selectedNode?.template_name || 'default'
