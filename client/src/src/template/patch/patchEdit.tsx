@@ -131,7 +131,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (!map) return
 
         if (!(node as ResourceNode).lockId) {
-            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'r', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
+            const linkResponse = await linkNode('cc/ISchema/0.1.0', node.key, 'w', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
             (node as ResourceNode).lockId = linkResponse.lock_id
         }
 
@@ -187,9 +187,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         const clg = await waitForClg()
-
-        // // If the patch/schema is defined in EPSG:4326, convert bounds to EPSG:3857 (meters)
-        // // so grid construction and sizing operate in meters.
 
         const gridContext: GridContext = {
             noodleKey: node.noodleKey,
@@ -266,124 +263,125 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         pageContext.current.isChecking = checkSwitchOn
     }
 
-    // useEffect(() => {
-    //     if (!map) return
+    // TODO: 优化事件绑定解绑
+    useEffect(() => {
+        if (!map) return
 
-    //     const canvas = map.getCanvas()
+        const canvas = map.getCanvas()
 
-    //     const localIsMouseDown = { current: false }
-    //     const localMouseDownPos = { current: [0, 0] as [number, number] }
-    //     const localMouseMovePos = { current: [0, 0] as [number, number] }
+        const localIsMouseDown = { current: false }
+        const localMouseDownPos = { current: [0, 0] as [number, number] }
+        const localMouseMovePos = { current: [0, 0] as [number, number] }
 
-    //     const onMouseDown = (e: MouseEvent) => {
-    //         if (!e.shiftKey) return
-    //         localIsMouseDown.current = true
-    //         map.dragPan.disable()
-    //         map.scrollZoom.disable()
-    //         const rect = canvas.getBoundingClientRect()
-    //         const x = e.clientX - rect.left
-    //         const y = e.clientY - rect.top
-    //         localMouseDownPos.current = [x, y]
+        const onMouseDown = (e: MouseEvent) => {
+            if (!e.shiftKey) return
+            localIsMouseDown.current = true
+            map.dragPan.disable()
+            map.scrollZoom.disable()
+            const rect = canvas.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const y = e.clientY - rect.top
+            localMouseDownPos.current = [x, y]
 
-    //         if (checkSwitchOn) {
-    //             gridInfo.current = topologyLayer!.executeCheckGrid([x, y])
-    //             triggerRepaint()
-    //         }
-    //     }
+            if (checkSwitchOn) {
+                gridInfo.current = topologyLayer!.executeCheckGrid([x, y])
+                triggerRepaint()
+            }
+        }
 
-    //     const onMouseMove = (e: MouseEvent) => {
-    //         if (!e.shiftKey || !localIsMouseDown.current) return
-    //         if (checkSwitchOn) return
-    //         const rect = canvas.getBoundingClientRect()
-    //         const x = e.clientX - rect.left
-    //         const y = e.clientY - rect.top
-    //         localMouseMovePos.current = [x, y]
+        const onMouseMove = (e: MouseEvent) => {
+            if (!e.shiftKey || !localIsMouseDown.current) return
+            if (checkSwitchOn) return
+            const rect = canvas.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const y = e.clientY - rect.top
+            localMouseMovePos.current = [x, y]
 
-    //         if (selectTab === 'brush') {
-    //             topologyLayer!.executePickGrids(
-    //                 selectTab,
-    //                 pickingTab,
-    //                 [localMouseMovePos.current[0], localMouseMovePos.current[1]]
-    //             )
-    //         } else {
-    //             map!.dragPan.disable();
-    //             if (map!.getCanvas()) {
-    //                 map!.getCanvas().style.cursor = 'crosshair'
-    //             }
+            if (selectTab === 'brush') {
+                topologyLayer!.executePickGrids(
+                    selectTab,
+                    pickingTab,
+                    [localMouseMovePos.current[0], localMouseMovePos.current[1]]
+                )
+            } else {
+                map!.dragPan.disable();
+                if (map!.getCanvas()) {
+                    map!.getCanvas().style.cursor = 'crosshair'
+                }
 
-    //             topologyLayer!.executeDrawBox(
-    //                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
-    //                 [localMouseMovePos.current[0], localMouseMovePos.current[1]]
-    //             )
-    //         }
-    //     }
+                topologyLayer!.executeDrawBox(
+                    [localMouseDownPos.current[0], localMouseDownPos.current[1]],
+                    [localMouseMovePos.current[0], localMouseMovePos.current[1]]
+                )
+            }
+        }
 
-    //     const onMouseUp = (e: MouseEvent) => {
-    //         if (!localIsMouseDown.current) return
-    //         localIsMouseDown.current = false
+        const onMouseUp = (e: MouseEvent) => {
+            if (!localIsMouseDown.current) return
+            localIsMouseDown.current = false
 
-    //         if (map) {
-    //             map.dragPan.enable();
-    //             map.scrollZoom.enable();
-    //             topologyLayer!.executeClearDrawBox();
-    //             if (map.getCanvas()) {
-    //                 map.getCanvas().style.cursor = '';
-    //             }
-    //         }
+            if (map) {
+                map.dragPan.enable();
+                map.scrollZoom.enable();
+                topologyLayer!.executeClearDrawBox();
+                if (map.getCanvas()) {
+                    map.getCanvas().style.cursor = '';
+                }
+            }
 
-    //         if (!e.shiftKey) return
-    //         if (checkSwitchOn) return
+            if (!e.shiftKey) return
+            if (checkSwitchOn) return
 
-    //         const rect = canvas.getBoundingClientRect()
-    //         const x = e.clientX - rect.left
-    //         const y = e.clientY - rect.top
-    //         const localMouseUpPos = [x, y]
+            const rect = canvas.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const y = e.clientY - rect.top
+            const localMouseUpPos = [x, y]
 
-    //         topologyLayer!.executePickGrids(
-    //             selectTab,
-    //             pickingTab,
-    //             [localMouseDownPos.current[0], localMouseDownPos.current[1]],
-    //             [localMouseUpPos[0], localMouseUpPos[1]]
-    //         )
-    //     }
+            topologyLayer!.executePickGrids(
+                selectTab,
+                pickingTab,
+                [localMouseDownPos.current[0], localMouseDownPos.current[1]],
+                [localMouseUpPos[0], localMouseUpPos[1]]
+            )
+        }
 
-    //     const onMouseOut = (e: MouseEvent) => {
-    //         if (checkSwitchOn) return
-    //         if (map) {
-    //             map.dragPan.enable()
-    //             map.scrollZoom.enable()
-    //             topologyLayer!.executeClearDrawBox()
-    //             if (map.getCanvas()) {
-    //                 map.getCanvas().style.cursor = ''
-    //             }
-    //         }
-    //         if (!e.shiftKey) return
+        const onMouseOut = (e: MouseEvent) => {
+            if (checkSwitchOn) return
+            if (map) {
+                map.dragPan.enable()
+                map.scrollZoom.enable()
+                topologyLayer!.executeClearDrawBox()
+                if (map.getCanvas()) {
+                    map.getCanvas().style.cursor = ''
+                }
+            }
+            if (!e.shiftKey) return
 
-    //         const rect = canvas.getBoundingClientRect()
-    //         const x = e.clientX - rect.left
-    //         const y = e.clientY - rect.top
-    //         const mouseUpPos = [x, y]
+            const rect = canvas.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const y = e.clientY - rect.top
+            const mouseUpPos = [x, y]
 
-    //         topologyLayer!.executePickGrids(
-    //             selectTab,
-    //             pickingTab,
-    //             [localMouseDownPos.current[0], localMouseDownPos.current[1]],
-    //             [mouseUpPos[0], mouseUpPos[1]]
-    //         )
-    //     }
+            topologyLayer!.executePickGrids(
+                selectTab,
+                pickingTab,
+                [localMouseDownPos.current[0], localMouseDownPos.current[1]],
+                [mouseUpPos[0], mouseUpPos[1]]
+            )
+        }
 
-    //     canvas.addEventListener('mousedown', onMouseDown)
-    //     canvas.addEventListener('mousemove', onMouseMove)
-    //     canvas.addEventListener('mouseup', onMouseUp)
-    //     canvas.addEventListener('mouseout', onMouseOut)
+        canvas.addEventListener('mousedown', onMouseDown)
+        canvas.addEventListener('mousemove', onMouseMove)
+        canvas.addEventListener('mouseup', onMouseUp)
+        canvas.addEventListener('mouseout', onMouseOut)
 
-    //     return () => {
-    //         canvas.removeEventListener('mousedown', onMouseDown)
-    //         canvas.removeEventListener('mousemove', onMouseMove)
-    //         canvas.removeEventListener('mouseup', onMouseUp)
-    //         canvas.removeEventListener('mouseout', onMouseOut)
-    //     }
-    // }, [selectTab, pickingTab, checkSwitchOn, topologyLayer, map])
+        return () => {
+            canvas.removeEventListener('mousedown', onMouseDown)
+            canvas.removeEventListener('mousemove', onMouseMove)
+            canvas.removeEventListener('mouseup', onMouseUp)
+            canvas.removeEventListener('mouseout', onMouseOut)
+        }
+    }, [selectTab, pickingTab, checkSwitchOn])
 
     const handleConfirmSelectAll = useCallback(() => {
         setSelectAllDialogOpen(false)

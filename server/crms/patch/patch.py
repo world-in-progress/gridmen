@@ -149,6 +149,10 @@ class Patch(IPatch):
         if self._pd_cache.empty:
             self._load_patch()
         return self._pd_cache
+    
+    @cache.setter
+    def cache(self, value: pd.DataFrame):
+        self._pd_cache = value
 
     def get_meta(self) -> PatchSchema:
         schema = PatchSchema()

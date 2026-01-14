@@ -17,14 +17,14 @@ export function setGridManager(
     callback()
 }
 
-// export async function subdivideGrids(
-//     this: WorkerContext,
-//     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, isRemote: boolean },
-//     callback: Callback<any>
-// ) {
-//     const renderInfo = await api.patch.subdivideGrids.fetch(gridInfo, gridInfo.isRemote)
-//     callback(null, renderInfo)
-// }
+export async function subdivideGrids(
+    this: WorkerContext,
+    gridInfo: { levels: Uint8Array, globalIds: Uint32Array, node_key: string, lock_id: string },
+    callback: Callback<any>
+) {
+    const renderInfo = await api.patch.subdivideGrids.fetch(gridInfo, gridInfo.node_key, gridInfo.lock_id)
+    callback(null, renderInfo)
+}
 
 // export async function mergeGrids(
 //     this: WorkerContext,
