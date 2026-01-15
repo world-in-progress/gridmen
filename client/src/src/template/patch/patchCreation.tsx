@@ -371,18 +371,14 @@ export default function PatchCreation({
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
                 ; (node.tree as ResourceTree).selectedNode = null
-
-                // tree.selectedNode is mutable; notify before switching tabs so ToolPanel receives null selectedNode
                 ; (node.tree as ResourceTree).notifyDomUpdate()
 
-            // 根据 layerGroup 模式恢复 toolPanel 状态
             const { isEditMode } = useLayerGroupStore.getState()
             useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
 
             setGeneralMessage('Created successfully')
             await (node.tree as ResourceTree).refresh()
             toast.success('Patch Created successfully')
-
         } catch (error) {
             setGeneralMessage(`Failed to create patch: ${error}`)
             toast.error(`Failed to create patch: ${error}`)
@@ -436,7 +432,7 @@ export default function PatchCreation({
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
                 <div className='w-full mx-auto space-y-2 px-6 pt-2 pb-4'>
                     {/* ----------- */}
-                    {/* Schema Name */}
+                    {/* Patch Name */}
                     {/* ----------- */}
                     <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
                         <h2 className='text-black text-lg font-semibold mb-2'>
