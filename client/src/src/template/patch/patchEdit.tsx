@@ -13,6 +13,7 @@ import {
     SquareDashed,
     SquareMousePointer,
     SquareDashedMousePointer,
+    SplinePointer,
 } from 'lucide-react'
 import store from '@/store/store'
 import {
@@ -26,6 +27,9 @@ import {
     AlertDialogContent,
     AlertDialogDescription,
 } from '@/components/ui/alert-dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Label } from '@/components/ui/label'
 import { linkNode } from '../api/node'
 import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
@@ -142,6 +146,15 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const [pickingTab, setPickingTab] = useState<boolean>(true)
     const [selectTab, setSelectTab] = useState<'brush' | 'box' | 'feature'>('brush')
     const [activeTopologyOperation, setActiveTopologyOperation] = useState<TopologyOperationType>(null)
+
+    const [featureSourceDialog, setFeatureSourceDialog] = useState(false)
+    const [featureSource, setFeatureSource] = useState<'vector' | 'file' | null>(null)
+    const [draggedVector, setDraggedVector] = useState<{
+        nodeKey: string
+        nodeInfo: string
+        name: string
+    } | null>(null)
+    const [tempFeatureSource, setTempFeatureSource] = useState<'vector' | 'file'>('file')
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
@@ -269,11 +282,9 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }
 
     const unloadContext = (node: ResourceNode) => {
-        // const core: GridCore = pageContext.current.gridCore!
-        // core.save(() => { })
 
-        // const clg = store.get<CustomLayerGroup>('clg')!
-        // clg.removeLayer('TopologyLayer')
+        const clg = store.get<CustomLayerGroup>('clg')!
+        clg.removeLayer('TopologyLayer')
 
         pageContext.current.editingState.select = selectTab
         pageContext.current.editingState.pick = pickingTab
@@ -316,7 +327,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localMouseMovePos.current = [x, y]
 
             if (selectTab === 'brush') {
-                console.log(selectTab, pickingTab, localMouseMovePos.current)
                 topologyLayer.executePickCells(
                     selectTab,
                     pickingTab,
@@ -448,7 +458,23 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         setDeleteSelectDialogOpen(true)
     }
 
-    const handleFeatureClick = useCallback(async () => {
+    const handleFeatureClick = useCallback(() => {
+        setFeatureSourceDialog(true)
+        setTempFeatureSource('file')
+    }, [])
+
+    const handleConfirmFeatureSource = useCallback(() => {
+        setFeatureSource(tempFeatureSource)
+        setFeatureSourceDialog(false)
+        if (tempFeatureSource === 'file') {
+            handleExecuteFeatureByFile()
+        } else {
+            // vector模式：等待用户拖入vector并点击confirm
+            setSelectTab('feature')
+        }
+    }, [tempFeatureSource, selectTab])
+
+    const handleExecuteFeatureByFile = useCallback(async () => {
         const currentTab: 'brush' | 'box' | 'feature' = selectTab
         setSelectTab('feature')
         if (window.electronAPI && typeof window.electronAPI.openFileDialog === 'function') {
@@ -472,6 +498,71 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             setSelectTab(currentTab)
         }
     }, [selectTab, topologyLayer])
+
+    const handleVectorNodeDragOver = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.currentTarget.classList.add('border-blue-500', 'bg-blue-50')
+    }
+
+    const handleVectorNodeDragLeave = (e: React.DragEvent) => {
+        e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
+    }
+
+    const handleVectorNodeDrop = async (e: React.DragEvent) => {
+        e.preventDefault()
+        e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
+        const raw = e.dataTransfer.getData('application/gridmen-node') || e.dataTransfer.getData('text/plain')
+
+        const payload = JSON.parse(raw) as {
+            nodeKey: string
+            nodeInfo: string
+            templateName: string
+            sourceTreeTitle: string
+        }
+
+        const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, templateName } = payload
+
+        if (!dragNodeKey || templateName !== 'vector') {
+            toast.error('Please drag a vector node')
+            return
+        }
+
+        setDraggedVector({
+            nodeKey: dragNodeKey,
+            nodeInfo: dragNodeInfo,
+            name: payload.sourceTreeTitle || 'Vector'
+        })
+    }
+
+    const handleConfirmVectorFeature = useCallback(async () => {
+        if (!draggedVector) {
+            toast.error('Please drag a vector node first')
+            return
+        }
+
+        const currentTab: 'brush' | 'box' | 'feature' = 'brush'
+
+        try {
+            // TODO: 从draggedVector获取vector数据并执行feature选择
+            // 这里需要实现从vector节点获取GeoJSON数据的逻辑
+            console.log('Executing feature selection with vector:', draggedVector)
+            toast.info('Vector feature selection will be implemented')
+
+            // 清理状态
+            setFeatureSource(null)
+            setDraggedVector(null)
+            setSelectTab(currentTab)
+        } catch (error) {
+            console.error('Error executing vector feature:', error)
+            toast.error(`Failed to execute vector feature: ${error}`)
+        }
+    }, [draggedVector, topologyLayer])
+
+    const handleCancelVectorFeature = useCallback(() => {
+        setFeatureSource(null)
+        setDraggedVector(null)
+        setSelectTab('brush')
+    }, [])
 
     const onTopologyOperationClick = (operationType: string) => {
         if (highSpeedMode && operationType !== null) {
@@ -1053,8 +1144,100 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                             </div>
                                         </button>
                                     </div>
+                                    {/* Vector Drop Area */}
+                                    {featureSource === 'vector' && (
+                                        <div className='space-y-2 mt-2'>
+                                            <div
+                                                onDragOver={handleVectorNodeDragOver}
+                                                onDragLeave={handleVectorNodeDragLeave}
+                                                onDrop={handleVectorNodeDrop}
+                                                className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
+                                            >
+                                                {draggedVector ? (
+                                                    <div className='space-y-2'>
+                                                        <div className='flex items-center justify-between bg-white rounded-md p-2 border border-blue-300'>
+                                                            <span className='text-sm font-medium text-gray-900'>{draggedVector.name}</span>
+                                                            <button
+                                                                onClick={() => setDraggedVector(null)}
+                                                                className='text-red-500 hover:text-red-700'
+                                                            >
+                                                                <CircleOff className='h-4 w-4' />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className='space-y-2 py-1'>
+                                                        <SplinePointer className='h-8 w-8 mx-auto text-gray-400 group-hover:text-indigo-500 transition-colors' />
+                                                        <p className='text-sm text-gray-400 group-hover:text-indigo-500 transition-colors'>
+                                                            Drag a Vector node here
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className='flex gap-2'>
+                                                <Button
+                                                    onClick={handleConfirmVectorFeature}
+                                                    disabled={!draggedVector}
+                                                    className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+                                                >
+                                                    Confirm
+                                                </Button>
+                                                <Button
+                                                    onClick={handleCancelVectorFeature}
+                                                    variant='outline'
+                                                    className='flex-1 cursor-pointer text-black'
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
+                            {/* Feature Source Dialog */}
+                            <Dialog open={featureSourceDialog} onOpenChange={setFeatureSourceDialog}>
+                                <DialogContent className='bg-white text-slate-900'>
+                                    <DialogHeader>
+                                        <DialogTitle className='text-slate-900'>Select Feature Source</DialogTitle>
+                                        <DialogDescription className='text-slate-600'>
+                                            Choose how you want to provide the feature data
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className='space-y-4 py-4'>
+                                        <RadioGroup value={tempFeatureSource} onValueChange={(value) => setTempFeatureSource(value as 'vector' | 'file')}>
+                                            <div className='flex items-center space-x-2 p-3 rounded-md border border-slate-200 hover:bg-slate-50 cursor-pointer'>
+                                                <RadioGroupItem value='file' id='file' />
+                                                <Label htmlFor='file' className='flex-1 cursor-pointer text-slate-900'>
+                                                    <div className='font-medium'>Upload File</div>
+                                                    <div className='text-sm text-slate-500'>Select a file from your computer</div>
+                                                </Label>
+                                            </div>
+                                            <div className='flex items-center space-x-2 p-3 rounded-md border border-slate-200 hover:bg-slate-50 cursor-pointer'>
+                                                <RadioGroupItem value='vector' id='vector' />
+                                                <Label htmlFor='vector' className='flex-1 cursor-pointer text-slate-900'>
+                                                    <div className='font-medium'>Drag Vector Node</div>
+                                                    <div className='text-sm text-slate-500'>Drag a vector node from the resource tree</div>
+                                                </Label>
+                                            </div>
+                                        </RadioGroup>
+                                    </div>
+                                    <div className='flex justify-end gap-2'>
+                                        <Button
+                                            variant='outline'
+                                            onClick={() => setFeatureSourceDialog(false)}
+                                            className='cursor-pointer'
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            onClick={handleConfirmFeatureSource}
+                                            className='bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                                        >
+                                            Confirm
+                                        </Button>
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
                             <div className='space-y-2'>
                                 <h1 className='text-2xl font-bold text-white'>Topology</h1>
                                 <div className='flex items-center h-[56px] mt-2 p-1 space-x-1 border border-gray-200 rounded-lg shadow-md'>

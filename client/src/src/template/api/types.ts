@@ -54,3 +54,24 @@ export interface PatchMeta {
     subdivide_rules: [number, number][]
     bounds: [number, number, number, number]
 }
+
+export interface VectorFileInfo {
+    filePath: string
+    fileType: string
+}
+
+export interface VectorDataResponse extends BaseResponse {
+    data: Record<string, any>
+}
+
+export interface VectorJsonComputionResponse extends BaseResponse {
+    feature_json: Record<string, any>
+}
+
+export interface UpdateVectorData {
+    name: string
+    type: string
+    color: string
+    epsg: string
+    feature_json: Record<string, any>
+}

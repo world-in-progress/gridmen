@@ -366,7 +366,7 @@ export default function PatchCreation({
             console.log('Submitting patch data:', JSON.stringify(patchData))
 
             // TODO: 清除Marker和Bounds
-            clearMarkerByNodeKey(node.key)
+            clearMarkerByNodeKey(pageContext.current.schema!.schemaNodeKey)
             clearMapPatchBounds(map, node.key)
 
             node.isTemp = false
