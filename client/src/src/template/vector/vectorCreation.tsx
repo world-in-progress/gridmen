@@ -96,7 +96,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         vectorData: {
             type: "point",
             name: "",
-            epsg: "",
+            epsg: "4326",
             color: "sky-500",
         }
     })
@@ -126,11 +126,14 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             pageContext.current.vectorData.name = node.name.split('.')[0]
         }
 
+        if (!pageContext.current.vectorData.epsg || !pageContext.current.vectorData.epsg.trim()) {
+            pageContext.current.vectorData.epsg = "4326"
+        }
+
         if (pageContext.current.hasVector) {
             setTimeout(() => {
                 if (pageContext.current.drawVector && pageContext.current.drawVector.features && pageContext.current.drawVector.features.length > 0) {
                     if (drawInstance) {
-                        // ensure loaded features have color
                         const loadColor = vectorColorMap.find((item) => item.value === pageContext.current.vectorData.color)?.color ?? "#0ea5e9"
                         for (const feature of pageContext.current.drawVector.features as any[]) {
                             feature.properties = feature.properties || {}
@@ -148,15 +151,10 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
                         try {
                             drawInstance.add(validVectors)
-                            // apply color to draw features (by id) after add
                             const all = drawInstance.getAll()
                             for (const feature of all.features as any[]) {
                                 if (!feature?.id) continue
-                                try {
-                                    drawInstance.setFeatureProperty(feature.id, "user_color", loadColor)
-                                } catch {
-                                    // ignore
-                                }
+                                drawInstance.setFeatureProperty(feature.id, "user_color", loadColor)
                             }
                         } catch (error) {
                             console.error("Failed to add vector:", error);
@@ -215,11 +213,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         for (const feature of all.features) {
             const featureId = (feature as any).id
             if (!featureId) continue
-            try {
-                drawInstance.setFeatureProperty(featureId, "user_color", hexColor)
-            } catch {
-                // ignore
-            }
+            drawInstance.setFeatureProperty(featureId, "user_color", hexColor)
         }
     }, [drawInstance])
 
@@ -253,17 +247,11 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             if (e?.features && Array.isArray(e.features)) {
                 for (const f of e.features) {
                     if (!f?.id) continue
-                    try {
-                        drawInstance.setFeatureProperty(f.id, "user_color", hex)
-                    } catch {
-                        // ignore
-                    }
+                    drawInstance.setFeatureProperty(f.id, "user_color", hex)
                 }
             }
             syncDrawVectorFromDraw()
 
-            // MapboxDraw will switch to simple_select after finishing (e.g. double click).
-            // If we are in Draw tool, re-enter draw mode so user can keep drawing continuously.
             if (selectedToolRef.current === "draw") {
                 const mode = getDrawModeByType(pageContext.current.vectorData.type)
                 setTimeout(() => safeChangeMode(mode), 0)
@@ -275,11 +263,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             if (e?.features && Array.isArray(e.features)) {
                 for (const f of e.features) {
                     if (!f?.id) continue
-                    try {
-                        drawInstance.setFeatureProperty(f.id, "user_color", hex)
-                    } catch {
-                        // ignore
-                    }
+                    drawInstance.setFeatureProperty(f.id, "user_color", hex)
                 }
             }
             syncDrawVectorFromDraw()
@@ -307,7 +291,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             name: pageContext.current!.vectorData.name,
             type: pageContext.current!.vectorData.type,
             color: pageContext.current!.vectorData.color,
-            epsg: pageContext.current!.vectorData.epsg,
+            epsg: '4326',
         }
 
         console.log('Creating vector with data:', newVector)
@@ -341,53 +325,28 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             toast.error(`Failed to create patch: ${error}`)
         }
 
-
-        // setVectorData(newVector)
-        // setVectorColor(vectorColor!)
-        // pageContext.current!.hasVector = true
-        // pageContext.current!.vectorData = newVector
-        // featureJson 就是你要保存/上传到后端的 GeoJSON FeatureCollection
-        // const createVectorRes = await apis.vector.createVector.fetch(newVector, node.tree.isPublic)
-        // if (!createVectorRes.success) {
-        //     toast.error(`Failed to create vector ${newVector.name}`)
-        //     return
-        // } else {
-        //     const tree = node.tree as SceneTree
-        //     await tree.alignNodeInfo(node, true)
-        //     tree.notifyDomUpdate()
-        //     toast.success(`Vector ${newVector.name} created successfully`)
-        // }
-        // setCreateDialogOpen(false)
         triggerRepaint()
     }
 
     const handleReselectVectorType = () => {
-        // const pc = pageContext.current!
-        // const drawInstance = store.get<MapboxDraw>("mapDraw")
-        // if (drawInstance) {
-        //     drawInstance.deleteAll()
-        // }
-        // pc.hasVector = false
-        // pc.vectorData = {
-        //     type: "point",
-        //     name: "",
-        //     epsg: "",
-        //     color: "sky-500"
-        // }
-        // setResetDialogOpen(false)
-        // setCreateDialogOpen(true)
-        // setSelectedTool("select")
+
+        drawInstance.deleteAll()
+        pageContext.current.hasVector = false
+        pageContext.current.vectorData = {
+            type: "point",
+            name: "",
+            epsg: "",
+            color: "sky-500"
+        }
+        setSelectedTool("draw")
         triggerRepaint()
     }
 
     const handleConfirmType = () => {
         pageContext.current.vectorData.type = pendingType
         setTypeSelectDialogOpen(false)
-
-        // default to Draw tool after selecting type
         setSelectedToolSafe("draw")
 
-        // enter draw mode for chosen type and apply current selected color
         const mode = getDrawModeByType(pendingType)
         const hex = getHexColorByValue(pageContext.current.vectorData.color)
         safeChangeMode(mode)
@@ -494,21 +453,6 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                     ))}
                                 </ul>
                             </div>
-                            <div className="text-sm w-full flex flex-row items-center justify-center space-x-4">
-                                <Button
-                                    className="w-[1/3] bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
-                                    onClick={handleReselectVectorType}
-                                >
-                                    Reselect Vector Type
-                                </Button>
-                                <Button
-                                    className="w-[1/3] bg-green-500 hover:bg-green-600 text-white cursor-pointer"
-                                    disabled={!pageContext.current.vectorData.name.trim() || !pageContext.current.vectorData.epsg.trim()}
-                                    onClick={handleCreateVector}
-                                >
-                                    Create New Vector
-                                </Button>
-                            </div>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
@@ -574,8 +518,8 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                             </div>
                         </div>
 
-                        <div className="p-4 space-y-4">
-                            <div className="space-y-2">
+                        <div className="p-4 space-y-2">
+                            <div className="space-y-1">
                                 <h3 className="text-white font-semibold text-lg flex items-center gap-2">
                                     <Palette className="w-5 h-5" />
                                     Vector Basic Information
@@ -683,6 +627,21 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                            <div className="text-sm w-full flex flex-row items-center justify-center space-x-4">
+                                <Button
+                                    className="w-[1/2] bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
+                                    onClick={handleReselectVectorType}
+                                >
+                                    Reselect Vector Type
+                                </Button>
+                                <Button
+                                    className="w-[1/2] bg-green-500 hover:bg-green-600 text-white cursor-pointer"
+                                    disabled={!pageContext.current.vectorData.name.trim() || !pageContext.current.vectorData.epsg.trim()}
+                                    onClick={handleCreateVector}
+                                >
+                                    Create New Vector
+                                </Button>
                             </div>
                         </div>
                     </div>
