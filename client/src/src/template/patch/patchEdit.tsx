@@ -302,7 +302,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localMouseDownPos.current = [x, y]
 
             if (checkSwitchOn) {
-                gridInfo.current = topologyLayer.executeCheckGrid([x, y])
+                gridInfo.current = topologyLayer.executeCheckCell([x, y])
                 triggerRepaint()
             }
         }
@@ -317,7 +317,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
             if (selectTab === 'brush') {
                 console.log(selectTab, pickingTab, localMouseMovePos.current)
-                topologyLayer.executePickGrids(
+                topologyLayer.executePickCells(
                     selectTab,
                     pickingTab,
                     [localMouseMovePos.current[0], localMouseMovePos.current[1]]
@@ -356,7 +356,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             const localMouseUpPos = [x, y]
 
-            topologyLayer.executePickGrids(
+            topologyLayer.executePickCells(
                 selectTab,
                 pickingTab,
                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
@@ -381,7 +381,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             const mouseUpPos = [x, y]
 
-            topologyLayer.executePickGrids(
+            topologyLayer.executePickCells(
                 selectTab,
                 pickingTab,
                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
@@ -404,7 +404,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const handleConfirmSelectAll = useCallback(() => {
         setSelectAllDialogOpen(false)
-        topologyLayer!.executePickAllGrids()
+        topologyLayer!.executePickAllCells()
     }, [topologyLayer])
 
     const handleConfirmDeleteSelect = useCallback(() => {
@@ -415,16 +415,16 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const handleConfirmTopologyAction = useCallback(() => {
         switch (activeTopologyOperation) {
             case 'subdivide':
-                topologyLayer!.executeSubdivideGrids()
+                topologyLayer!.executeSubdivideCells()
                 break
             case 'merge':
-                topologyLayer!.executeMergeGrids()
+                topologyLayer!.executeMergeCells()
                 break
             case 'delete':
-                topologyLayer!.executeDeleteGrids()
+                topologyLayer!.executeDeleteCells()
                 break
             case 'recover':
-                topologyLayer!.executeRecoverGrids()
+                topologyLayer!.executeRecoverCells()
                 break
             default:
                 console.warn('No active topology operation to confirm.')
@@ -457,7 +457,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (filePath) {
                     console.log('Selected file path:', filePath)
                     store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                    topologyLayer!.executePickGridsByFeature(filePath)
+                    topologyLayer!.executePickCellsByFeature(filePath)
                     setSelectTab(currentTab)
                 } else {
                     console.log('No file selected')
@@ -477,16 +477,16 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (highSpeedMode && operationType !== null) {
             switch (operationType) {
                 case 'subdivide':
-                    topologyLayer!.executeSubdivideGrids()
+                    topologyLayer!.executeSubdivideCells()
                     break
                 case 'merge':
-                    topologyLayer!.executeMergeGrids()
+                    topologyLayer!.executeMergeCells()
                     break
                 case 'delete':
-                    topologyLayer!.executeDeleteGrids()
+                    topologyLayer!.executeDeleteCells()
                     break
                 case 'recover':
-                    topologyLayer!.executeRecoverGrids()
+                    topologyLayer!.executeRecoverCells()
                     break
                 default:
                     console.warn('Unknown topology operation type:', operationType)
@@ -543,7 +543,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (event.key === 'S' || event.key === 's') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        topologyLayer!.executeSubdivideGrids()
+                        topologyLayer!.executeSubdivideCells()
                     } else {
                         setActiveTopologyOperation('subdivide')
                     }
@@ -551,7 +551,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (event.key === 'M' || event.key === 'm') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        topologyLayer!.executeMergeGrids()
+                        topologyLayer!.executeMergeCells()
                     } else {
                         setActiveTopologyOperation('merge')
                     }
@@ -559,7 +559,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (event.key === 'D' || event.key === 'd') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        topologyLayer!.executeDeleteGrids()
+                        topologyLayer!.executeDeleteCells()
                     } else {
                         setActiveTopologyOperation('delete')
                     }
@@ -567,7 +567,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (event.key === 'R' || event.key === 'r') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        topologyLayer!.executeRecoverGrids()
+                        topologyLayer!.executeRecoverCells()
                     } else {
                         setActiveTopologyOperation('recover')
                     }

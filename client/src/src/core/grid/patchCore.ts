@@ -1,11 +1,9 @@
 import proj4 from 'proj4'
 import * as apis from '@/template/api/apis'
 import Dispatcher from '../message/dispatcher'
+import BoundingBox2D from '../util/boundingBox2D'
 import { MercatorCoordinate } from '../math/mercatorCoordinate'
 import { PatchContext, CellCheckInfo, PatchSaveInfo, MultiCellBaseInfo, StructuredCellRenderVertices, CellKeyHashTable } from './types'
-import BoundingBox2D from '../util/boundingBox2D'
-
-// proj4.defs('EPSG:2326', "+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs")
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
@@ -253,7 +251,7 @@ export default class PatchCore {
      * Mark the specified cells as deleted
      * @description: Marks the specified cells as deleted in the patch system.  
      * Not really deleted, but marked as deleted.  
-     * For recover operation, the deleted cells must still can be picked up.
+     * For restore operation, the deleted cells must still can be picked up.
      */
     markCellsAsDeleted(removableStorageIds: number[], callback?: Function): void {
         const levels = new Uint8Array(removableStorageIds.length)
@@ -344,28 +342,28 @@ export default class PatchCore {
     }
 
     getChildren(level: number, globalId: number): number[] | null {
-        if (level >= this.levelInfos.length || level < 0) return null;
+        if (level >= this.levelInfos.length || level < 0) return null
 
-        const { width: levelWidth } = this.levelInfos[level];
-        const globalU = globalId % levelWidth;
-        const globalV = Math.floor(globalId / levelWidth);
+        const { width: levelWidth } = this.levelInfos[level]
+        const globalU = globalId % levelWidth
+        const globalV = Math.floor(globalId / levelWidth)
 
-        const [subWidth, subHeight] = this.context.rules[level];
-        const subCount = subWidth * subHeight;
+        const [subWidth, subHeight] = this.context.rules[level]
+        const subCount = subWidth * subHeight
 
-        const children = new Array<number>(subCount);
-        const baseGlobalWidth = levelWidth * subWidth;
+        const children = new Array<number>(subCount)
+        const baseGlobalWidth = levelWidth * subWidth
         for (let localId = 0; localId < subCount; localId++) {
-            const subU = localId % subWidth;
-            const subV = Math.floor(localId / subWidth);
+            const subU = localId % subWidth
+            const subV = Math.floor(localId / subWidth)
 
-            const subGlobalU = globalU * subWidth + subU;
-            const subGlobalV = globalV * subHeight + subV;
-            const subGlobalId = subGlobalV * baseGlobalWidth + subGlobalU;
-            children[localId] = subGlobalId;
+            const subGlobalU = globalU * subWidth + subU
+            const subGlobalV = globalV * subHeight + subV
+            const subGlobalId = subGlobalV * baseGlobalWidth + subGlobalU
+            children[localId] = subGlobalId
         }
 
-        return children;
+        return children
     }
 
     getInfoByStorageId(storageId: number): [level: number, globalId: number] {
@@ -416,10 +414,9 @@ export default class PatchCore {
 // Helpers //////////////////////////////////////////////////////////////////////////////////////////////////////
 
 function encodeFloatToDouble(value: number) {
-    const result = new Float32Array(2);
-    result[0] = value;
-
-    const delta = value - result[0];
-    result[1] = delta;
-    return result;
+    const result = new Float32Array(2)
+    result[0] = value
+    const delta = value - result[0]
+    result[1] = delta
+    return result
 }
