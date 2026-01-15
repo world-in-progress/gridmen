@@ -1,56 +1,56 @@
-import { toast } from 'sonner'
-import * as api from '../api/apis'
-import PatchEdit from './patchEdit'
-import PatchCheck from './patchCheck'
-import { linkNode } from '../api/node'
-import { ITemplate } from "../iTemplate"
-import PatchCreation from './patchCreation'
+import { IViewContext } from "@/views/IViewContext";
+import { ITemplate } from "../iTemplate";
 import { IResourceNode } from "../scene/iscene"
-import { IViewContext } from "@/views/IViewContext"
-import { ResourceNode, ResourceTree } from "../scene/scene"
-import { Delete, Edit3, Info, FilePlusCorner } from "lucide-react"
-import { useLayerStore, useToolPanelStore } from '@/store/storeSet'
+import VectorCheck from "./vectorCheck";
+import VectorCreation from "./vectorCreation";
+import VectorEdit from "./vectorEdit"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
+import { Delete, Edit3, FilePlusCorner, Info } from "lucide-react";
+import { ResourceNode, ResourceTree } from "../scene/scene";
+import { useLayerStore, useToolPanelStore } from "@/store/storeSet"
+import * as api from '../api/apis'
+import { linkNode } from "../api/node";
+import { toast } from "sonner";
 
-enum PatchMenuItem {
-    CREATE_PATCH = 'Create Patch',
-    CHECK_PATCH = 'Check Patch',
-    EDIT_PATCH = 'Edit Patch',
-    DELETE_PATCH = 'Delete Patch',
+enum VectorMenuItem {
+    CREATE_VECTOR = 'Create Vector',
+    CHECK_VECTOR = 'Check Vector',
+    EDIT_VECTOR = 'Edit Vector',
+    DELETE_VECTOR = 'Delete Vector',
 }
 
-export default class PatchTemplate implements ITemplate {
-    static templateName: string = 'patch'
-    templateName: string = PatchTemplate.templateName
+export default class VectorTemplate implements ITemplate {
+    static templateName: string = 'vector'
+    templateName: string = VectorTemplate.templateName
 
     static viewModels = {
         'MapView': {
-            check: PatchTemplate.checkMapView,
-            create: PatchTemplate.creationMapView,
-            edit: PatchTemplate.editMapView
+            check: VectorTemplate.checkMapView,
+            create: VectorTemplate.creationMapView,
+            edit: VectorTemplate.editMapView
         }
     }
 
     static checkMapView(node: IResourceNode, context: IViewContext): Function {
-        return () => PatchCheck({ node, context })
+        return () => VectorCheck({ node, context })
     }
 
     static creationMapView(node: IResourceNode, context: IViewContext): Function {
-        return () => PatchCreation({ node, context })
+        return () => VectorCreation({ node, context })
     }
 
     static editMapView(node: IResourceNode, context: IViewContext): Function {
-        return () => PatchEdit({ node, context })
+        return () => VectorEdit({ node, context })
     }
 
     renderMenu(node: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element {
         return (
             <ContextMenuContent>
-                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, PatchMenuItem.CREATE_PATCH) }}>
+                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, VectorMenuItem.CREATE_VECTOR) }}>
                     <FilePlusCorner className='w-4 h-4' />
                     <span>Create</span>
                 </ContextMenuItem>)}
-                {!node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, PatchMenuItem.CHECK_PATCH) }}>
+                {!node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, VectorMenuItem.CHECK_VECTOR) }}>
                     <Info className='w-4 h-4' />
                     <span>Check</span>
                 </ContextMenuItem>)}
@@ -58,12 +58,12 @@ export default class PatchTemplate implements ITemplate {
                 {(node as ResourceNode).tree.leadIP === undefined && (
                     <>
                         {!node.isTemp && (
-                            <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, PatchMenuItem.EDIT_PATCH) }}>
+                            <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, VectorMenuItem.EDIT_VECTOR) }}>
                                 <Edit3 className='w-4 h-4' />
                                 <span>Edit</span>
                             </ContextMenuItem>)}
 
-                        < ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, PatchMenuItem.DELETE_PATCH) }}>
+                        < ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, VectorMenuItem.DELETE_VECTOR) }}>
                             <Delete className='w-4 h-4 text-white rotate-180' />
                             <span className='text-white' >Delete</span>
                         </ContextMenuItem>
@@ -75,16 +75,16 @@ export default class PatchTemplate implements ITemplate {
 
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
-            case PatchMenuItem.CREATE_PATCH:
+            case VectorMenuItem.CREATE_VECTOR:
                 useToolPanelStore.getState().setActiveTab('create')
                 break
-            case PatchMenuItem.CHECK_PATCH: {
+            case VectorMenuItem.CHECK_VECTOR: {
                 const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
                 (node as ResourceNode).mountParams = patchInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
-            case PatchMenuItem.EDIT_PATCH: {
+            case VectorMenuItem.EDIT_VECTOR: {
                 if (!(node as ResourceNode).lockId) {
                     const linkResponse = await linkNode('cc/IPatch/0.1.0', node.key, 'w', (node as ResourceNode).tree.leadIP !== undefined ? true : false);
                     (node as ResourceNode).lockId = linkResponse.lock_id
@@ -95,17 +95,17 @@ export default class PatchTemplate implements ITemplate {
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
-            case PatchMenuItem.DELETE_PATCH:
+            case VectorMenuItem.DELETE_VECTOR:
                 {
                     if (node.isTemp) {
                         ; (node as ResourceNode).tree.tempNodeExist = false
                         await (node.tree as ResourceTree).removeNode(node)
-                        toast.success(`Patch ${node.name} deleted successfully`)
+                        toast.success(`Vector ${node.name} deleted successfully`)
                         return
                     }
 
                     await api.node.unmountNode(node.key)
-                    toast.success(`Patch ${node.name} deleted successfully`)
+                    toast.success(`Vector ${node.name} deleted successfully`)
                     await (node.tree as ResourceTree).refresh()
                 }
                 break

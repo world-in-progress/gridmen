@@ -1,13 +1,11 @@
 import {
     BaseResponse,
     GetNodeInfoParams,
-    LinkNodeParams,
     LinkNodeResponse,
     MountNodeParams,
     NodeMeta,
     PushPullNodeParams,
     PullResponse,
-    UnlinkNodeParams
 } from './types'
 import { useSettingStore } from '@/store/storeSet'
 import { extractIPFromUrl, getApiBaseUrl } from './utils'
@@ -21,6 +19,8 @@ export const getNodeInfo = async ({ node_key, child_start_index, child_end_index
         const baseUrl = getApiBaseUrl(leadIP || false)
         let url = `${baseUrl}${API_PREFIX}?node_key=${node_key}&child_start_index=${child_start_index || 0}`
         if (child_end_index !== undefined) url += `&child_end_index=${child_end_index}`
+
+        console.log('url', url)
 
         const response = await fetch(url, { method: "GET" })
         if (!response.ok) {

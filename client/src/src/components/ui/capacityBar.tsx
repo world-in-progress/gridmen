@@ -152,7 +152,7 @@ export default function CapacityBar({
                                     {getIcon(displayPercentage)}
                                     {isAnimating && (
                                         <span
-                                            className="absolute inset-0 animate-ping opacity-75 rounded-full bg-current"
+                                            className="absolute inset-0 animate-ping rounded-full bg-current"
                                             style={{ backgroundColor: 'currentColor' }}
                                         />
                                     )}
