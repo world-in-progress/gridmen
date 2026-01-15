@@ -17,6 +17,7 @@ router = APIRouter(prefix='/vector', tags=['vector-related apis'])
 @router.post('/save', response_model=BaseResponse)
 def save_feature(node_key: str, lock_id: str | None = None, body: FeatureSaveBody=Body(..., description='save feature')):
     try:
+        print('lock id:', lock_id)
         with noodle.connect(IVector, node_key, 'pw', lock_id=lock_id) as vector:
             vector.save_feature(body.feature_json)
         return BaseResponse(success=True, message='Feature saved successfully')

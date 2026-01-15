@@ -130,18 +130,18 @@ def restore_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(...
         raise HTTPException(status_code=500, detail=f'Failed to recover cells: {str(e)}')
 
 @router.get('/pick', response_class=Response, response_description='Returns picked cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
+def pick_cells_by_feature(node_key: str, lock_id: str, file_or_node_key: str, is_file: bool):
     """
     Pick cells based on features from a .shp or .geojson file.
     The feature_dir parameter should be a path to the feature file accessible by the server.
     """
     # Validate the feature_dir parameter
-    feature_file = Path(feature_dir)
+    feature_file = Path(file_or_node_key)
     file_extension = feature_file.suffix.lower()
     if file_extension not in ['.shp', '.geojson']:
         raise HTTPException(status_code=400, detail=f'Unsupported file type: {file_extension}. Must be .shp or .geojson.')
     if not feature_file.exists() or not feature_file.is_file():
-        raise HTTPException(status_code=404, detail=f'Feature file not found: {feature_dir}')
+        raise HTTPException(status_code=404, detail=f'Feature file not found: {file_or_node_key}')
 
     try:
         # Prepare target spatial reference
@@ -167,13 +167,13 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
         # Set up GDAL/OGR data source
         data_source = ogr.Open(str(feature_file))
         if data_source is None:
-            logging.error(f'GDAL/OGR could not open feature file: {feature_dir}')
-            raise HTTPException(status_code=500, detail=f'Could not open feature file: {feature_dir}')
+            logging.error(f'GDAL/OGR could not open feature file: {file_or_node_key}')
+            raise HTTPException(status_code=500, detail=f'Could not open feature file: {file_or_node_key}')
 
         for i in range(data_source.GetLayerCount()):
             layer = data_source.GetLayer(i)
             if layer is None:
-                logging.warning(f'Could not get layer {i} from {feature_dir}')
+                logging.warning(f'Could not get layer {i} from {file_or_node_key}')
                 continue
             
             # Check if the layer has a same spatial reference as the target EPSG
@@ -182,7 +182,7 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
                 if not source_sr.IsSame(target_sr):
                     raise HTTPException(status_code=500, detail=f'Provided feature file has different EPSG {source_sr.GetAttrValue("AUTHORITY", 1)} than the target EPSG: {target_epsg}')
             elif not source_sr:
-                raise HTTPException(status_code=500, detail=f'Layer {i} in {feature_dir} has no spatial reference.')
+                raise HTTPException(status_code=500, detail=f'Layer {i} in {file_or_node_key} has no spatial reference.')
             
             # Iterate through features in the layer and extract geometries
             feature = layer.GetNextFeature()
@@ -194,8 +194,8 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
                 feature = layer.GetNextFeature()
         
         if not ogr_geometries:
-            logging.warning(f'No geometries found or extracted from feature file: {feature_dir}')
-            raise HTTPException(status_code=400, detail=f'No geometries found in feature file: {feature_dir}')
+            logging.warning(f'No geometries found or extracted from feature file: {file_or_node_key}')
+            raise HTTPException(status_code=400, detail=f'No geometries found in feature file: {file_or_node_key}')
 
         # Get centers of all active grids
         #################################
@@ -204,7 +204,7 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
             active_levels, active_global_ids = patch.get_activated_cell_infos()
 
             if not active_levels or not active_global_ids:
-                logging.info(f'No active cells found to check against features from {feature_dir}')
+                logging.info(f'No active cells found to check against features from {file_or_node_key}')
                 return Response(
                     content=MultiCellInfo(levels=[], global_ids=[]).combine_bytes(),
                     media_type='application/octet-stream'
@@ -239,7 +239,7 @@ def pick_cells_by_feature(node_key: str, feature_dir: str, lock_id: str):
                 picked_global_ids.extend(batch_global_ids)
 
         if not picked_levels:
-            logging.info(f'No activate cell centers found within the features from {feature_dir}')
+            logging.info(f'No activate cell centers found within the features from {file_or_node_key}')
             return Response(
                 content=MultiCellInfo(levels=[], global_ids=[]).combine_bytes(),
                 media_type='application/octet-stream'

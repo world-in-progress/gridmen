@@ -325,12 +325,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 mountParamsString: JSON.stringify(newVector)
             })
 
-            const vectorLinkResponse = await api.node.linkNode('gridmen/IVector/1.0.0', node.nodeInfo, 'w')
-            const lockId = vectorLinkResponse.lock_id
-
             await api.vector.saveVector(node.nodeInfo, null, featureJson)
-
-            await api.node.unlinkNode(node.nodeInfo, lockId)
 
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false

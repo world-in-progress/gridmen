@@ -5,11 +5,10 @@ const API_PREFIX = '/api/vector'
 
 export const saveVector = async (nodeInfo: string, lockId: string | null, featureJson: Record<string, any>) => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-    const url = `${address}${API_PREFIX}/save?node_key=${nodeKey}&lock_id=${lockId}`
+    const url = `${address}${API_PREFIX}/save?node_key=${nodeKey}` + (lockId ? `&lock_id=${lockId}` : '')
 
     try {
         const requestBody = {
-            node_key: nodeKey,
             feature_json: featureJson
         }
 

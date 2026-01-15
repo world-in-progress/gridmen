@@ -69,8 +69,6 @@ export interface VectorJsonComputionResponse extends BaseResponse {
 }
 
 export interface UpdateVectorData {
-    name: string
-    type: string
     color: string
     epsg: string
     feature_json: Record<string, any>

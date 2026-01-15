@@ -32,7 +32,8 @@ class Vector:
         if not self.path.exists():
             raise FileNotFoundError(f'Workspace path {workspace} does not exist')
         
-        meta: VectorMeta = VectorMeta.model_dump_json(loads=self.meta_path.read_text(encoding='utf-8'))
+        # meta: VectorMeta = VectorMeta.model_dump_json(loads=self.meta_path.read_text(encoding='utf-8'))
+        meta: VectorMeta = VectorMeta.model_validate_json(self.meta_path.read_text(encoding='utf-8'))
         self.name = meta.name
         self.epsg = meta.epsg
         self.color = meta.color
@@ -503,4 +504,10 @@ class Vector:
         
         else:
             raise ValueError(f'Unsupported GeoJSON type: {geojson_type}')
+        
+    def terminate(self):
+        """
+        Terminate the resource, clean up if necessary
+        """
+        pass
     
