@@ -485,8 +485,6 @@ class Patch:
         Returns:
             tuple[list[int], list[int]]: activated cells' global ids and levels
         """
-        self._load_patch()
-        
         activated_cells = self.cache[self.cache[ATTR_ACTIVATE] == True]
         levels, global_ids = _decode_index_batch(activated_cells.index.values)
         return levels.tolist(), global_ids.tolist()
@@ -496,8 +494,6 @@ class Patch:
         Returns:
             tuple[list[int], list[int]]: deleted cells' global ids and levels
         """
-        self._load_patch()
-        
         deleted_cells = self.cache[self.cache[ATTR_DELETED] == True]
         levels, global_ids = _decode_index_batch(deleted_cells.index.values)
         return levels.tolist(), global_ids.tolist()
