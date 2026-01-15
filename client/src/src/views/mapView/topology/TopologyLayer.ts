@@ -741,7 +741,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         if (!this.isTransparent) {
             // Mesh Pass
             if (this.hitBuffer.isHitting)
-                console.log('rendering meshes')
                 this.drawCellMeshes()
             // Line Pass
             this.drawCellLines()
