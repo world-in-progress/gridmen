@@ -1,6 +1,7 @@
 import numpy as np
 from pydantic import BaseModel, field_validator
 
+from .node import NodeToken
 from .base import BaseResponse
 
 class PatchMeta(BaseModel):
@@ -66,3 +67,8 @@ class MultiCellInfoResponse(BaseResponse):
         if not isinstance(v, dict):
             raise ValueError('Infos must be a dictionary')
         return v
+
+class PickByFeatureRequest(BaseModel):
+    patch_token: NodeToken
+    file_or_feature_token: NodeToken | str  # if str, it is treated as feature file path related to Shp or GeoJSON
+    

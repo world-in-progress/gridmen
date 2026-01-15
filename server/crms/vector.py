@@ -38,8 +38,11 @@ class Vector:
         self.epsg = meta.epsg
         self.color = meta.color
     
-    def get_geojson_path(self) -> str:
-        return str(self.path / f'{self.name}.geojson')
+    def get_geojson_string(self) -> str:
+        file_path = os.path.join(self.path, self.name + '.geojson')
+        with open(file_path, 'r', encoding='utf-8') as f:
+            geojson_str = f.read()
+        return geojson_str
         
     def save_feature(self, feature_json: dict[str, Any]) -> dict[str, bool | str]:
         feature_path = self.path / f'{self.name}.geojson'

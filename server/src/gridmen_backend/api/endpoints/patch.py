@@ -7,7 +7,7 @@ from functools import partial
 from fastapi import APIRouter, HTTPException, Response, Body
 
 from ...schemas.base import BaseResponse
-from ...schemas.patch import PatchMeta, MultiCellInfo
+from ...schemas.patch import PatchMeta, MultiCellInfo, PickByFeatureRequest
 
 from icrms.ivector import IVector
 from icrms.ipatch import IPatch, PatchSaveInfo, PatchSchema
@@ -130,14 +130,18 @@ def restore_cells(node_key: str, lock_id: str, cell_info_bytes: bytes = Body(...
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to recover cells: {str(e)}')
 
-@router.get('/pick', response_class=Response, response_description='Returns picked cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
-def pick_cells_by_feature(node_key: str, lock_id: str, file_or_vector_node_key: str, is_file: bool):
+@router.post('/pick', response_class=Response, response_description='Returns picked cell information in bytes. Format: [4 bytes for length, followed by level bytes, followed by padding bytes, followed by global id bytes]')
+def pick_cells_by_feature(request: PickByFeatureRequest):
     """
     Pick cells based on features from a .shp or .geojson file.
     The feature_dir parameter should be a path to the feature file accessible by the server.
     """
     # Prepare target spatial reference
     ##################################
+    node_key = request.patch_token.node_key
+    lock_id = request.patch_token.lock_id
+    file_or_vector_node_key = request.file_or_feature_token
+    is_file = isinstance(file_or_vector_node_key, str)
     
     with noodle.connect(IPatch, node_key, 'pr', lock_id=lock_id) as patch:
         schema: PatchSchema = patch.get_schema()
@@ -153,31 +157,41 @@ def pick_cells_by_feature(node_key: str, lock_id: str, file_or_vector_node_key: 
     # Get GDAL/OGR data source from file or vector node
     ###################################################
     
-    # Get feature path
-    if not is_file:
-        with noodle.connect(IVector, file_or_vector_node_key, 'pr') as vector:
-            feature_path = vector.get_geojson_path()
-    else:
-        feature_path = file_or_vector_node_key
-    
-    # Validate the feature_path parameter
-    feature_file = Path(feature_path)
-    file_extension = feature_file.suffix.lower()
-    if file_extension not in ['.shp', '.geojson']:
-        raise HTTPException(status_code=400, detail=f'Unsupported file type: {file_extension}. Must be .shp or .geojson.')
-    if not feature_file.exists() or not feature_file.is_file():
-        raise HTTPException(status_code=404, detail=f'Feature file not found: {feature_path}')
-
     data_source = None
-    try:
-        # Set up GDAL/OGR data source
-        data_source = ogr.Open(str(feature_file))
-        if data_source is None:
-            raise ValueError(f'Could not open data source from {file_or_vector_node_key}')
-    except Exception as e:
-        error_message = f'Error opening data source from {file_or_vector_node_key}: {str(e)}'
-        logging.error(error_message)
-        raise HTTPException(status_code=500, detail=error_message)
+    # Get feature path
+    if is_file:
+        feature_path = file_or_vector_node_key
+        # Validate the feature_path parameter
+        feature_file = Path(feature_path)
+        file_extension = feature_file.suffix.lower()
+        if file_extension not in ['.shp', '.geojson']:
+            raise HTTPException(status_code=400, detail=f'Unsupported file type: {file_extension}. Must be .shp or .geojson.')
+        if not feature_file.exists() or not feature_file.is_file():
+            raise HTTPException(status_code=404, detail=f'Feature file not found: {feature_path}')
+
+        try:
+            # Set up GDAL/OGR data source
+            data_source = ogr.Open(str(feature_file))
+            if data_source is None:
+                raise ValueError(f'Could not open data source from {feature_path}')
+        except Exception as e:
+            error_message = f'Error opening data source from {feature_path}: {str(e)}'
+            logging.error(error_message)
+            raise HTTPException(status_code=500, detail=error_message)
+    else:
+        vector_key = file_or_vector_node_key.node_key
+        vector_lock_id = file_or_vector_node_key.lock_id
+        with noodle.connect(IVector, vector_key, 'pr', lock_id=vector_lock_id) as vector:
+            geojson_string = vector.get_geojson_string()
+        try:
+            # Parse geojson string into OGR data source
+            data_source = ogr.Open(f'GeoJSON:{geojson_string}')
+            if data_source is None:
+                raise ValueError(f'Could not open data source from vector node {vector_key}')
+        except Exception as e:
+            error_message = f'Error opening data source from vector node {vector_key}: {str(e)}'
+            logging.error(error_message)
+            raise HTTPException(status_code=500, detail=error_message)
     
     # Extract WKT of geometries from data source
     ############################################

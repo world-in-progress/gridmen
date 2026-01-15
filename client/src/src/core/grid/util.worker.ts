@@ -64,6 +64,22 @@ export async function getCellInfoByFeature(
     })
 }
 
+export async function getCellInfoByVectorNode(
+    pickInfo: { nodeInfo: string, lockId: string, vectorNodeInfo: string, vectorNodeLockId: string | null },
+    callback: Callback<any>
+) {
+    const result = await api.patch.pickByVectorNode(
+        pickInfo.nodeInfo,
+        pickInfo.lockId,
+        pickInfo.vectorNodeInfo,
+        pickInfo.vectorNodeLockId
+    )
+    callback(null, {
+        levels: result.levels,
+        globalIds: result.globalIds
+    })
+}
+
 export async function getMultiCellRenderVertices(
     this: WorkerSelf & Record<'patchManager', PatchManager>,
     gridInfo: MultiCellBaseInfo,

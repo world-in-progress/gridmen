@@ -146,10 +146,62 @@ export const restoreCells = async (query: MultiCellBaseInfo, nodeInfo: string, l
 
 export const pickByFeature = async (featureDir: string, nodeInfo: string, lockId: string) => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-    const url = `${address}${API_PREFIX}/pick?node_key=${nodeKey}&lock_id=${lockId}&feature_dir=${featureDir}`
+    const url = `${address}${API_PREFIX}/pick`
+    const body = {
+        patch_token: {
+            node_key: nodeKey,
+            lock_id: lockId
+        },
+        file_or_feature_token: featureDir
+    }
 
     try {
-        const response = await fetch(url, { method: 'GET' })
+        const response = await fetch(
+            url,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            }
+        )
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`)
+        }
+
+        const buffer = await response.arrayBuffer()
+        return MultiCellInfoParser.fromBuffer(buffer)
+
+    } catch (error) {
+        throw new Error(`Failed to pick cells by feature: ${error}`)
+    }
+}
+
+export const pickByVectorNode = async (nodeInfo: string, lockId: string, vectorNodeInfo: string, vectorNodeLockId: string | null) => {
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/pick`
+    const body = {
+        patch_token: {
+            node_key: nodeKey,
+            lock_id: lockId
+        },
+        file_or_feature_token: {
+            node_key: vectorNodeInfo,
+        }
+    }
+    if (vectorNodeLockId) {
+        (body.file_or_feature_token as any).lock_id = vectorNodeLockId
+    }
+
+    try {
+        const response = await fetch(
+            url,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            }
+        )
 
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`)

@@ -341,6 +341,19 @@ export default class PatchCore {
         })
     }
 
+    getCellInfoByVectorNode(vectorNodeInfo: string, vectorNodeLockId: string | null, callback?: Function) {
+        this._dispatcher.actor.send('getCellInfoByVectorNode', { nodeInfo: this.nodeInfo, lockId: this._lockId, vectorNodeInfo, vectorNodeLockId }, (_, cellInfos: { levels: Uint8Array, globalIds: Uint32Array }) => {
+            const { levels, globalIds } = cellInfos
+            const cellNum = levels.length
+            const storageIds: number[] = new Array(cellNum)
+            for (let i = 0; i < cellNum; i++) {
+                const id = this._key_storageId_dict.get(levels[i], globalIds[i])! // ! ensured because all activated cells are stored in the cache
+                storageIds[i] = id
+            }
+            callback && callback(storageIds)
+        })
+    }
+
     getChildren(level: number, globalId: number): number[] | null {
         if (level >= this.levelInfos.length || level < 0) return null
 
