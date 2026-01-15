@@ -3,10 +3,8 @@ from typing import Any
 from pydantic import BaseModel
 
 class UpdateFeatureBody(BaseModel):
-    name: str
-    type: str
-    color: str
     epsg: str
+    color: str
     feature_json: dict[str, Any]
 
 # Define ICRM ###########################################################

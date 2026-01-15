@@ -5,12 +5,18 @@ import zipfile
 from typing import Any
 from pathlib import Path
 from osgeo import ogr, osr
+from pydantic import BaseModel
 from icrms.ivector import UpdateFeatureBody
 
 import logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_EPSG = '4326'  # Default EPSG code for GeoJSON storage
+
+class VectorMeta(BaseModel):
+    name: str
+    epsg: str
+    color: str
 
 class Vector:
     """
@@ -19,15 +25,18 @@ class Vector:
     The Vector Resource.  
     Vector is a geometry feature file that can be uploaded to the resource pool.  
     """
-    def __init__(self, name: str, type: str, color: str, epsg: str, workspace: str):
-        self.name = name
-        self.type = type
-        self.epsg = epsg
-        self.color = color
-
+    def __init__(self, workspace: str):
         self.path = Path(workspace)
-        self.path.mkdir(parents=True, exist_ok=True)
 
+        self.meta_path = self.path / 'meta.json'
+        if not self.path.exists():
+            raise FileNotFoundError(f'Workspace path {workspace} does not exist')
+        
+        meta: VectorMeta = VectorMeta.model_dump_json(loads=self.meta_path.read_text(encoding='utf-8'))
+        self.name = meta.name
+        self.epsg = meta.epsg
+        self.color = meta.color
+        
     def save_feature(self, feature_json: dict[str, Any]) -> dict[str, bool | str]:
         feature_path = self.path / f'{self.name}.geojson'
         try:
@@ -89,7 +98,6 @@ class Vector:
             feature_json = json.load(f)
         return {
             'name': self.name,
-            'type': self.type,
             'color': self.color,
             'epsg': self.epsg,
             'feature_json': feature_json
@@ -113,14 +121,19 @@ class Vector:
         return self._transform_geojson_coordinates(geojson_data, DEFAULT_EPSG, self.epsg)
 
     def update_feature(self, update_body: UpdateFeatureBody) -> dict[str, bool | str]:
-        """
-        Update feature
-        """
-        self.name = update_body.name
-        self.type = update_body.type
-        self.color = update_body.color
         self.epsg = update_body.epsg
+        self.color = update_body.color
         feature_json = update_body.feature_json
+        
+        # Update meta information
+        meta = VectorMeta(
+            name=self.name,
+            epsg=self.epsg,
+            color=self.color
+        )
+        with open(self.meta_path, 'w', encoding='utf-8') as f:
+            f.write(meta.model_dump_json(indent=2))
+        
         # Ensure the feature_json is in FeatureCollection format
         file_path = os.path.join(self.path, self.name + '.geojson')
         try:

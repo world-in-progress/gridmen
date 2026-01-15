@@ -10,5 +10,5 @@ node_templates:
     module_path: templates.schema
   - name: patch
     module_path: templates.patch
-  - name: feature
-    module_path: templates.feature
+  - name: vector
+    module_path: templates.vector
