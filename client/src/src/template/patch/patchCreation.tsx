@@ -363,9 +363,6 @@ export default function PatchCreation({
                 mountParamsString: JSON.stringify(patchData)
             })
 
-            console.log('Submitting patch data:', JSON.stringify(patchData))
-
-            // TODO: 清除Marker和Bounds
             clearMarkerByNodeKey(pageContext.current.schema!.schemaNodeKey)
             clearMapPatchBounds(map, node.key)
 

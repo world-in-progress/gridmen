@@ -152,11 +152,13 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                 })
 
                 const drawColor = '#F06B00'
+                const drawColorExpr: any = ['coalesce', ['get', 'user_color'], drawColor]
 
                 const MapboxDrawAny = MapboxDraw as any
                 const draw = new MapboxDrawAny({
                     displayControlsDefault: false,
                     boxSelect: false,
+                    userProperties: true,
                     modes: {
                         ...MapboxDrawAny.modes,
                         draw_rectangle: DrawRectangle
@@ -169,7 +171,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                             'filter': ['all', ['==', '$type', 'Point'], ['==', 'active', 'true']],
                             'paint': {
                                 'circle-radius': 7,
-                                'circle-color': drawColor
+                                'circle-color': drawColorExpr
                             }
                         },
                         // Inactive point style
@@ -179,7 +181,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                             'filter': ['all', ['==', '$type', 'Point'], ['==', 'active', 'false']],
                             'paint': {
                                 'circle-radius': 5,
-                                'circle-color': drawColor
+                                'circle-color': drawColorExpr
                             }
                         },
                         // Line style
@@ -192,7 +194,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                                 'line-join': 'round'
                             },
                             'paint': {
-                                'line-color': drawColor,
+                                'line-color': drawColorExpr,
                                 'line-width': 2,
                                 'line-dasharray': [2, 2]
                             }
@@ -203,8 +205,8 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                             'type': 'fill',
                             'filter': ['all', ['==', '$type', 'Polygon'], ['!=', 'mode', 'static']],
                             'paint': {
-                                'fill-color': drawColor,
-                                'fill-outline-color': drawColor,
+                                'fill-color': drawColorExpr,
+                                'fill-outline-color': drawColorExpr,
                                 'fill-opacity': 0.1
                             }
                         },
@@ -218,7 +220,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                                 'line-join': 'round'
                             },
                             'paint': {
-                                'line-color': drawColor,
+                                'line-color': drawColorExpr,
                                 'line-width': 2,
                                 'line-dasharray': [2, 2]
                             }
@@ -230,7 +232,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                             'filter': ['all', ['==', '$type', 'Point'], ['==', 'meta', 'midpoint']],
                             'paint': {
                                 'circle-radius': 4,
-                                'circle-color': drawColor
+                                'circle-color': drawColorExpr
                             }
                         },
                         // Vertex point style
@@ -240,7 +242,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                             'filter': ['all', ['==', '$type', 'Point'], ['==', 'meta', 'vertex']],
                             'paint': {
                                 'circle-radius': 5,
-                                'circle-color': drawColor
+                                'circle-color': drawColorExpr
                             }
                         }
                     ]

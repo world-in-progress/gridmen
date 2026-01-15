@@ -1,10 +1,7 @@
 import {
-    LucidePointer as SplinePointer,
+    SplinePointer,
     Pencil,
-    Save,
-    Move,
     Trash2,
-    Hand,
     Undo2,
     Redo2,
     MousePointer,
@@ -36,11 +33,13 @@ import type { IViewContext } from "@/views/IViewContext"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Button } from "@/components/ui/button"
-import { useEffect, useReducer, useRef, useState } from "react"
-import { ResourceNode } from "../scene/scene"
-import { Card, CardContent } from "@/components/ui/card"
+import { useCallback, useEffect, useReducer, useRef, useState } from "react"
+import { ResourceNode, ResourceTree } from "../scene/scene"
+import * as api from '../api/apis'
 import { Badge } from "@/components/ui/badge"
 import { MapViewContext } from "@/views/mapView/mapView"
+import { useLayerGroupStore, useToolPanelStore } from "@/store/storeSet"
+import { toast } from "sonner"
 
 interface VectorCreationProps {
     node: IResourceNode
@@ -105,20 +104,10 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
     const [typeSelectDialogOpen, setTypeSelectDialogOpen] = useState(true)
     const [pendingType, setPendingType] = useState<VectorData["type"]>("point")
 
-    const [, triggerRepaint] = useReducer(x => x + 1, 0)
+    const [selectedTool, setSelectedTool] = useState<ToolType>("draw")
+    const selectedToolRef = useRef<ToolType>("draw")
 
-    const getVectorTypeIcon = (type: string) => {
-        switch (type) {
-            case "point":
-                return <Dot className="w-6 h-6 text-blue-500" />
-            case "line":
-                return <Minus className="w-6 h-6 text-green-500" />
-            case "polygon":
-                return <Square className="w-6 h-6 text-purple-500" />
-            default:
-                return null
-        }
-    }
+    const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
     useEffect(() => {
         loadContext()
@@ -141,6 +130,12 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             setTimeout(() => {
                 if (pageContext.current.drawVector && pageContext.current.drawVector.features && pageContext.current.drawVector.features.length > 0) {
                     if (drawInstance) {
+                        // ensure loaded features have color
+                        const loadColor = vectorColorMap.find((item) => item.value === pageContext.current.vectorData.color)?.color ?? "#0ea5e9"
+                        for (const feature of pageContext.current.drawVector.features as any[]) {
+                            feature.properties = feature.properties || {}
+                            feature.properties.user_color = feature.properties.user_color ?? loadColor
+                        }
                         const validVectors: GeoJSON.FeatureCollection = {
                             type: "FeatureCollection",
                             features: pageContext.current.drawVector.features.filter((vector) => {
@@ -153,6 +148,16 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
                         try {
                             drawInstance.add(validVectors)
+                            // apply color to draw features (by id) after add
+                            const all = drawInstance.getAll()
+                            for (const feature of all.features as any[]) {
+                                if (!feature?.id) continue
+                                try {
+                                    drawInstance.setFeatureProperty(feature.id, "user_color", loadColor)
+                                } catch {
+                                    // ignore
+                                }
+                            }
                         } catch (error) {
                             console.error("Failed to add vector:", error);
                         }
@@ -174,6 +179,127 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         // }
     }
 
+    const setSelectedToolSafe = useCallback((tool: ToolType) => {
+        selectedToolRef.current = tool
+        setSelectedTool(tool)
+    }, [])
+
+    const safeChangeMode = useCallback((mode: string, modeOptions?: any) => {
+        try {
+            ; (drawInstance as any)?.changeMode?.(mode, modeOptions)
+        } catch (e) {
+            console.warn("Failed to change draw mode:", e)
+        }
+    }, [drawInstance])
+
+    const getHexColorByValue = useCallback((value: string) => {
+        return vectorColorMap.find((item) => item.value === value)?.color ?? "#0ea5e9"
+    }, [])
+
+    const getDrawModeByType = useCallback((type: VectorData["type"]) => {
+        switch (type) {
+            case "point":
+                return "draw_point"
+            case "line":
+                return "draw_line_string"
+            case "polygon":
+                return "draw_polygon"
+            default:
+                return "simple_select"
+        }
+    }, [])
+
+    const applyVectorColorToDraw = useCallback((hexColor: string) => {
+        if (!drawInstance) return
+        const all = drawInstance.getAll()
+        for (const feature of all.features) {
+            const featureId = (feature as any).id
+            if (!featureId) continue
+            try {
+                drawInstance.setFeatureProperty(featureId, "user_color", hexColor)
+            } catch {
+                // ignore
+            }
+        }
+    }, [drawInstance])
+
+    const syncDrawVectorFromDraw = useCallback(() => {
+        if (!drawInstance) return
+        const all = drawInstance.getAll()
+        pageContext.current.drawVector = all
+        pageContext.current.hasVector = all.features.length > 0
+        triggerRepaint()
+    }, [drawInstance])
+
+    const getVectorTypeIcon = (type: string) => {
+        switch (type) {
+            case "point":
+                return <Dot className="w-6 h-6 text-blue-500" />
+            case "line":
+                return <Minus className="w-6 h-6 text-green-500" />
+            case "polygon":
+                return <Square className="w-6 h-6 text-purple-500" />
+            default:
+                return null
+        }
+    }
+
+
+    useEffect(() => {
+        if (!map || !drawInstance) return
+
+        const onCreate = (e: any) => {
+            const hex = getHexColorByValue(pageContext.current.vectorData.color)
+            if (e?.features && Array.isArray(e.features)) {
+                for (const f of e.features) {
+                    if (!f?.id) continue
+                    try {
+                        drawInstance.setFeatureProperty(f.id, "user_color", hex)
+                    } catch {
+                        // ignore
+                    }
+                }
+            }
+            syncDrawVectorFromDraw()
+
+            // MapboxDraw will switch to simple_select after finishing (e.g. double click).
+            // If we are in Draw tool, re-enter draw mode so user can keep drawing continuously.
+            if (selectedToolRef.current === "draw") {
+                const mode = getDrawModeByType(pageContext.current.vectorData.type)
+                setTimeout(() => safeChangeMode(mode), 0)
+            }
+        }
+
+        const onUpdate = (e: any) => {
+            const hex = getHexColorByValue(pageContext.current.vectorData.color)
+            if (e?.features && Array.isArray(e.features)) {
+                for (const f of e.features) {
+                    if (!f?.id) continue
+                    try {
+                        drawInstance.setFeatureProperty(f.id, "user_color", hex)
+                    } catch {
+                        // ignore
+                    }
+                }
+            }
+            syncDrawVectorFromDraw()
+        }
+
+        const onDelete = () => {
+            syncDrawVectorFromDraw()
+        }
+
+        map.on("draw.create", onCreate)
+        map.on("draw.update", onUpdate)
+        map.on("draw.delete", onDelete)
+
+        return () => {
+            map.off("draw.create", onCreate)
+            map.off("draw.update", onUpdate)
+            map.off("draw.delete", onDelete)
+        }
+    }, [drawInstance, getDrawModeByType, getHexColorByValue, map, safeChangeMode, syncDrawVectorFromDraw])
+
     const handleCreateVector = async () => {
         if (!pageContext.current!.vectorData.name.trim() || !pageContext.current!.vectorData.epsg) return
 
@@ -184,12 +310,48 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             epsg: pageContext.current!.vectorData.epsg,
         }
 
-        const vectorColor = vectorColorMap.find(item => item.value === newVector.color)?.color
+        console.log('Creating vector with data:', newVector)
+
+        const featureJson = drawInstance.getAll()
+        pageContext.current.drawVector = featureJson
+        pageContext.current.hasVector = featureJson.features.length > 0
+
+        console.log('featureJson', featureJson)
+
+        try {
+            await api.node.mountNode({
+                nodeInfo: node.nodeInfo,
+                templateName: 'vector',
+                mountParamsString: JSON.stringify(newVector)
+            })
+
+            const vectorLinkResponse = await api.node.linkNode('gridmen/IVector/1.0.0', node.nodeInfo, 'w')
+            const lockId = vectorLinkResponse.lock_id
+
+            await api.vector.saveVector(node.nodeInfo, null, featureJson)
+
+            await api.node.unlinkNode(node.nodeInfo, lockId)
+
+            node.isTemp = false
+                ; (node as ResourceNode).tree.tempNodeExist = false
+                ; (node.tree as ResourceTree).selectedNode = null
+                ; (node.tree as ResourceTree).notifyDomUpdate()
+
+            const { isEditMode } = useLayerGroupStore.getState()
+            useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
+
+            await (node.tree as ResourceTree).refresh()
+            toast.success('Patch Created successfully')
+        } catch (error) {
+            toast.error(`Failed to create patch: ${error}`)
+        }
+
 
         // setVectorData(newVector)
         // setVectorColor(vectorColor!)
         // pageContext.current!.hasVector = true
         // pageContext.current!.vectorData = newVector
+        // featureJson 就是你要保存/上传到后端的 GeoJSON FeatureCollection
         // const createVectorRes = await apis.vector.createVector.fetch(newVector, node.tree.isPublic)
         // if (!createVectorRes.success) {
         //     toast.error(`Failed to create vector ${newVector.name}`)
@@ -226,8 +388,38 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
     const handleConfirmType = () => {
         pageContext.current.vectorData.type = pendingType
         setTypeSelectDialogOpen(false)
+
+        // default to Draw tool after selecting type
+        setSelectedToolSafe("draw")
+
+        // enter draw mode for chosen type and apply current selected color
+        const mode = getDrawModeByType(pendingType)
+        const hex = getHexColorByValue(pageContext.current.vectorData.color)
+        safeChangeMode(mode)
+        applyVectorColorToDraw(hex)
         triggerRepaint()
     }
+
+    const handleClickDraw = useCallback(() => {
+        setSelectedToolSafe("draw")
+        const mode = getDrawModeByType(pageContext.current.vectorData.type)
+        safeChangeMode(mode)
+    }, [getDrawModeByType, safeChangeMode, setSelectedToolSafe])
+
+    const handleClickSelect = useCallback(() => {
+        setSelectedToolSafe("select")
+        safeChangeMode("simple_select")
+    }, [safeChangeMode, setSelectedToolSafe])
+
+    const handleDeleteSelected = useCallback(() => {
+        if (selectedToolRef.current !== "select") return
+        try {
+            ; (drawInstance as any)?.trash?.()
+        } catch (e) {
+            console.warn("Failed to delete selected features:", e)
+        }
+        syncDrawVectorFromDraw()
+    }, [drawInstance, syncDrawVectorFromDraw])
 
     return (
         <div className="w-full h-full flex flex-col">
@@ -332,51 +524,55 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                 <div>
                                     <h3 className="text-white font-semibold mb-2">Drawing Mode</h3>
                                     <div className="grid grid-cols-2 gap-2">
-                                        <button className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
+                                        <button
+                                            onClick={handleClickDraw}
+                                            className={`${selectedTool === "draw"
+                                                ? "bg-orange-500 hover:bg-orange-600"
+                                                : "bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600"}
+                                                text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer`}
+                                        >
                                             <Pencil className="h-4 w-4" />
                                             <span>Draw</span>
                                             <span className="text-xs opacity-80">[ Ctrl+D ]</span>
                                         </button>
-                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
+                                        <button
+                                            onClick={handleClickSelect}
+                                            className={`${selectedTool === "select"
+                                                ? "bg-orange-500 hover:bg-orange-600"
+                                                : "bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600"}
+                                                text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer`}
+                                        >
                                             <MousePointer className="h-4 w-4" />
                                             <span>Select</span>
                                             <span className="text-xs opacity-80">[ Ctrl+S ]</span>
-                                        </button>
-                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
-                                            <Move className="h-4 w-4" />
-                                            <span>Move</span>
-                                            <span className="text-xs opacity-80">[ Ctrl+M ]</span>
-                                        </button>
-                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
-                                            <Hand className="h-4 w-4" />
-                                            <span>Pan</span>
-                                            <span className="text-xs opacity-80">[ Ctrl+H ]</span>
                                         </button>
                                     </div>
                                 </div>
 
                                 <div>
                                     <h3 className="text-white font-semibold mb-2">Operations</h3>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer">
                                             <Undo2 className="h-4 w-4" />
                                             <span>Undo</span>
                                             <span className="text-xs opacity-80">[ Ctrl+Z ]</span>
                                         </button>
-                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
+                                        <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer">
                                             <Redo2 className="h-4 w-4" />
                                             <span>Redo</span>
                                             <span className="text-xs opacity-80">[ Ctrl+Y ]</span>
                                         </button>
-                                        <button className="bg-red-500 hover:bg-red-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
+                                        <button
+                                            onClick={handleDeleteSelected}
+                                            disabled={selectedTool !== "select"}
+                                            className={`${selectedTool === "select"
+                                                ? "bg-red-500 hover:bg-red-600 cursor-pointer"
+                                                : "bg-slate-700/50 border border-slate-600 opacity-50 cursor-not-allowed"}
+                                                text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all`}
+                                        >
                                             <Trash2 className="h-4 w-4" />
                                             <span>Delete</span>
                                             <span className="text-xs opacity-80">[ Del ]</span>
-                                        </button>
-                                        <button className="bg-green-500 hover:bg-green-600 text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer">
-                                            <Save className="h-4 w-4" />
-                                            <span>Save</span>
-                                            <span className="text-xs opacity-80">[ Ctrl+S ]</span>
                                         </button>
                                     </div>
                                 </div>
@@ -432,6 +628,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                             value={pageContext.current.vectorData.color}
                                             onValueChange={(value: any) => {
                                                 pageContext.current.vectorData.color = value
+                                                applyVectorColorToDraw(getHexColorByValue(value))
                                                 triggerRepaint()
                                             }}
                                         >
