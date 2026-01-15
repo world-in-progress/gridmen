@@ -1270,6 +1270,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }
