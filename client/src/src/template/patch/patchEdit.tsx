@@ -14,6 +14,7 @@ import {
     SquareMousePointer,
     SquareDashedMousePointer,
     SplinePointer,
+    X,
 } from 'lucide-react'
 import store from '@/store/store'
 import {
@@ -62,7 +63,7 @@ interface PageContext {
     isChecking: boolean
     editingState: {
         pick: boolean,
-        select: 'brush' | 'box' | 'feature',
+        select: 'brush' | 'box',
     }
 }
 
@@ -147,32 +148,28 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const highSpeedMode = useSettingStore(state => state.highSpeedMode)
 
     const [topologyLayer, setTopologyLayer] = useState<TopologyLayer | null>(null)
-
     const [checkSwitchOn, setCheckSwitchOn] = useState(false)
-
     const [selectAllDialogOpen, setSelectAllDialogOpen] = useState(false)
     const [deleteSelectDialogOpen, setDeleteSelectDialogOpen] = useState(false)
-
     const [pickingTab, setPickingTab] = useState<boolean>(true)
-    const [selectTab, setSelectTab] = useState<'brush' | 'box' | 'feature'>('brush')
+    const [selectTab, setSelectTab] = useState<'brush' | 'box'>('brush')
     const [activeTopologyOperation, setActiveTopologyOperation] = useState<TopologyOperationType>(null)
-
     const [featurePickResource, setFeaturePickResource] = useState<FeaturePickResource | null>(null)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
     useEffect(() => {
-        loadContext(node as ResourceNode)
+        loadContext()
 
         return () => {
-            unloadContext(node as ResourceNode)
+            unloadContext()
         }
-    }, [node])
+    }, [])
 
-    const loadContext = async (node: ResourceNode) => {
+    const loadContext = async () => {
         if (!map) return
 
-        if (!(node as ResourceNode).lockId) {
+        if ((node as ResourceNode).lockId) {
             const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
             (node as ResourceNode).lockId = linkResponse.lock_id
         }
@@ -221,7 +218,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
         const gridContext: PatchContext = {
             nodeInfo: node.nodeInfo,
-            lockId: node.lockId!,
+            lockId: (node as ResourceNode).lockId!,
             srcCS: `EPSG:${pageContext.current.patch?.epsg}`,
             targetCS: 'EPSG:4326',
             bBox: boundingBox2D(...pageContext.current.patch!.bounds as [number, number, number, number]),
@@ -284,7 +281,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         triggerRepaint()
     }
 
-    const unloadContext = (node: ResourceNode) => {
+    const unloadContext = () => {
 
         // TODO: 无法记录操作按钮的选中状态
         const clg = store.get<CustomLayerGroup>('clg')!
@@ -463,18 +460,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         setDeleteSelectDialogOpen(true)
     }
 
-    const handleFeatureClick = useCallback(() => {
-        setSelectTab('feature')
-        pageContext.current!.editingState.select = 'feature'
-    }, [])
-
     const getFileNameFromPath = (filePath: string) => {
         const normalized = filePath.replace(/\\/g, '/')
         return normalized.split('/').pop() || filePath
     }
 
     const handleUploadFeatureFile = useCallback(async () => {
-        handleFeatureClick()
 
         if (!window.electronAPI || typeof window.electronAPI.openFileDialog !== 'function') {
             toast.error('Electron API not available')
@@ -493,7 +484,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             console.error('Error opening file dialog:', error)
             toast.error('Failed to open file dialog')
         }
-    }, [handleFeatureClick])
+    }, [])
 
     const handleVectorNodeDragOver = (e: React.DragEvent) => {
         e.preventDefault()
@@ -524,26 +515,27 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 return
             }
 
-            handleFeatureClick()
             setFeaturePickResource({
                 kind: 'vector',
                 nodeKey: dragNodeKey,
                 nodeInfo: dragNodeInfo,
                 name: payload.sourceTreeTitle || 'Vector'
             })
+
+            const vectorLinkResponse = await linkNode('gridmen/IVector/1.0.0', dragNodeInfo, 'r')
+
+
         } catch (error) {
             console.error('Invalid drag payload:', error)
             toast.error('Invalid drag data')
         }
     }
 
-    const handleClearFeaturePickResource = useCallback(() => {
+    const handleClearUploadedFeature = () => {
         setFeaturePickResource(null)
-    }, [])
+    }
 
     const handleSelectFeaturePick = useCallback(async () => {
-        handleFeatureClick()
-
         if (!topologyLayer) {
             toast.error('Topology layer not ready')
             return
@@ -590,7 +582,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             store.get<{ on: Function; off: Function }>('isLoading')!.off()
             toast.error('Failed to execute feature pick')
         }
-    }, [featurePickResource, handleFeatureClick, topologyLayer])
+    }, [featurePickResource, topologyLayer])
 
     const onTopologyOperationClick = (operationType: string) => {
         if (highSpeedMode && operationType !== null) {
@@ -653,12 +645,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     pageContext.current!.editingState.select = 'box'
                     setSelectTab('box')
                 }
-                if (event.key === '3') {
-                    event.preventDefault()
-                    pageContext.current!.editingState.select = 'feature'
-                    setSelectTab('feature')
-                    handleFeatureClick()
-                }
                 if (event.key === 'S' || event.key === 's') {
                     event.preventDefault()
                     if (highSpeedMode) {
@@ -703,7 +689,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         setPickingTab,
         handleConfirmDeleteSelect,
         handleConfirmSelectAll,
-        handleFeatureClick,
         selectTab,
         topologyLayer,
         checkSwitchOn,
@@ -1157,35 +1142,18 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                 [ Ctrl+2 ]
                                             </div>
                                         </button>
-                                        {/* <button
-                                            className={`flex-1 py-2 px-3 rounded-md transition-colors duration-200 flex flex-col text-white gap-0.5 text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} 
-                                                            ${selectTab === 'feature' ? 'bg-[#FF8F2E] ' : ' hover:bg-gray-500'}`}
-                                            onClick={() => { !checkSwitchOn && handleFeatureClick() }}
-                                            disabled={checkSwitchOn}
-                                        >
-                                            <div className='flex flex-row gap-1 items-center'>
-                                                <FolderOpen className='h-4 w-4' />
-                                                Feature
-                                            </div>
-                                            <div className={`text-xs ${selectTab === 'feature' && 'text-white'} `}>
-                                                [ Ctrl+3 ]
-                                            </div>
-                                        </button> */}
                                     </div>
-                                    <div className='flex flex-col items-center mb-1 p-1 gap-1 rounded-lg border border-gray-200 shadow-md'>
+                                    <div className='mb-1 p-1 gap-1 shadow-md'>
                                         <div className='flex flex-row gap-1 items-center'>
                                             <FolderOpen className='h-4 w-4' />
                                             <span>Select Grids By Vector</span>
-                                            <div className={`text-xs ${selectTab === 'feature' && 'text-white'} `}>
-                                                [ Ctrl+3 ]
-                                            </div>
                                         </div>
                                         <div className='space-y-2 mt-2'>
                                             <div
                                                 onDragOver={handleVectorNodeDragOver}
                                                 onDragLeave={handleVectorNodeDragLeave}
                                                 onDrop={handleVectorNodeDrop}
-                                                className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
+                                                className='border-2 w-full p-2 border-dashed border-gray-300 rounded-lg text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
                                             >
                                                 {featurePickResource ? (
                                                     <div className='space-y-2'>
@@ -1196,10 +1164,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                                     : `Vector: ${featurePickResource.name}`}
                                                             </span>
                                                             <button
-                                                                onClick={handleClearFeaturePickResource}
+                                                                onClick={() => setFeaturePickResource(null)}
                                                                 className='text-red-500 hover:text-red-700'
                                                             >
-                                                                <CircleOff className='h-4 w-4' />
+                                                                <X className='h-4 w-4' />
                                                             </button>
                                                         </div>
                                                     </div>
@@ -1213,12 +1181,21 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                 )}
                                             </div>
                                             <div className='flex gap-2'>
-                                                <Button
-                                                    onClick={handleUploadFeatureFile}
-                                                    className='flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                                                >
-                                                    Upload
-                                                </Button>
+                                                {featurePickResource ? (
+                                                    <Button
+                                                        onClick={() => setFeaturePickResource(null)}
+                                                        className='flex-1 bg-red-600 hover:bg-red-700 text-white cursor-pointer'
+                                                    >
+                                                        Clear
+                                                    </Button>
+                                                ) : (
+                                                    <Button
+                                                        onClick={handleUploadFeatureFile}
+                                                        className='flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                                                    >
+                                                        Upload
+                                                    </Button>
+                                                )}
                                                 <Button
                                                     onClick={handleSelectFeaturePick}
                                                     disabled={!featurePickResource}

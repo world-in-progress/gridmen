@@ -300,7 +300,12 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         pageContext.current.drawVector = featureJson
         pageContext.current.hasVector = featureJson.features.length > 0
 
-        console.log('featureJson', featureJson)
+        setSelectedToolSafe('select')
+        safeChangeMode('simple_select')
+        drawInstance.deleteAll()
+        pageContext.current.drawVector = null
+        pageContext.current.hasVector = false
+        triggerRepaint()
 
         try {
             await api.node.mountNode({
@@ -322,6 +327,16 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             await (node.tree as ResourceTree).refresh()
             toast.success('Patch Created successfully')
         } catch (error) {
+            try {
+                if (featureJson?.features?.length) {
+                    drawInstance.add(featureJson)
+                    pageContext.current.drawVector = featureJson
+                    pageContext.current.hasVector = true
+                    triggerRepaint()
+                }
+            } catch (restoreError) {
+                console.warn('Failed to restore vector features after error:', restoreError)
+            }
             toast.error(`Failed to create patch: ${error}`)
         }
 
@@ -457,8 +472,6 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                     </div>
                     <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
                         <div className="border-b border-gray-700">
-
-
                             <div className="w-full p-4 space-y-4 border-t border-gray-700">
                                 <div>
                                     <h3 className="text-white font-semibold mb-2">Drawing Mode</h3>
