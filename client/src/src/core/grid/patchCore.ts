@@ -1,9 +1,11 @@
 import proj4 from 'proj4'
+import * as apis from '@/template/api/apis'
 import Dispatcher from '../message/dispatcher'
 import { MercatorCoordinate } from '../math/mercatorCoordinate'
 import { PatchContext, CellCheckInfo, PatchSaveInfo, MultiCellBaseInfo, StructuredCellRenderVertices, CellKeyHashTable } from './types'
+import BoundingBox2D from '../util/boundingBox2D'
 
-proj4.defs('EPSG:2326', "+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs")
+// proj4.defs('EPSG:2326', "+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs")
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
@@ -24,19 +26,18 @@ export default class PatchCore {
     nodeInfo: string
     maxCellNum: number
     levelInfos: PatchLevelInfo[]
-    renderRelativeCenter: Float32Array
+    renderRelativeCenter: Float32Array = new Float32Array([0.0, 0.0])
 
+    // Private patch memory cache
     private _lockId: string
-
-    // Worker dispatcher
-    private _dispatcher: Dispatcher
-
-    // Patch cache
     private _nextStorageId = 0
     private _levelCache: Uint8Array
     private _deletedCache: Uint8Array
     private _globalIdCache: Uint32Array
     private _key_storageId_dict: CellKeyHashTable
+
+    // Worker dispatcher
+    private _dispatcher: Dispatcher
 
     constructor(public context: PatchContext, options: PatchCoreOptions = {}) {
         // Init metadata
@@ -56,48 +57,60 @@ export default class PatchCore {
             this.levelInfos[level] = { width, height }
         })
 
-        // Calculate bounding box center in mercator coordinates for anti-jitter rendering
-        const bBoxCenter: [number, number] = proj4(this.context.srcCS, this.context.targetCS, this.context.bBox.center)
-        const mercatorCenter = MercatorCoordinate.fromLonLat(bBoxCenter)
-        const centerX = encodeFloatToDouble(mercatorCenter[0])
-        const centerY = encodeFloatToDouble(mercatorCenter[1])
-        this.renderRelativeCenter = new Float32Array([...centerX, ...centerY])
-
         // Init dispatcher
         this._dispatcher = new Dispatcher(this, options.workerCount)
 
         // Init patch cache
         this._levelCache = new Uint8Array(this.maxCellNum)
         this._globalIdCache = new Uint32Array(this.maxCellNum)
-        this._deletedCache = new Uint8Array(this.maxCellNum).fill(UNDELETED_FLAG)
         this._key_storageId_dict = new CellKeyHashTable(this.maxCellNum)
+        this._deletedCache = new Uint8Array(this.maxCellNum).fill(UNDELETED_FLAG)
     }
 
-    get bBox() {
+    get bBox(): BoundingBox2D {
         return this.context.bBox
     }
 
-    get srcCRS() {
+    get srcCRS(): string {
         return this.context.srcCS
+    }
+
+    get targetCRS(): string {
+        return this.context.targetCS
     }
 
     get cellNum(): number {
         return this._nextStorageId
     }
 
-    get maxLevel() {
+    get maxLevel(): number {
         return this.levelInfos.length - 1
     }
 
     init(callback?: Function): void {
-        // Clear next storage ID
-        this._nextStorageId = 0
+        // Get src EPSG code (number type)
+        const srcEPSG: number = parseInt(this.srcCRS.split(':')[1])
 
-        // Brodcast actors to init patch manager and initialize patch cache
-        this._dispatcher.broadcast('setCellManager', this.context, () => {
-            // Get activate patch information
-            this._dispatcher.actor.send('getPatchInfo', { nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, baseInfo: MultiCellBaseInfo) => {
-                this.updateMultiCellRenderInfo(baseInfo, callback)
+        // Update proj4 definitions
+        apis.proj.getProj4Defs(srcEPSG).then((proj4Defs) => {
+            proj4.defs(this.srcCRS, proj4Defs)
+
+            // Calculate bounding box center in mercator coordinates for anti-jitter rendering
+            const bBoxCenter: [number, number] = proj4(this.srcCRS, this.targetCRS, this.bBox.center)
+            const mercatorCenter = MercatorCoordinate.fromLonLat(bBoxCenter)
+            const centerX = encodeFloatToDouble(mercatorCenter[0])
+            const centerY = encodeFloatToDouble(mercatorCenter[1])
+            this.renderRelativeCenter = new Float32Array([...centerX, ...centerY])
+
+            // Clear next storage ID
+            this._nextStorageId = 0
+
+            // Brodcast actors to init patch manager and initialize patch cache
+            this._dispatcher.broadcast('setPatchManager', this.context, () => {
+                // Get activate patch information
+                this._dispatcher.actor.send('getPatchInfo', { nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, baseInfo: MultiCellBaseInfo) => {
+                    this.updateMultiCellRenderInfo(baseInfo, callback)
+                })
             })
         })
     }

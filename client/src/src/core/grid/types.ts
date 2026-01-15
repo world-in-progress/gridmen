@@ -1,6 +1,4 @@
 import BoundingBox2D from '../util/boundingBox2D'
-import type { Converter } from 'proj4/dist/lib/core'
-import { MercatorCoordinate } from '../math/mercatorCoordinate'
 
 export type PatchContext = {
     nodeInfo: string

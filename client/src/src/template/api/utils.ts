@@ -8,6 +8,7 @@ export function extractIPFromUrl(url: string): string {
 }
 
 export function decodeNodeInfo(nodeInfo: string): { address: string, nodeKey: string} {
+    console.log('decodeNodeInfo...', nodeInfo)
     const isRemote = nodeInfo.includes('::')
     if (isRemote) {
         const [address, nodeKey] = nodeInfo.split('::')

@@ -56,8 +56,8 @@ interface PatchEditProps {
 
 interface PageContext {
     patch: PatchMeta | null
+    patchCore: PatchCore | null
     topologyLayer: TopologyLayer | null
-    gridCore: PatchCore | null
     isChecking: boolean
     editingState: {
         pick: boolean,
@@ -120,7 +120,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const pageContext = useRef<PageContext>({
         patch: null,
         topologyLayer: null,
-        gridCore: null,
+        patchCore: null,
         isChecking: false,
         editingState: {
             pick: true,
@@ -219,8 +219,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         await gridLayer.initialize(map, map.painter.context.gl)
 
         pageContext.current.topologyLayer = gridLayer
-        gridLayer.gridCore = patchCore
-        pageContext.current.gridCore = patchCore
+        gridLayer.patchCore = patchCore
+        pageContext.current.patchCore = patchCore
 
         setTopologyLayer(pageContext.current.topologyLayer)
         setPickingTab(pageContext.current.editingState.pick)
@@ -260,7 +260,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     }
 
                     pageContext.current.topologyLayer = null
-                    pageContext.current.gridCore = null
+                    pageContext.current.patchCore = null
                 },
             },
         }
@@ -604,7 +604,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }
 
     const handleSaveTopologyState = () => {
-        const core: PatchCore = pageContext.current.gridCore!
+        const core: PatchCore = pageContext.current.patchCore!
         core.save(() => {
             toast.success(`Topology edit state of ${pageContext.current.patch?.name} saved successfully`)
         })
@@ -644,7 +644,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                         </ul>
                     </div>
                     <div className='text-sm w-full flex flex-row items-center justify-between space-x-2'>
-                        <CapacityBar gridCore={pageContext.current.gridCore!} />
+                        <CapacityBar gridCore={pageContext.current.patchCore!} />
                         <div
                             className='bg-sky-500 hover:bg-sky-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
                             onClick={toggleCheckSwitch}

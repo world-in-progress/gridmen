@@ -133,7 +133,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         return this._gridCore?.maxCellNum || DEFAULT_MAX_GRID_NUM
     }
 
-    set gridCore(core: PatchCore) {
+    set patchCore(core: PatchCore) {
         const currentMaxGridNum = this.maxGridNum
         this._gridCore = core // after setting, this.maxGridNum will be updated
         this.startCallback()
@@ -160,7 +160,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         }
     }
 
-    get gridCore(): PatchCore {
+    get patchCore(): PatchCore {
         if (!this._gridCore) {
             const err = new Error('GridCore is not initialized')
             console.error(err)
@@ -383,10 +383,10 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform2fv(gl.getUniformLocation(this._pickingShader, 'centerHigh'), [this.layerGroup.mercatorCenterX[0], this.layerGroup.mercatorCenterY[0]]);
         gl.uniform2fv(gl.getUniformLocation(this._pickingShader, 'centerLow'), [this.layerGroup.mercatorCenterX[1], this.layerGroup.mercatorCenterY[1]]);
         gl.uniformMatrix4fv(gl.getUniformLocation(this._pickingShader, 'pickingMatrix'), false, pickingMatrix)
-        gl.uniform4fv(gl.getUniformLocation(this._pickingShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
+        gl.uniform4fv(gl.getUniformLocation(this._pickingShader, 'relativeCenter'), this.patchCore.renderRelativeCenter)
         gl.uniformMatrix4fv(gl.getUniformLocation(this._pickingShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
 
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.cellNum)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.patchCore.cellNum)
 
         gl.flush()
 
@@ -441,10 +441,10 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform2fv(gl.getUniformLocation(this._pickingShader, 'centerHigh'), [this.layerGroup.mercatorCenterX[0], this.layerGroup.mercatorCenterY[0]]);
         gl.uniform2fv(gl.getUniformLocation(this._pickingShader, 'centerLow'), [this.layerGroup.mercatorCenterX[1], this.layerGroup.mercatorCenterY[1]]);
         gl.uniformMatrix4fv(gl.getUniformLocation(this._pickingShader, 'pickingMatrix'), false, boxPickingMatrix)
-        gl.uniform4fv(gl.getUniformLocation(this._pickingShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
+        gl.uniform4fv(gl.getUniformLocation(this._pickingShader, 'relativeCenter'), this.patchCore.renderRelativeCenter)
         gl.uniformMatrix4fv(gl.getUniformLocation(this._pickingShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
 
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.cellNum)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.patchCore.cellNum)
 
         gl.flush()
 
@@ -476,7 +476,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const ids = Array.isArray(storageIds) ? storageIds : [storageIds]
         if (addMode) {
             // Highlight all grids
-            if (ids.length === this.gridCore.cellNum) {
+            if (ids.length === this.patchCore.cellNum) {
 
                 this.hitBuffer.all = ids
                 gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Uint8Array(this.maxGridNum).fill(this.hitFlag[0]))
@@ -552,12 +552,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.map.triggerRepaint()
 
         // Check information
-        return this.gridCore.check(storageId)
+        return this.patchCore.check(storageId)
     }
 
     executePickGridsByFeature(path: string) {
         this.startCallback()
-        this.gridCore.getCellInfoByFeature(path, (storageIds: number[]) => {
+        this.patchCore.getCellInfoByFeature(path, (storageIds: number[]) => {
             this._hit(storageIds)
             this.endCallback()
             store.get<{ on: Function; off: Function }>('isLoading')!.off();
@@ -567,7 +567,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     executePickAllGrids() {
         this.startCallback()
         const storageIds = new Array<number>()
-        for (let i = 0; i < this.gridCore.cellNum; i++) {
+        for (let i = 0; i < this.patchCore.cellNum; i++) {
             storageIds.push(i)
         }
         this._hit(storageIds)
@@ -593,12 +593,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
         if (storageIds.length === 1) {
             // Fast delete for single grid
-            this.gridCore.deleteCellLocally(storageIds[0], (info: [sourceStorageId: number, targetStorageId: number]) => {
+            this.patchCore.deleteCellLocally(storageIds[0], (info: [sourceStorageId: number, targetStorageId: number]) => {
                 this.copyGPUGrid(info[0], info[1])
                 this.endCallback()
             })
         } else {
-            this.gridCore.deleteCellsLocally(storageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
+            this.patchCore.deleteCellsLocally(storageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
                 for (let i = 0; i < infos[0].length; i++) {
                     this.copyGPUGrid(infos[0][i], infos[1][i])
                 }
@@ -615,7 +615,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const gl = this._gl
 
         // Set grids deleted
-        this.gridCore.markCellsAsDeleted(storageIds, () => {
+        this.patchCore.markCellsAsDeleted(storageIds, () => {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._gridSignalBuffer)
             storageIds.forEach(storageId => {
                 gl.bufferSubData(gl.ARRAY_BUFFER, this.maxGridNum + storageId, this.deletedFlag, 0)
@@ -633,7 +633,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const gl = this._gl
 
         // Set grids undeleted
-        this.gridCore.restoreCells(storageIds, () => {
+        this.patchCore.restoreCells(storageIds, () => {
             gl.bindBuffer(gl.ARRAY_BUFFER, this._gridSignalBuffer)
             storageIds.forEach(storageId => {
                 gl.bufferSubData(gl.ARRAY_BUFFER, this.maxGridNum + storageId, this.undeletedFlag, 0)
@@ -662,7 +662,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         if (subdivideInfos.levels.length === 0) return
         this.startCallback()
 
-        this.gridCore.subdivideCells(subdivideInfos, (renderInfos: any) => {
+        this.patchCore.subdivideCells(subdivideInfos, (renderInfos: any) => {
             this.updateGPUGrids(renderInfos)
             const [fromStorageId, levels] = renderInfos
             const storageIds = Array.from(
@@ -679,21 +679,21 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.startCallback()
 
         // Merge grids
-        this.gridCore.mergeCells(mergeableStorageIds, (info: { childStorageIds: number[], parentInfo: MultiCellBaseInfo }) => {
+        this.patchCore.mergeCells(mergeableStorageIds, (info: { childStorageIds: number[], parentInfo: MultiCellBaseInfo }) => {
             // If no parent grid is provided, just hit the mergable grids and do nothing
             if (info.parentInfo.levels.length === 0) {
                 this._hit(mergeableStorageIds)
                 this.endCallback()
             }
             // Delete child grids
-            this.gridCore.deleteCellsLocally(info.childStorageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
+            this.patchCore.deleteCellsLocally(info.childStorageIds, (infos: [sourceStorageIds: number[], targetStorageIds: number[]]) => {
                 for (let i = 0; i < infos[0].length; i++) {
                     this.copyGPUGrid(infos[0][i], infos[1][i])
                 }
 
-                const fromStorageId = this.gridCore.cellNum
+                const fromStorageId = this.patchCore.cellNum
                 // Update parent grid in grid core and GPU resources
-                this.gridCore.updateMultiCellRenderInfo(info.parentInfo, (renderInfo: any) => {
+                this.patchCore.updateMultiCellRenderInfo(info.parentInfo, (renderInfo: any) => {
                     this.updateGPUGrids(renderInfo)
 
                     // Pick all merged grids
@@ -713,11 +713,11 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const subdivideGlobalIds: number[] = []
         const subdividableStorageIds = this.executeClearSelection()
             .filter(removableStorageId => {
-                const level = this.gridCore.getInfoByStorageId(removableStorageId)[0]
-                const isValid = (level !== this.gridCore.maxLevel) && (!this._gridCore!.isDeleted(removableStorageId))
+                const level = this.patchCore.getInfoByStorageId(removableStorageId)[0]
+                const isValid = (level !== this.patchCore.maxLevel) && (!this._gridCore!.isDeleted(removableStorageId))
                 if (isValid) {
                     subdivideLevels.push(level)
-                    const globalId = this.gridCore.getInfoByStorageId(removableStorageId)[1]
+                    const globalId = this.patchCore.getInfoByStorageId(removableStorageId)[1]
                     subdivideGlobalIds.push(globalId)
                 }
                 return isValid
@@ -774,10 +774,10 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform2fv(gl.getUniformLocation(this._gridMeshShader, 'centerHigh'), [this.layerGroup.mercatorCenterX[0], this.layerGroup.mercatorCenterY[0]]);
         gl.uniform2fv(gl.getUniformLocation(this._gridMeshShader, 'centerLow'), [this.layerGroup.mercatorCenterX[1], this.layerGroup.mercatorCenterY[1]]);
         gl.uniform1f(gl.getUniformLocation(this._gridMeshShader, 'mode'), 0.0)
-        gl.uniform4fv(gl.getUniformLocation(this._gridMeshShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
+        gl.uniform4fv(gl.getUniformLocation(this._gridMeshShader, 'relativeCenter'), this.patchCore.renderRelativeCenter)
         gl.uniformMatrix4fv(gl.getUniformLocation(this._gridMeshShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
 
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.gridCore.cellNum)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.patchCore.cellNum)
 
         gl.disable(gl.BLEND)
     }
@@ -797,9 +797,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.uniform2fv(gl.getUniformLocation(this._gridLineShader, 'centerHigh'), [this.layerGroup.mercatorCenterX[0], this.layerGroup.mercatorCenterY[0]]);
         gl.uniform2fv(gl.getUniformLocation(this._gridLineShader, 'centerLow'), [this.layerGroup.mercatorCenterX[1], this.layerGroup.mercatorCenterY[1]]);
         gl.uniformMatrix4fv(gl.getUniformLocation(this._gridLineShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)
-        gl.uniform4fv(gl.getUniformLocation(this._gridLineShader, 'relativeCenter'), this.gridCore.renderRelativeCenter)
+        gl.uniform4fv(gl.getUniformLocation(this._gridLineShader, 'relativeCenter'), this.patchCore.renderRelativeCenter)
 
-        gl.drawArraysInstanced(gl.LINE_LOOP, 0, 4, this.gridCore.cellNum)
+        gl.drawArraysInstanced(gl.LINE_LOOP, 0, 4, this.patchCore.cellNum)
 
         gl.disable(gl.BLEND)
     }

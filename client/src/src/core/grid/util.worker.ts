@@ -14,7 +14,9 @@ export function setPatchManager(
     callback: Callback<any>
 ) {
     this.patchManager = new PatchManager(context)
-    callback()
+    this.patchManager.init().then(_ => {
+        callback()
+    })
 }
 
 export async function subdivideCells(
@@ -62,11 +64,6 @@ export async function getCellInfoByFeature(
     })
 }
 
-export async function savePatch(nodeInfo: string, lockId: string, callback: Callback<any>) {
-    const result = await api.patch.savePatch(nodeInfo, lockId)
-    callback(null, result)
-}
-
 export async function getMultiCellRenderVertices(
     this: WorkerSelf & Record<'patchManager', PatchManager>,
     gridInfo: MultiCellBaseInfo,
@@ -110,4 +107,16 @@ export async function getPatchInfo(
         deleted: combinedDeleted,
     }
     callback(null, renderInfo)
+}
+
+export async function savePatch(
+    this: WorkerSelf & Record<'patchManager', PatchManager>,
+    data: {
+        nodeInfo: string
+        lockId: string
+    },
+    callback: Callback<any>
+) {
+    const result = await api.patch.savePatch(data.nodeInfo, data.lockId)
+    callback(null, result)
 }

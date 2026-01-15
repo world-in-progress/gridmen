@@ -1,4 +1,5 @@
 import { Class, Klass } from '../types'
+import BoundingBox2D, { boundingBox2D } from './boundingBox2D'
 
 export type Registry = {
     [ key: string ]: {
@@ -33,3 +34,4 @@ export default registry
 
 register(Error, 'Error')
 register(Object, 'Object')
+register(BoundingBox2D, 'BoundingBox2D')

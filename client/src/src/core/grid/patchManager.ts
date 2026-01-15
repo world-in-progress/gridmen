@@ -1,16 +1,13 @@
-import proj4 from 'proj4';
+import proj4 from 'proj4'
+import * as apis from '../../template/api/apis'
 import type { Converter } from 'proj4/dist/lib/core'
+import { MercatorCoordinate } from '../math/mercatorCoordinate'
+import { PatchContext, StructuredCellRenderVertices } from './types'
 
-import {
-    PatchContext,
-    StructuredCellRenderVertices,
-} from './types';
-import { MercatorCoordinate } from '../math/mercatorCoordinate';
-
-proj4.defs(
-    'EPSG:2326',
-    '+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs'
-);
+// proj4.defs(
+//     'EPSG:2326',
+//     '+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs'
+// );
 
 interface GridLevelInfo {
     width: number;
@@ -21,39 +18,50 @@ export type GridInfo = {
     uuId: string;
     level: number;
     globalId: number;
-};
+}
 
 export default class PatchManager {
     private _center: [number, number]
-    private _levelInfos: GridLevelInfo[];
-    private _context: PatchContext;
-    private _projConverter: Converter;
+    private _levelInfos: GridLevelInfo[]
+    private _context: PatchContext
+    private _projConverter!: Converter
 
     constructor(context: PatchContext) {
-        this._projConverter = proj4(
-            context.srcCS,
-            context.targetCS
-        );
-        this._levelInfos = [{ width: 1, height: 1 }];
+        this._levelInfos = [{ width: 1, height: 1 }]
 
-        this._context = context;
+        this._context = context
         this._context.rules.forEach((_, level, rules) => {
-            let width: number, height: number;
+            let width: number, height: number
             if (level == 0) {
-                width = 1;
-                height = 1;
+                width = 1
+                height = 1
             } else {
-                width = this._levelInfos[level - 1].width * rules[level - 1][0];
+                width = this._levelInfos[level - 1].width * rules[level - 1][0]
                 height =
-                    this._levelInfos[level - 1].height * rules[level - 1][1];
+                    this._levelInfos[level - 1].height * rules[level - 1][1]
             }
-            this._levelInfos[level] = { width, height };
-        });
+            this._levelInfos[level] = { width, height }
+        })
 
         this._center = [
             (this._context.bBox.xMin + this._context.bBox.xMax) / 2.0,
             (this._context.bBox.yMin + this._context.bBox.yMax) / 2.0,
         ]
+    }
+
+    async init(): Promise<void> {
+        // Get src EPSG code (number type)
+        const srcEPSG: number = parseInt(this._context.srcCS.split(':')[1])
+
+        // Update proj4 definitions
+        const proj4Defs = await apis.proj.getProj4Defs(srcEPSG)
+        proj4.defs(this._context.srcCS, proj4Defs)
+
+        // Define projection converter
+        this._projConverter = proj4(
+            this._context.srcCS,
+            this._context.targetCS
+        )
     }
 
     set context(context: PatchContext) {
