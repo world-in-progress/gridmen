@@ -27,9 +27,6 @@ import {
     AlertDialogContent,
     AlertDialogDescription,
 } from '@/components/ui/alert-dialog'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Label } from '@/components/ui/label'
 import { linkNode } from '../api/node'
 import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
@@ -76,6 +73,19 @@ interface GridCheckingInfo {
     localId: number
     deleted: boolean
 }
+
+type FeaturePickResource =
+    | {
+        kind: 'file'
+        filePath: string
+        name: string
+    }
+    | {
+        kind: 'vector'
+        nodeKey: string
+        nodeInfo: string
+        name: string
+    }
 
 type TopologyOperationType = 'subdivide' | 'merge' | 'delete' | 'recover' | null
 
@@ -147,14 +157,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const [selectTab, setSelectTab] = useState<'brush' | 'box' | 'feature'>('brush')
     const [activeTopologyOperation, setActiveTopologyOperation] = useState<TopologyOperationType>(null)
 
-    const [featureSourceDialog, setFeatureSourceDialog] = useState(false)
-    const [featureSource, setFeatureSource] = useState<'vector' | 'file' | null>(null)
-    const [draggedVector, setDraggedVector] = useState<{
-        nodeKey: string
-        nodeInfo: string
-        name: string
-    } | null>(null)
-    const [tempFeatureSource, setTempFeatureSource] = useState<'vector' | 'file'>('file')
+    const [featurePickResource, setFeaturePickResource] = useState<FeaturePickResource | null>(null)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
@@ -461,45 +464,36 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }
 
     const handleFeatureClick = useCallback(() => {
-        setFeatureSourceDialog(true)
-        setTempFeatureSource('file')
+        setSelectTab('feature')
+        pageContext.current!.editingState.select = 'feature'
     }, [])
 
-    const handleConfirmFeatureSource = useCallback(() => {
-        setFeatureSource(tempFeatureSource)
-        setFeatureSourceDialog(false)
-        if (tempFeatureSource === 'file') {
-            handleExecuteFeatureByFile()
-        } else {
-            // vector模式：等待用户拖入vector并点击confirm
-            setSelectTab('feature')
-        }
-    }, [tempFeatureSource, selectTab])
+    const getFileNameFromPath = (filePath: string) => {
+        const normalized = filePath.replace(/\\/g, '/')
+        return normalized.split('/').pop() || filePath
+    }
 
-    const handleExecuteFeatureByFile = useCallback(async () => {
-        const currentTab: 'brush' | 'box' | 'feature' = selectTab
-        setSelectTab('feature')
-        if (window.electronAPI && typeof window.electronAPI.openFileDialog === 'function') {
-            try {
-                const filePath = await window.electronAPI.openFileDialog()
-                if (filePath) {
-                    console.log('Selected file path:', filePath)
-                    store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                    topologyLayer!.executePickCellsByFeature(filePath)
-                    setSelectTab(currentTab)
-                } else {
-                    console.log('No file selected')
-                    setSelectTab(currentTab)
-                }
-            } catch (error) {
-                console.error('Error opening file dialog:', error)
-                setSelectTab(currentTab)
-            }
-        } else {
-            console.warn('Electron API not available')
-            setSelectTab(currentTab)
+    const handleUploadFeatureFile = useCallback(async () => {
+        handleFeatureClick()
+
+        if (!window.electronAPI || typeof window.electronAPI.openFileDialog !== 'function') {
+            toast.error('Electron API not available')
+            return
         }
-    }, [selectTab, topologyLayer])
+
+        try {
+            const filePath = await window.electronAPI.openFileDialog()
+            if (!filePath) return
+            setFeaturePickResource({
+                kind: 'file',
+                filePath,
+                name: getFileNameFromPath(filePath)
+            })
+        } catch (error) {
+            console.error('Error opening file dialog:', error)
+            toast.error('Failed to open file dialog')
+        }
+    }, [handleFeatureClick])
 
     const handleVectorNodeDragOver = (e: React.DragEvent) => {
         e.preventDefault()
@@ -515,56 +509,88 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
         const raw = e.dataTransfer.getData('application/gridmen-node') || e.dataTransfer.getData('text/plain')
 
-        const payload = JSON.parse(raw) as {
-            nodeKey: string
-            nodeInfo: string
-            templateName: string
-            sourceTreeTitle: string
+        try {
+            const payload = JSON.parse(raw) as {
+                nodeKey: string
+                nodeInfo: string
+                templateName: string
+                sourceTreeTitle: string
+            }
+
+            const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, templateName } = payload
+
+            if (!dragNodeKey || templateName !== 'vector') {
+                toast.error('Please drag a vector node')
+                return
+            }
+
+            handleFeatureClick()
+            setFeaturePickResource({
+                kind: 'vector',
+                nodeKey: dragNodeKey,
+                nodeInfo: dragNodeInfo,
+                name: payload.sourceTreeTitle || 'Vector'
+            })
+        } catch (error) {
+            console.error('Invalid drag payload:', error)
+            toast.error('Invalid drag data')
         }
-
-        const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, templateName } = payload
-
-        if (!dragNodeKey || templateName !== 'vector') {
-            toast.error('Please drag a vector node')
-            return
-        }
-
-        setDraggedVector({
-            nodeKey: dragNodeKey,
-            nodeInfo: dragNodeInfo,
-            name: payload.sourceTreeTitle || 'Vector'
-        })
     }
 
-    const handleConfirmVectorFeature = useCallback(async () => {
-        if (!draggedVector) {
-            toast.error('Please drag a vector node first')
+    const handleClearFeaturePickResource = useCallback(() => {
+        setFeaturePickResource(null)
+    }, [])
+
+    const handleSelectFeaturePick = useCallback(async () => {
+        handleFeatureClick()
+
+        if (!topologyLayer) {
+            toast.error('Topology layer not ready')
             return
         }
 
-        const currentTab: 'brush' | 'box' | 'feature' = 'brush'
+        if (!featurePickResource) {
+            toast.error('Please drag a vector node or upload a feature file')
+            return
+        }
 
         try {
-            // TODO: 从draggedVector获取vector数据并执行feature选择
-            // 这里需要实现从vector节点获取GeoJSON数据的逻辑
-            console.log('Executing feature selection with vector:', draggedVector)
-            toast.info('Vector feature selection will be implemented')
+            store.get<{ on: Function; off: Function }>('isLoading')!.on()
 
-            // 清理状态
-            setFeatureSource(null)
-            setDraggedVector(null)
-            setSelectTab(currentTab)
+            if (featurePickResource.kind === 'file') {
+                topologyLayer.executePickCellsByFeature(featurePickResource.filePath)
+                return
+            }
+
+            const writeTempGeojson = (window.electronAPI as any)?.writeTempGeojson
+            if (typeof writeTempGeojson !== 'function') {
+                toast.error('writeTempGeojson is not available')
+                store.get<{ on: Function; off: Function }>('isLoading')!.off()
+                return
+            }
+
+            const resp = await (api as any).vector.getVectorFeatureJsonComputation(featurePickResource.nodeInfo, null)
+            const featureJson = resp?.feature_json ?? resp?.data
+            if (!featureJson) {
+                toast.error('Vector feature_json is empty')
+                store.get<{ on: Function; off: Function }>('isLoading')!.off()
+                return
+            }
+
+            const filePath = await writeTempGeojson(JSON.stringify(featureJson))
+            if (!filePath) {
+                toast.error('Failed to create temp geojson')
+                store.get<{ on: Function; off: Function }>('isLoading')!.off()
+                return
+            }
+
+            topologyLayer.executePickCellsByFeature(filePath)
         } catch (error) {
-            console.error('Error executing vector feature:', error)
-            toast.error(`Failed to execute vector feature: ${error}`)
+            console.error('Error executing feature pick:', error)
+            store.get<{ on: Function; off: Function }>('isLoading')!.off()
+            toast.error('Failed to execute feature pick')
         }
-    }, [draggedVector, topologyLayer])
-
-    const handleCancelVectorFeature = useCallback(() => {
-        setFeatureSource(null)
-        setDraggedVector(null)
-        setSelectTab('brush')
-    }, [])
+    }, [featurePickResource, handleFeatureClick, topologyLayer])
 
     const onTopologyOperationClick = (operationType: string) => {
         if (highSpeedMode && operationType !== null) {
@@ -1146,10 +1172,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                             </div>
                                         </button> */}
                                     </div>
-                                    <div className='flex items-center h-[64px] mb-1 p-1 gap-1 rounded-lg border border-gray-200 shadow-md'>
+                                    <div className='flex flex-col items-center mb-1 p-1 gap-1 rounded-lg border border-gray-200 shadow-md'>
                                         <div className='flex flex-row gap-1 items-center'>
                                             <FolderOpen className='h-4 w-4' />
-                                            <span>Feature</span>
+                                            <span>Select Grids By Vector</span>
                                             <div className={`text-xs ${selectTab === 'feature' && 'text-white'} `}>
                                                 [ Ctrl+3 ]
                                             </div>
@@ -1161,12 +1187,16 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                 onDrop={handleVectorNodeDrop}
                                                 className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
                                             >
-                                                {draggedVector ? (
+                                                {featurePickResource ? (
                                                     <div className='space-y-2'>
                                                         <div className='flex items-center justify-between bg-white rounded-md p-2 border border-blue-300'>
-                                                            <span className='text-sm font-medium text-gray-900'>{draggedVector.name}</span>
+                                                            <span className='text-sm font-medium text-gray-900'>
+                                                                {featurePickResource.kind === 'file'
+                                                                    ? `File: ${featurePickResource.name}`
+                                                                    : `Vector: ${featurePickResource.name}`}
+                                                            </span>
                                                             <button
-                                                                onClick={() => setDraggedVector(null)}
+                                                                onClick={handleClearFeaturePickResource}
                                                                 className='text-red-500 hover:text-red-700'
                                                             >
                                                                 <CircleOff className='h-4 w-4' />
@@ -1177,123 +1207,30 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                     <div className='space-y-2 py-1'>
                                                         <SplinePointer className='h-8 w-8 mx-auto text-gray-400 group-hover:text-indigo-500 transition-colors' />
                                                         <p className='text-sm text-gray-400 group-hover:text-indigo-500 transition-colors'>
-                                                            Drag a Vector node here
+                                                            Drag a Vector node here, or Upload a file
                                                         </p>
                                                     </div>
                                                 )}
                                             </div>
                                             <div className='flex gap-2'>
                                                 <Button
-                                                    onClick={handleConfirmVectorFeature}
-                                                    disabled={!draggedVector}
-                                                    className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+                                                    onClick={handleUploadFeatureFile}
+                                                    className='flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
                                                 >
-                                                    Confirm
+                                                    Upload
                                                 </Button>
                                                 <Button
-                                                    onClick={handleCancelVectorFeature}
-                                                    variant='outline'
-                                                    className='flex-1 cursor-pointer text-black'
+                                                    onClick={handleSelectFeaturePick}
+                                                    disabled={!featurePickResource}
+                                                    className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                                                 >
-                                                    Cancel
+                                                    Select
                                                 </Button>
                                             </div>
                                         </div>
                                     </div>
-                                    {/* Vector Drop Area */}
-                                    {featureSource === 'vector' && (
-                                        <div className='space-y-2 mt-2'>
-                                            <div
-                                                onDragOver={handleVectorNodeDragOver}
-                                                onDragLeave={handleVectorNodeDragLeave}
-                                                onDrop={handleVectorNodeDrop}
-                                                className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
-                                            >
-                                                {draggedVector ? (
-                                                    <div className='space-y-2'>
-                                                        <div className='flex items-center justify-between bg-white rounded-md p-2 border border-blue-300'>
-                                                            <span className='text-sm font-medium text-gray-900'>{draggedVector.name}</span>
-                                                            <button
-                                                                onClick={() => setDraggedVector(null)}
-                                                                className='text-red-500 hover:text-red-700'
-                                                            >
-                                                                <CircleOff className='h-4 w-4' />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className='space-y-2 py-1'>
-                                                        <SplinePointer className='h-8 w-8 mx-auto text-gray-400 group-hover:text-indigo-500 transition-colors' />
-                                                        <p className='text-sm text-gray-400 group-hover:text-indigo-500 transition-colors'>
-                                                            Drag a Vector node here
-                                                        </p>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className='flex gap-2'>
-                                                <Button
-                                                    onClick={handleConfirmVectorFeature}
-                                                    disabled={!draggedVector}
-                                                    className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-                                                >
-                                                    Confirm
-                                                </Button>
-                                                <Button
-                                                    onClick={handleCancelVectorFeature}
-                                                    variant='outline'
-                                                    className='flex-1 cursor-pointer text-black'
-                                                >
-                                                    Cancel
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             </div>
-                            {/* Feature Source Dialog */}
-                            <Dialog open={featureSourceDialog} onOpenChange={setFeatureSourceDialog}>
-                                <DialogContent className='bg-white text-slate-900'>
-                                    <DialogHeader>
-                                        <DialogTitle className='text-slate-900'>Select Feature Source</DialogTitle>
-                                        <DialogDescription className='text-slate-600'>
-                                            Choose how you want to provide the feature data
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <div className='space-y-4 py-4'>
-                                        <RadioGroup value={tempFeatureSource} onValueChange={(value) => setTempFeatureSource(value as 'vector' | 'file')}>
-                                            <div className='flex items-center space-x-2 p-3 rounded-md border border-slate-200 hover:bg-slate-50 cursor-pointer'>
-                                                <RadioGroupItem value='file' id='file' />
-                                                <Label htmlFor='file' className='flex-1 cursor-pointer text-slate-900'>
-                                                    <div className='font-medium'>Upload File</div>
-                                                    <div className='text-sm text-slate-500'>Select a file from your computer</div>
-                                                </Label>
-                                            </div>
-                                            <div className='flex items-center space-x-2 p-3 rounded-md border border-slate-200 hover:bg-slate-50 cursor-pointer'>
-                                                <RadioGroupItem value='vector' id='vector' />
-                                                <Label htmlFor='vector' className='flex-1 cursor-pointer text-slate-900'>
-                                                    <div className='font-medium'>Drag Vector Node</div>
-                                                    <div className='text-sm text-slate-500'>Drag a vector node from the resource tree</div>
-                                                </Label>
-                                            </div>
-                                        </RadioGroup>
-                                    </div>
-                                    <div className='flex justify-end gap-2'>
-                                        <Button
-                                            variant='outline'
-                                            onClick={() => setFeatureSourceDialog(false)}
-                                            className='cursor-pointer'
-                                        >
-                                            Cancel
-                                        </Button>
-                                        <Button
-                                            onClick={handleConfirmFeatureSource}
-                                            className='bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                                        >
-                                            Confirm
-                                        </Button>
-                                    </div>
-                                </DialogContent>
-                            </Dialog>
                             <div className='space-y-2'>
                                 <h1 className='text-2xl font-bold text-white'>Topology</h1>
                                 <div className='flex items-center h-[56px] mt-2 p-1 space-x-1 border border-gray-200 rounded-lg shadow-md'>
