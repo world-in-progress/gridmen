@@ -116,17 +116,34 @@ function FrameworkShell() {
             treeOfNode.notifyDomUpdate()
         }
 
+        const isDestructiveAction = (() => {
+            if (typeof menuItem !== 'string') return false
+            const key = menuItem.toLowerCase()
+            return key.includes('delete') || key.includes('remove') || key.includes('unmount') || key.includes('unlink')
+        })()
+
         // IMPORTANT: If template action is async (e.g. linkNode -> sets lockId),
         // wait for it before applying selection + switching tabs, so we don't briefly render
         // this node under the previous tab (often 'create') and then jump again.
         const maybePromise = node.template?.handleMenuOpen(node, menuItem)
         const isThenable = !!maybePromise && typeof (maybePromise as any).then === 'function'
 
-        if (isThenable && nextTab) {
+        // Destructive actions shouldn't change selection/tab; selecting the node would
+        // briefly render its current tab (often 'create') which looks like a navigation jump.
+        if (isDestructiveAction) {
+            if (isThenable) {
+                ; (maybePromise as Promise<void>).catch((err) => {
+                    console.error('handleMenuOpen failed:', err)
+                })
+            }
+            return
+        }
+
+        if (isThenable) {
             ; (maybePromise as Promise<void>)
                 .then(() => {
                     applySelection()
-                    useToolPanelStore.getState().setActiveTab(nextTab!)
+                    if (nextTab) useToolPanelStore.getState().setActiveTab(nextTab)
                 })
                 .catch((err) => {
                     console.error('handleMenuOpen failed:', err)
@@ -134,11 +151,9 @@ function FrameworkShell() {
             return
         }
 
-        // Sync path (or no tab switch): apply selection immediately.
+        // Sync path: apply selection immediately.
         applySelection()
-        if (nextTab) {
-            useToolPanelStore.getState().setActiveTab(nextTab)
-        }
+        if (nextTab) useToolPanelStore.getState().setActiveTab(nextTab)
     }, [privateTree, publicTree])
 
     const handleNodeRemove = useCallback((node: IResourceNode) => {

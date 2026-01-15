@@ -283,9 +283,11 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const unloadContext = (node: ResourceNode) => {
 
+        // TODO: 无法记录操作按钮的选中状态
         const clg = store.get<CustomLayerGroup>('clg')!
         clg.removeLayer('TopologyLayer')
 
+        console.log(pageContext.current.editingState)
         pageContext.current.editingState.select = selectTab
         pageContext.current.editingState.pick = pickingTab
         pageContext.current.isChecking = checkSwitchOn
@@ -1129,7 +1131,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                 [ Ctrl+2 ]
                                             </div>
                                         </button>
-                                        <button
+                                        {/* <button
                                             className={`flex-1 py-2 px-3 rounded-md transition-colors duration-200 flex flex-col text-white gap-0.5 text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} 
                                                             ${selectTab === 'feature' ? 'bg-[#FF8F2E] ' : ' hover:bg-gray-500'}`}
                                             onClick={() => { !checkSwitchOn && handleFeatureClick() }}
@@ -1142,7 +1144,61 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                             <div className={`text-xs ${selectTab === 'feature' && 'text-white'} `}>
                                                 [ Ctrl+3 ]
                                             </div>
-                                        </button>
+                                        </button> */}
+                                    </div>
+                                    <div className='flex items-center h-[64px] mb-1 p-1 gap-1 rounded-lg border border-gray-200 shadow-md'>
+                                        <div className='flex flex-row gap-1 items-center'>
+                                            <FolderOpen className='h-4 w-4' />
+                                            <span>Feature</span>
+                                            <div className={`text-xs ${selectTab === 'feature' && 'text-white'} `}>
+                                                [ Ctrl+3 ]
+                                            </div>
+                                        </div>
+                                        <div className='space-y-2 mt-2'>
+                                            <div
+                                                onDragOver={handleVectorNodeDragOver}
+                                                onDragLeave={handleVectorNodeDragLeave}
+                                                onDrop={handleVectorNodeDrop}
+                                                className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
+                                            >
+                                                {draggedVector ? (
+                                                    <div className='space-y-2'>
+                                                        <div className='flex items-center justify-between bg-white rounded-md p-2 border border-blue-300'>
+                                                            <span className='text-sm font-medium text-gray-900'>{draggedVector.name}</span>
+                                                            <button
+                                                                onClick={() => setDraggedVector(null)}
+                                                                className='text-red-500 hover:text-red-700'
+                                                            >
+                                                                <CircleOff className='h-4 w-4' />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className='space-y-2 py-1'>
+                                                        <SplinePointer className='h-8 w-8 mx-auto text-gray-400 group-hover:text-indigo-500 transition-colors' />
+                                                        <p className='text-sm text-gray-400 group-hover:text-indigo-500 transition-colors'>
+                                                            Drag a Vector node here
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className='flex gap-2'>
+                                                <Button
+                                                    onClick={handleConfirmVectorFeature}
+                                                    disabled={!draggedVector}
+                                                    className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+                                                >
+                                                    Confirm
+                                                </Button>
+                                                <Button
+                                                    onClick={handleCancelVectorFeature}
+                                                    variant='outline'
+                                                    className='flex-1 cursor-pointer text-black'
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
                                     </div>
                                     {/* Vector Drop Area */}
                                     {featureSource === 'vector' && (
