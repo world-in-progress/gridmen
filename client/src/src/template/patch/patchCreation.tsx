@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMapPatchBounds, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
 import { PatchData } from './types'
 
 interface PatchCreationProps {
@@ -257,7 +257,7 @@ export default function PatchCreation({
             pageContext.current.originBounds = [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]]
             await adjustCoords()
             pageContext.current.inputBounds = pageContext.current.convertedBounds
-            addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], '4326')
+            addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], node.key)
         }
         document.removeEventListener('rectangle-draw-complete', onDrawComplete)
         setIsDrawingBounds(false)
@@ -367,6 +367,7 @@ export default function PatchCreation({
 
             // TODO: 清除Marker和Bounds
             clearMarkerByNodeKey(node.key)
+            clearMapPatchBounds(map, node.key)
 
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
