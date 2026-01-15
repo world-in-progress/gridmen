@@ -37,6 +37,9 @@ class Vector:
         self.name = meta.name
         self.epsg = meta.epsg
         self.color = meta.color
+    
+    def get_geojson_path(self) -> str:
+        return str(self.path / f'{self.name}.geojson')
         
     def save_feature(self, feature_json: dict[str, Any]) -> dict[str, bool | str]:
         feature_path = self.path / f'{self.name}.geojson'

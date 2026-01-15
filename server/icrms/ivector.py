@@ -11,6 +11,9 @@ class UpdateFeatureBody(BaseModel):
 
 @cc.icrm(namespace='gridmen', version='1.0.0')
 class IVector:
+    def get_geojson_path(self) -> str:
+        ...
+    
     def save_feature(self, feature_json: dict[str, Any]) -> dict[str, bool | str]:
         ...
 
