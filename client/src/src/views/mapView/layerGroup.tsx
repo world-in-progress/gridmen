@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin, Square, MapPinned, PencilRuler } from "lucide-react"
+import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, Trash2, GripVertical, MapPin, Square, MapPinned, PencilRuler, SquaresUnite, SplinePointer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/utils/utils"
@@ -264,14 +264,27 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
     }
 
     const handleDeleteLayer = (layer: Layer) => {
+        const node = layer.node
+        if (node) {
+            const tree = node.tree as ResourceTree
+            if (tree.selectedNode?.id === node.id) {
+                tree.selectedNode = null
+                tree.notifyDomUpdate()
+                useToolPanelStore.getState().setActiveTab('create')
+            }
+        }
+
         setLayers(prev => {
             const { layers: nextLayers } = findAndRemoveLayer(prev, layer.id)
             return nextLayers
         })
 
-        // 同步维护 ResourceNode 列表
-        removeLayerNode(layer.node!.key)
-        layer.node!.close()
+        if (layer.node) {
+            removeLayerNode(layer.node.key)
+            layer.node.close().catch((err) => {
+                console.warn('Failed to close layer node:', err)
+            })
+        }
 
         setExpandedGroups(prev => {
             if (!prev.has(layer.id)) return prev
@@ -282,10 +295,21 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
     }
 
     const handleRemoveAllLayers = () => {
-        // 只清空 Resource Node 图层组内部的图层，不移除 Resource Node 组本身
         const resourceGroup = getResourceNodeGroup(layers)
         const nodesToClose = resourceGroup?.children ? collectLayerNodes(resourceGroup.children) : []
-        nodesToClose.forEach((n) => n.close())
+
+        nodesToClose.forEach((n) => {
+            const tree = n.tree as ResourceTree
+            if (tree.selectedNode?.id === n.id) {
+                tree.selectedNode = null
+                tree.notifyDomUpdate()
+                useToolPanelStore.getState().setActiveTab('create')
+            }
+
+            n.close().catch((err) => {
+                console.warn('Failed to close layer node:', err)
+            })
+        })
 
         setLayers((prev) =>
             prev.map((layer) => {
@@ -312,6 +336,10 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     return (layer.visible ? <MapPin className="w-4 h-4 text-red-500" /> : <MapPin className="w-4 h-4 text-gray-500" />)
                 case 'patch':
                     return (layer.visible ? <Square className="w-4 h-4 text-sky-500" /> : <Square className="w-4 h-4 text-gray-500" />)
+                case 'grid':
+                    return (layer.visible ? <SquaresUnite className="w-4 h-4 text-amber-500" /> : <Square className="w-4 h-4 text-gray-500" />)
+                case 'vector':
+                    return (layer.visible ? <SplinePointer className="w-4 h-4 text-indigo-500" /> : <Square className="w-4 h-4 text-gray-500" />)
                 default:
                     return <Layers className="w-4 h-4 text-gray-400" />
             }

@@ -31,7 +31,7 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
         //     (node as ResourceNode).lockId = linkResponse.lock_id
         // }
 
-        if ((node as ResourceNode).mountParams !== null) {
+        if ((node as ResourceNode).mountParams === undefined) {
             const schemaNode = await api.node.getNodeParams(node.nodeInfo)
             const parsed = JSON.parse((schemaNode as unknown as any).mount_params) as SchemaData
             (node as ResourceNode).mountParams = parsed

@@ -297,8 +297,8 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         console.log('Creating vector with data:', newVector)
 
         const featureJson = drawInstance.getAll()
-        pageContext.current.drawVector = featureJson
-        pageContext.current.hasVector = featureJson.features.length > 0
+        // pageContext.current.drawVector = featureJson
+        // pageContext.current.hasVector = featureJson.features.length > 0
 
         setSelectedToolSafe('select')
         safeChangeMode('simple_select')

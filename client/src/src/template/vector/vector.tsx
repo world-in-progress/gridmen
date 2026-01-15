@@ -79,8 +79,12 @@ export default class VectorTemplate implements ITemplate {
                 useToolPanelStore.getState().setActiveTab('create')
                 break
             case VectorMenuItem.CHECK_VECTOR: {
-                const patchInfo = await api.node.getNodeParams(node.nodeInfo);
-                (node as ResourceNode).mountParams = patchInfo
+                if (!(node as ResourceNode).lockId) {
+                    const linkResponse = await linkNode('gridmen/IVector/1.0.0', node.nodeInfo, 'r');
+                    (node as ResourceNode).lockId = linkResponse.lock_id
+                }
+                const vectorInfo = await api.vector.getVector(node.nodeInfo, (node as ResourceNode).lockId!);
+                (node as ResourceNode).mountParams = vectorInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break
@@ -89,8 +93,8 @@ export default class VectorTemplate implements ITemplate {
                     const linkResponse = await linkNode('gridmen/IVector/1.0.0', node.nodeInfo, 'w');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
-                const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
-                (node as ResourceNode).mountParams = patchInfo
+                const vectorInfo = await api.vector.getVector(node.nodeInfo, (node as ResourceNode).lockId!);
+                (node as ResourceNode).mountParams = vectorInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
             }
                 break

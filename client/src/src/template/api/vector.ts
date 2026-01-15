@@ -59,9 +59,9 @@ export const saveVector = async (nodeInfo: string, lockId: string | null, featur
 // }
 
 
-export const getVector = async (nodeInfo: string, lockId: string) => {
+export const getVector = async (nodeInfo: string, lockId: string | null) => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-    const url = `${address}${API_PREFIX}/?node_key=${nodeKey}&lock_id=${lockId}`
+    const url = `${address}${API_PREFIX}/?node_key=${nodeKey}` + (lockId ? `&lock_id=${lockId}` : '')
 
     try {
         const response = await fetch(url, { method: 'GET' })

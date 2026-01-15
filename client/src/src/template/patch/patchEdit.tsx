@@ -66,6 +66,7 @@ interface PageContext {
         select: 'brush' | 'box',
     }
     vectorLockId: string | null
+    vectorData: Record<string, any> | null
 }
 
 interface GridCheckingInfo {
@@ -129,9 +130,68 @@ const topologyOperations = [
     },
 ]
 
+const vectorColorMap = [
+    { value: "sky-500", color: "#0ea5e9", name: "Sky" },
+    { value: "green-500", color: "#22c55e", name: "Green" },
+    { value: "red-500", color: "#ef4444", name: "Red" },
+    { value: "purple-500", color: "#a855f7", name: "Purple" },
+    { value: "yellow-300", color: "#FFDF20", name: "Yellow" },
+    { value: "orange-500", color: "#FF6900", name: "Orange" },
+    { value: "pink-500", color: "#ec4899", name: "Pink" },
+    { value: "indigo-500", color: "#6366f1", name: "Indigo" },
+]
+
+const getHexColorByValue = (value: string | undefined | null) => {
+    return vectorColorMap.find((item) => item.value === value)?.color ?? "#0ea5e9"
+}
+
+const toPreviewFeatureCollection = (input: any, forcedHexColor: string): GeoJSON.FeatureCollection => {
+    const features = Array.isArray(input?.features) ? input.features : []
+
+    const validFeatures = features
+        .filter((f: any) => {
+            const t = f?.geometry?.type
+            if (!t) return false
+            if (t === 'Polygon') {
+                const ring = f?.geometry?.coordinates?.[0]
+                return Array.isArray(ring) && ring.length >= 4
+            }
+            if (t === 'MultiPolygon') {
+                const firstRing = f?.geometry?.coordinates?.[0]?.[0]
+                return Array.isArray(firstRing) && firstRing.length >= 4
+            }
+            if (t === 'LineString') {
+                const coords = f?.geometry?.coordinates
+                return Array.isArray(coords) && coords.length >= 2
+            }
+            if (t === 'Point') {
+                const coords = f?.geometry?.coordinates
+                return Array.isArray(coords) && coords.length >= 2
+            }
+            return true
+        })
+        .map((f: any) => {
+            const id = f?.id ?? (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+            return {
+                ...f,
+                id,
+                properties: {
+                    ...(f?.properties ?? {}),
+                    user_color: forcedHexColor,
+                },
+            }
+        })
+
+    return {
+        type: 'FeatureCollection',
+        features: validFeatures,
+    }
+}
+
 export default function PatchEdit({ node, context }: PatchEditProps) {
     const mapContext = context as MapViewContext
     const map = mapContext.map
+    const drawInstance = mapContext.drawInstance
 
     const pageContext = useRef<PageContext>({
         patch: null,
@@ -143,6 +203,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             select: 'brush',
         },
         vectorLockId: null,
+        vectorData: null,
     })
 
     const gridInfo = useRef<GridCheckingInfo | null>(null)
@@ -265,15 +326,9 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     } catch (err) {
                         console.error('PatchEdit cleanup failed to remove TopologyLayer:', err)
                     }
-
-                    // Restore map interactions/cursor (safe no-ops if map is gone)
-                    try {
-                        map.dragPan.enable()
-                        map.scrollZoom.enable()
-                        if (map.getCanvas()) map.getCanvas().style.cursor = ''
-                    } catch {
-                        // ignore
-                    }
+                    map.dragPan.enable()
+                    map.scrollZoom.enable()
+                    if (map.getCanvas()) map.getCanvas().style.cursor = ''
 
                     pageContext.current.topologyLayer = null
                     pageContext.current.patchCore = null
@@ -530,6 +585,29 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 name: payload.sourceTreeTitle || 'Vector'
             })
 
+            const vectorData = await api.vector.getVector(dragNodeInfo, dragNodeLockId || '')
+            console.log('Dragged vector data:', vectorData.data)
+            pageContext.current.vectorData = vectorData.data
+
+            try {
+                const hex = getHexColorByValue((vectorData.data as any)?.color)
+                const fc = toPreviewFeatureCollection((vectorData.data as any)?.feature_json, hex)
+
+                if (drawInstance) {
+                    drawInstance.deleteAll()
+                    if (fc.features.length > 0) {
+                        drawInstance.add(fc as any)
+                        const all = drawInstance.getAll()
+                        for (const feature of all.features as any[]) {
+                            if (!feature?.id) continue
+                            drawInstance.setFeatureProperty(feature.id, 'user_color', hex)
+                        }
+                    }
+                }
+            } catch (renderErr) {
+                console.warn('Failed to render dragged vector on map:', renderErr)
+            }
+
             triggerRepaint()
         } catch (error) {
             console.error('Invalid drag payload:', error)
@@ -540,9 +618,14 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const handleClearUploadedFeature = () => {
         setFeaturePickResource(null)
 
-        // if () {
-        //     await unlinkNode('gridmen/IVector/1.0.0', featurePickResource!.nodeInfo, 'r', featurePickResource!.nodeKey)
-        // }
+        try {
+            drawInstance?.deleteAll()
+        } catch (e) {
+            console.warn('Failed to clear draw preview:', e)
+        }
+
+        pageContext.current.vectorLockId = null
+        pageContext.current.vectorData = null
     }
 
     const handleSelectFeaturePick = useCallback(async () => {
@@ -1153,8 +1236,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                                     : `Vector: ${featurePickResource.name}`}
                                                             </span>
                                                             <button
-                                                                onClick={() => setFeaturePickResource(null)}
-                                                                className='text-red-500 hover:text-red-700'
+                                                                onClick={handleClearUploadedFeature}
+                                                                className='text-red-500 hover:text-red-600 cursor-pointer'
                                                             >
                                                                 <X className='h-4 w-4' />
                                                             </button>
@@ -1172,7 +1255,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                             <div className='flex gap-2'>
                                                 {featurePickResource ? (
                                                     <Button
-                                                        onClick={() => setFeaturePickResource(null)}
+                                                        onClick={handleClearUploadedFeature}
                                                         className='flex-1 bg-red-600 hover:bg-red-700 text-white cursor-pointer'
                                                     >
                                                         Clear

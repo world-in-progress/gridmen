@@ -79,21 +79,30 @@ export default class SchemaTemplate implements ITemplate {
                     const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
-                const schemaInfo = await api.node.getNodeParams(node.nodeInfo);
-                (node as ResourceNode).mountParams = schemaInfo
-                useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
-            }
-                break
-            case SchemaMenuItem.EDIT_SCHEMA:
-                {
-                    if (!(node as ResourceNode).lockId) {
-                        const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
-                        (node as ResourceNode).lockId = linkResponse.lock_id
-                    }
-                    const schemaInfo = await api.node.getNodeParams(node.nodeInfo)
-                        ; (node as ResourceNode).mountParams = schemaInfo
+                if ((node as ResourceNode).mountParams === undefined) {
+                    const schemaNode = await api.node.getNodeParams(node.nodeInfo)
+                    const parsed = JSON.parse((schemaNode as unknown as any).mount_params)
+                        ; (node as ResourceNode).mountParams = parsed
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                } else {
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
                 }
+            }
+                break
+            case SchemaMenuItem.EDIT_SCHEMA: {
+                if (!(node as ResourceNode).lockId) {
+                    const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
+                    (node as ResourceNode).lockId = linkResponse.lock_id
+                }
+                if ((node as ResourceNode).mountParams === undefined) {
+                    const schemaNode = await api.node.getNodeParams(node.nodeInfo)
+                    const parsed = JSON.parse((schemaNode as unknown as any).mount_params)
+                        ; (node as ResourceNode).mountParams = parsed
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                } else {
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                }
+            }
                 break
             case SchemaMenuItem.DELETE_SCHEMA:
                 {
