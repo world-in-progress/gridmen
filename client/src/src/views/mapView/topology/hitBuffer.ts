@@ -25,6 +25,10 @@ export default class HitBuffer {
         }
     }
 
+    get isHitting(): boolean {
+        return this._hitCount > 0
+    }
+
     isHit(index: number): boolean {
         return this._hitBuffer[index] != 0
     }
