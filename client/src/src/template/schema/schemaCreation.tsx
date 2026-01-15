@@ -423,7 +423,6 @@ export default function SchemaCreation({
             setGeneralMessage('Created successfully')
             await (node.tree as ResourceTree).refresh()
             toast.success('Schema Created successfully')
-
         } catch (error) {
             setGeneralMessage(`Failed to create schema: ${error}`)
             toast.error(`Failed to create schema: ${error}`)

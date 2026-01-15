@@ -1,6 +1,6 @@
 import {
     BaseResponse,
-    GetNodeInfoParams,
+    GetNodeMetaInfoParams,
     LinkNodeResponse,
     MountNodeParams,
     NodeMeta,

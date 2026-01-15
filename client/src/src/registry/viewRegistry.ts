@@ -7,6 +7,7 @@ import DefaultTemplate from "@/template/default/default"
 import DefaultView from "@/views/defaultView/defaultView"
 import MapViewComponent from "@/views/mapView/mapViewComponent"
 import TableViewComponent from "@/views/tableView/tableViewComponent"
+import VectorTemplate from "@/template/vector/vector"
 
 export interface NodeTemplateFunctionSet {
     check: Function | null
@@ -48,6 +49,11 @@ const _VIEW_REGISTRY: Record<string, ViewContent> = {
                 check: GridTemplate.checkMapView,
                 create: GridTemplate.creationMapView,
                 edit: GridTemplate.editMapView
+            },
+            [VectorTemplate.templateName]: {
+                check: VectorTemplate.checkMapView,
+                create: VectorTemplate.creationMapView,
+                edit: VectorTemplate.editMapView
             }
         }
     },
