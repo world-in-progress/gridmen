@@ -36,6 +36,7 @@ export const convertPointCoordinate = async (originPoint: [number, number], from
 }
 
 const markerMap = new Map<string, mapboxgl.Marker>()
+const patchBoundsMap = new Map<string, { sourceId: string, fillLayerId: string, outlineLayerId: string }>()
 
 export const clearMapAllMarkers = () => {
     markerMap.forEach((marker) => {
@@ -165,9 +166,23 @@ export const stopDrawRectangle = (map: mapboxgl.Map, drawInstance: MapboxDraw) =
     }
 }
 
+export const clearMapAllPatchBounds = (map: mapboxgl.Map) => {
+    patchBoundsMap.forEach((bounds, id) => {
+        try {
+            if (map.getLayer(bounds.fillLayerId)) map.removeLayer(bounds.fillLayerId)
+            if (map.getLayer(bounds.outlineLayerId)) map.removeLayer(bounds.outlineLayerId)
+            if (map.getSource(bounds.sourceId)) map.removeSource(bounds.sourceId)
+        } catch (error) {
+            console.error(`Error clearing patch bounds ${id}:`, error)
+        }
+    })
+    patchBoundsMap.clear()
+}
+
 export const addMapPatchBounds = (
     map: mapboxgl.Map,
-    bounds: [number, number, number, number], id?: string,
+    bounds: [number, number, number, number],
+    id: string,
     fit?: boolean,
     options?: {
         fillColor?: string,
@@ -176,13 +191,16 @@ export const addMapPatchBounds = (
         lineWidth?: number,
     }
 ) => {
+    if (!map || !bounds || bounds.length < 4 || !id) return
 
-    const sourceId = id ? `bounds-source-${id}` : 'bounds-source'
-    const fillLayerId = id ? `bounds-fill-${id}` : 'bounds-fill'
-    const outlineLayerId = id ? `bounds-outline-${id}` : 'bounds-outline'
+    const sourceId = `bounds-source-${id}`
+    const fillLayerId = `bounds-fill-${id}`
+    const outlineLayerId = `bounds-outline-${id}`
 
     const addBounds = () => {
-        // 这一步添加触发了
+        // Clear existing bounds with the same ID first
+        clearMapPatchBounds(map, id)
+
         // Remove existing layers/source with the same ID before adding new ones
         if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId)
         if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId)
@@ -252,6 +270,9 @@ export const addMapPatchBounds = (
                 duration: 1000
             })
         }
+
+        // Store in map for later reference
+        patchBoundsMap.set(id, { sourceId, fillLayerId, outlineLayerId })
     }
 
     if (map.isStyleLoaded()) {
@@ -271,6 +292,22 @@ export const addMapPatchBounds = (
                 })
             }
         }, 100)
+    }
+}
+
+export const clearMapPatchBounds = (map: mapboxgl.Map, id: string) => {
+    if (!map || !id) return
+
+    const bounds = patchBoundsMap.get(id)
+    if (!bounds) return
+
+    try {
+        if (map.getLayer(bounds.fillLayerId)) map.removeLayer(bounds.fillLayerId)
+        if (map.getLayer(bounds.outlineLayerId)) map.removeLayer(bounds.outlineLayerId)
+        if (map.getSource(bounds.sourceId)) map.removeSource(bounds.sourceId)
+        patchBoundsMap.delete(id)
+    } catch (error) {
+        console.error(`Error clearing patch bounds ${id}:`, error)
     }
 }
 
