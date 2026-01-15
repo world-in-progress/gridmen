@@ -3,8 +3,12 @@ icrms:
     module_path: icrms.ischema
   - tag: gridmen/IPatch/1.0.0
     module_path: icrms.ipatch
+  - tag: gridmen/IVector/1.0.0
+    module_path: icrms.ivector
 node_templates:
   - name: schema
     module_path: templates.schema
   - name: patch
     module_path: templates.patch
+  - name: feature
+    module_path: templates.feature

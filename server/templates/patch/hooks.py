@@ -1,11 +1,8 @@
 import os
 import json
-import sys
 import tarfile
 from pathlib import Path
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'py-noodle', 'src'))
-from pynoodle.noodle import noodle
+from pynoodle import noodle
 
 def MOUNT(node_key: str, params: dict | None):
     # Use the full node path structure relative to 'resource'

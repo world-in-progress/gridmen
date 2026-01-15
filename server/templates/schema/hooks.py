@@ -1,12 +1,8 @@
 import os
 import json
-import sys
 import tarfile
 from pathlib import Path
-from typing import Literal
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'py-noodle', 'src'))
-from pynoodle.noodle import noodle
+from pynoodle import noodle
 
 def MOUNT(node_key: str, params: dict | None) -> dict | None:
     """
@@ -181,24 +177,3 @@ def UNPACK(target_node_key: str, tar_path: str, template_name: str) -> None:
 
     except Exception as e:
         raise Exception(f"Error unpacking node {target_node_key}: {e}")
-    
-    # def LINK(node_key:str, access_mode: Literal['r', 'w'] ) -> str:
-    #     """
-    #     Link a schema node.
-    #     """
-    #     try:
-    #         node_record = noodle._load_node_record(node_key, is_cascade=False)
-    #         launch_params = json.loads(node_record.launch_params)
-    #         resource_space = launch_params.get('resource_space')
-    #         dest_path = Path(resource_space)
-    #         dest_path.mkdir(parents=True, exist_ok=True)
-
-    #         # Create a symbolic link to the resource space
-    #         link_name = f"{node_key.replace('.', '_')}_{access_mode}.link"
-    #         link_path = dest_path / link_name
-    #         if not link_path.exists():
-    #             link_path.symlink_to(resource_space)
-    #         return str(link_path)
-
-    #     except Exception as e:
-    #         raise Exception(f"Error linking node {node_key}: {e}")
