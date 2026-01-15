@@ -1,4 +1,4 @@
-import { Grid, LucideIcon, MapPin, Square, SquaresUnite } from "lucide-react"
+import { LucideIcon, MapPin, SplinePointer, Square, SquaresUnite } from "lucide-react"
 
 interface ResourceEntry {
     value: string
@@ -21,5 +21,10 @@ export const RESOURCE_REGISTRY: ResourceEntry[] = [
         value: "grid",
         label: "Grid",
         icon: SquaresUnite,
+    },
+    {
+        value: "vector",
+        label: "Vector",
+        icon: SplinePointer,
     },
 ]

@@ -38,22 +38,11 @@ export interface PullResponse extends BaseResponse {
     target_node_key: string
 }
 
-export interface LinkNodeParams {
-    icrm_tag: string
-    node_key: string
-    access_mode: 'r' | 'w'
-}
-
 export interface LinkNodeResponse {
     lock_id: string
     node_key: string
     lock_type: string
     access_mode: string
-}
-
-export interface UnlinkNodeParams {
-    node_key: string
-    lock_id: string
 }
 
 export interface PatchMeta {
