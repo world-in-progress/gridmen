@@ -13,6 +13,7 @@ import {
     ChevronDown,
     ChevronRight,
     SquaresUnite,
+    SplinePointer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/utils/utils'
@@ -517,6 +518,8 @@ const NodeRenderer = ({
                                             return <Square className={cn(node.isTemp ? 'text-white' : 'text-sky-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
                                         case 'grid':
                                             return <SquaresUnite className={cn(node.isTemp ? 'text-white' : 'text-amber-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
+                                        case 'vector':
+                                            return <SplinePointer className={cn(node.isTemp ? 'text-white' : 'text-indigo-500', 'w-4 h-4 mr-1 ml-4.5 ')} />
                                         default:
                                             return <File className='w-4 h-4 mr-2 ml-4.5 text-blue-500' />
                                     }
