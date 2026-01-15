@@ -86,10 +86,9 @@ export default class VectorTemplate implements ITemplate {
                 break
             case VectorMenuItem.EDIT_VECTOR: {
                 if (!(node as ResourceNode).lockId) {
-                    const linkResponse = await linkNode('cc/IPatch/0.1.0', node.nodeInfo, 'w');
+                    const linkResponse = await linkNode('gridmen/IVector/1.0.0', node.nodeInfo, 'w');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
-                // const patchInfo = await api.node.getNodeParams(node.key, (node as ResourceNode).tree.leadIP !== undefined ? true : false);
                 const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
                 (node as ResourceNode).mountParams = patchInfo
                 useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
