@@ -21,7 +21,7 @@ function createWindow(): void {
 	// });
 
 	// Use Vite dev server URL in development, otherwise use the built file
-	const startUrl = process.env.ELECTRON_START_URL || 'http://localhost:5173';
+	const startUrl = process.env.ELECTRON_START_URL || 'http://127.0.0.1:5173';
 
 	mainWindow.loadURL(startUrl);
 

@@ -21,7 +21,7 @@ import { Button } from '../ui/button'
 import * as api from '@/template/api/apis'
 import { Input } from '@/components/ui/input'
 import { Separator } from "@/components/ui/separator"
-import { ResourceTree } from '@/template/scene/scene'
+import { ResourceNode, ResourceTree } from '@/template/scene/scene'
 import { IResourceNode } from '@/template/scene/iscene'
 import { useSelectedNodeStore, useToolPanelStore } from '@/store/storeSet'
 import { RESOURCE_REGISTRY } from '@/registry/resourceRegistry'
@@ -346,6 +346,7 @@ const NodeRenderer = ({
             const payload = {
                 nodeKey: node.key,
                 nodeInfo: node.nodeInfo,
+                nodeLockId: (node as ResourceNode).lockId || null,
                 templateName: node.template_name,
                 sourceTreeTitle: sourceTreeTitle || ''
             }

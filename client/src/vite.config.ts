@@ -14,6 +14,7 @@ export default defineConfig(({ command, mode }) => {
             emptyOutDir: false,
         },
         server: {
+            host: '127.0.0.1',
             fs: {
                 allow: ['..', '../src/'],
             },

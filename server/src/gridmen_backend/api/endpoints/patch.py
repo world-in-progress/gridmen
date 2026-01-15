@@ -144,7 +144,7 @@ def pick_cells_by_feature(request: PickByFeatureRequest):
     is_file = isinstance(file_or_vector_node_key, str)
     
     with noodle.connect(IPatch, node_key, 'pr', lock_id=lock_id) as patch:
-        schema: PatchSchema = patch.get_schema()
+        schema: PatchSchema = patch.get_meta()
     target_epsg: int = schema.epsg
     target_sr = osr.SpatialReference()
     target_sr.ImportFromEPSG(target_epsg)

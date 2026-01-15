@@ -28,7 +28,7 @@ import {
     AlertDialogContent,
     AlertDialogDescription,
 } from '@/components/ui/alert-dialog'
-import { linkNode } from '../api/node'
+import { linkNode, unlinkNode } from '../api/node'
 import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
 import { SchemaData } from '../schema/types'
@@ -65,6 +65,7 @@ interface PageContext {
         pick: boolean,
         select: 'brush' | 'box',
     }
+    vectorLockId: string | null
 }
 
 interface GridCheckingInfo {
@@ -140,7 +141,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         editingState: {
             pick: true,
             select: 'brush',
-        }
+        },
+        vectorLockId: null,
     })
 
     const gridInfo = useRef<GridCheckingInfo | null>(null)
@@ -169,8 +171,9 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const loadContext = async () => {
         if (!map) return
 
-        if ((node as ResourceNode).lockId) {
-            const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
+        if (!(node as ResourceNode).lockId) {
+            console.log('1111111111111111111')
+            const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
             (node as ResourceNode).lockId = linkResponse.lock_id
         }
 
@@ -236,15 +239,15 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         pageContext.current.patchCore = patchCore
 
         setTopologyLayer(pageContext.current.topologyLayer)
-        setPickingTab(pageContext.current.editingState.pick)
-        setSelectTab(pageContext.current.editingState.select)
+        // setPickingTab(pageContext.current.editingState.pick)
+        // setSelectTab(pageContext.current.editingState.select)
         setCheckSwitchOn(pageContext.current.isChecking)
 
         if (pageContext.current.topologyLayer && pageContext.current.isChecking) {
             pageContext.current.topologyLayer.setCheckMode(pageContext.current.isChecking)
         }
 
-        store.get<{ on: Function, off: Function }>('isLoading')!.off()
+        // store.get<{ on: Function, off: Function }>('isLoading')!.off()
         const boundsOn4326 = await convertBoundsCoordinates(pageContext.current.patch!.bounds, pageContext.current.patch!.epsg, 4326)
         map.fitBounds(boundsOn4326, {
             duration: 1000,
@@ -287,10 +290,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         const clg = store.get<CustomLayerGroup>('clg')!
         clg.removeLayer('TopologyLayer')
 
-        console.log(pageContext.current.editingState)
-        pageContext.current.editingState.select = selectTab
-        pageContext.current.editingState.pick = pickingTab
-        pageContext.current.isChecking = checkSwitchOn
+        console.log('unloadContext called')
+
+        // console.log(pageContext.current.editingState)
+        // pageContext.current.editingState.select = selectTab
+        // pageContext.current.editingState.pick = pickingTab
+        // pageContext.current.isChecking = checkSwitchOn
     }
 
     // TODO: 优化事件绑定解绑
@@ -504,16 +509,19 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const payload = JSON.parse(raw) as {
                 nodeKey: string
                 nodeInfo: string
+                nodeLockId: string | null
                 templateName: string
                 sourceTreeTitle: string
             }
 
-            const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, templateName } = payload
+            const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, nodeLockId: dragNodeLockId, templateName } = payload
 
             if (!dragNodeKey || templateName !== 'vector') {
                 toast.error('Please drag a vector node')
                 return
             }
+
+            pageContext.current.vectorLockId = dragNodeLockId
 
             setFeaturePickResource({
                 kind: 'vector',
@@ -522,9 +530,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 name: payload.sourceTreeTitle || 'Vector'
             })
 
-            const vectorLinkResponse = await linkNode('gridmen/IVector/1.0.0', dragNodeInfo, 'r')
-
-
+            triggerRepaint()
         } catch (error) {
             console.error('Invalid drag payload:', error)
             toast.error('Invalid drag data')
@@ -533,6 +539,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const handleClearUploadedFeature = () => {
         setFeaturePickResource(null)
+
+        // if () {
+        //     await unlinkNode('gridmen/IVector/1.0.0', featurePickResource!.nodeInfo, 'r', featurePickResource!.nodeKey)
+        // }
     }
 
     const handleSelectFeaturePick = useCallback(async () => {
@@ -547,39 +557,18 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         try {
-            store.get<{ on: Function; off: Function }>('isLoading')!.on()
+            // store.get<{ on: Function; off: Function }>('isLoading')!.on()
 
             if (featurePickResource.kind === 'file') {
                 topologyLayer.executePickCellsByFeature(featurePickResource.filePath)
                 return
-            }
-
-            const writeTempGeojson = (window.electronAPI as any)?.writeTempGeojson
-            if (typeof writeTempGeojson !== 'function') {
-                toast.error('writeTempGeojson is not available')
-                store.get<{ on: Function; off: Function }>('isLoading')!.off()
+            } else if (featurePickResource.kind === 'vector') {
+                topologyLayer.executePickCellsByVectorNode(featurePickResource.nodeInfo, pageContext.current.vectorLockId)
                 return
             }
-
-            const resp = await (api as any).vector.getVectorFeatureJsonComputation(featurePickResource.nodeInfo, null)
-            const featureJson = resp?.feature_json ?? resp?.data
-            if (!featureJson) {
-                toast.error('Vector feature_json is empty')
-                store.get<{ on: Function; off: Function }>('isLoading')!.off()
-                return
-            }
-
-            const filePath = await writeTempGeojson(JSON.stringify(featureJson))
-            if (!filePath) {
-                toast.error('Failed to create temp geojson')
-                store.get<{ on: Function; off: Function }>('isLoading')!.off()
-                return
-            }
-
-            topologyLayer.executePickCellsByFeature(filePath)
         } catch (error) {
             console.error('Error executing feature pick:', error)
-            store.get<{ on: Function; off: Function }>('isLoading')!.off()
+            // store.get<{ on: Function; off: Function }>('isLoading')!.off()
             toast.error('Failed to execute feature pick')
         }
     }, [featurePickResource, topologyLayer])
