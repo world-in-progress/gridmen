@@ -21,7 +21,7 @@ interface PatchCreationProps {
     context: IViewContext
 }
 
-interface Schema extends SchemaData {
+export interface Schema extends SchemaData {
     schemaNodeKey: string
 }
 

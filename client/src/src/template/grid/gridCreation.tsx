@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useState } from "react"
+import React, { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import {
     AlertDialog,
     AlertDialogTitle,
@@ -12,8 +12,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Fullscreen, GripVertical, MapPin, RotateCcw, SquaresUnite, Upload, X } from 'lucide-react'
-import { cn } from '@/utils/utils'
+import { ArrowRightLeft, Fullscreen, GripVertical, MapPin, RotateCcw, SquaresUnite, Upload, X } from 'lucide-react'
+import { addMapMarker, clearMarkerByNodeKey, cn, convertPointCoordinate } from '@/utils/utils'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { IResourceNode } from '../scene/iscene'
 import { IViewContext } from '@/views/IViewContext'
@@ -24,6 +24,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Schema } from "../patch/patchCreation"
+import { SchemaData } from "../schema/types"
 
 interface GridCreationProps {
     node: IResourceNode
@@ -36,6 +38,7 @@ interface PageContext {
     patchesBounds: Record<string, [number, number, number, number]>
     selectedVectors: VectorResourceItem[]
 
+    schema: Schema | null
     demFilePath?: string
     lumFilePath?: string
 }
@@ -288,6 +291,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         patchesBounds: {},
         selectedVectors: [],
 
+        schema: null,
         demFilePath: "",
         lumFilePath: "",
     })
@@ -296,6 +300,8 @@ export default function GridCreation({ node, context }: GridCreationProps) {
     const [isVectorDragOver, setIsVectorDragOver] = useState(false)
     const [mergeDialogOpen, setMergeDialogOpen] = useState(false)
     const [highlightedResource, setHighlightedResource] = useState<string | null>(null)
+
+    const tempSchemaKeyRef = useRef<string | null>(null)
 
     const [, triggerRepaint] = useReducer((x) => x + 1, 0)
 
@@ -768,6 +774,60 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         tree.notifyDomUpdate()
     }
 
+    const handleSchemaNodeDragOver = (e: React.DragEvent) => {
+        e.preventDefault()
+        e.currentTarget.classList.add('border-blue-500', 'bg-blue-50')
+    }
+    const handleSchemaNodeDragLeave = (e: React.DragEvent) => {
+        e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
+    }
+    const handleSchemaNodeDrop = async (e: React.DragEvent) => {
+        e.preventDefault()
+        e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50')
+        const raw = e.dataTransfer.getData('application/gridmen-node') || e.dataTransfer.getData('text/plain')
+
+        const payload = JSON.parse(raw) as {
+            nodeKey: string
+            nodeInfo: string
+            templateName: string
+            sourceTreeTitle: string
+        }
+
+        const { nodeInfo: dragNodeInfo, nodeKey: dragNodeKey, templateName, sourceTreeTitle } = payload
+
+        if (!dragNodeKey || templateName !== 'schema') {
+            toast.error('Please drag a schema node')
+            return
+        } else {
+            const { mount_params } = await (api.node.getNodeParams(dragNodeInfo) as any)
+            const schemaMountParams = JSON.parse(mount_params) as SchemaData
+            const schema: Schema = {
+                ...schemaMountParams,
+                schemaNodeKey: dragNodeKey
+            }
+
+            clearMarkerByNodeKey(tempSchemaKeyRef.current!)
+            const AlignmentOriginOn4326 = await convertPointCoordinate(schema.alignment_origin, schema.epsg, 4326)
+            addMapMarker(map, AlignmentOriginOn4326!, schema.schemaNodeKey)
+            tempSchemaKeyRef.current = schema.schemaNodeKey
+
+            pageContext.current.schema = schema
+            console.log('Dragged schema', pageContext.current.schema)
+        }
+        triggerRepaint()
+    }
+
+    const deleteDragSchema = () => {
+        clearMarkerByNodeKey(tempSchemaKeyRef.current!)
+        tempSchemaKeyRef.current = null
+        pageContext.current.schema = null
+        console.log('Deleted dragged schema', pageContext.current.schema)
+
+        triggerRepaint()
+    }
+
+    // TODO: 写一个检查函数判断patch返回的schema key是否与拖入schema相同
+
     return (
         <div className="w-full h-full flex flex-col">
             <div className="flex-none w-full border-b border-gray-700 flex flex-col">
@@ -817,6 +877,40 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                 readOnly={true}
                                 className={`w-full text-black border-gray-300`}
                             />
+                        </div>
+                    </div>
+                    <div className='bg-white rounded-lg shadow-sm p-4 border border-gray-200'>
+                        <h2 className='text-black text-lg font-semibold mb-2'>
+                            Belong To Schema
+                        </h2>
+                        <div className='space-y-2'>
+                            <div
+                                onDragOver={handleSchemaNodeDragOver}
+                                onDragLeave={handleSchemaNodeDragLeave}
+                                onDrop={handleSchemaNodeDrop}
+                                className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-blue-50/50 group'
+                            >
+                                {pageContext.current.schema?.name ? (
+                                    <div className='space-y-2'>
+                                        <div className='inline-flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-200 rounded-md shadow-md transition-all duration-200 group-hover:shadow-md group-hover:border-red-300'>
+                                            <MapPin className='w-4 h-4 text-red-500' fill='none' stroke='currentColor' viewBox='0 0 24 24' />
+                                            <span className='font-semibold text-black text-md'>{pageContext.current.schema.name}</span>
+                                            <X className='w-4 h-4 text-gray-400 cursor-pointer hover:text-gray-600' onClick={deleteDragSchema} />
+                                        </div>
+                                        <div className='flex items-center justify-center gap-2 text-sm text-gray-500'>
+                                            <ArrowRightLeft className='w-4 h-4' />
+                                            <span >Drag to change schema</span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className='space-y-2 py-1'>
+                                        <div className='inline-flex items-center justify-center w-12 h-12 bg-gray-100 rounded-full mb-2 group-hover:bg-blue-100 transition-colors'>
+                                            <Upload className='w-6 h-6 text-gray-400 group-hover:text-blue-500 transition-colors' />
+                                        </div>
+                                        <div className='font-medium text-gray-500 text-sm'>Drag a schema here</div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     {/* TODO：DEM和LUM文件上传 */}
