@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useState } from "react"
+import React, { useCallback, useEffect, useReducer, useState } from "react"
 import {
     AlertDialog,
     AlertDialogTitle,
@@ -23,6 +23,7 @@ import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Checkbox } from "@/components/ui/checkbox"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 
 interface GridCreationProps {
     node: IResourceNode
@@ -34,6 +35,9 @@ interface PageContext {
     selectedPatches: PatchResourceItem[]
     patchesBounds: Record<string, [number, number, number, number]>
     selectedVectors: VectorResourceItem[]
+
+    demFilePath?: string
+    lumFilePath?: string
 }
 
 type VectorAggOp = "set" | "add" | "subtract" | "max"
@@ -283,6 +287,9 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         selectedPatches: [],
         patchesBounds: {},
         selectedVectors: [],
+
+        demFilePath: "",
+        lumFilePath: "",
     })
 
     const [isDragOver, setIsDragOver] = useState(false)
@@ -307,6 +314,13 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             pageContext.current.name = node.name.split(".")[0]
         }
 
+        if (typeof pageContext.current.demFilePath !== "string") {
+            pageContext.current.demFilePath = pageContext.current.demFilePath == null ? "" : String(pageContext.current.demFilePath)
+        }
+        if (typeof pageContext.current.lumFilePath !== "string") {
+            pageContext.current.lumFilePath = pageContext.current.lumFilePath == null ? "" : String(pageContext.current.lumFilePath)
+        }
+
         if (!Array.isArray(pageContext.current.selectedVectors)) {
             pageContext.current.selectedVectors = []
         }
@@ -321,6 +335,63 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             if (typeof item.lumValue !== "string") item.lumValue = item.lumValue == null ? "" : String(item.lumValue)
         }
 
+        triggerRepaint()
+    }
+
+    const getFileNameFromPath = (filePath: string) => {
+        const normalized = filePath.replace(/\\/g, "/")
+        return normalized.split("/").pop() || filePath
+    }
+
+    const openRasterFileDialog = async () => {
+        if (!window.electronAPI) {
+            toast.error("Electron API not available")
+            return null
+        }
+
+        const api = window.electronAPI
+        const picker =
+            typeof api.openTiffFileDialog === "function"
+                ? api.openTiffFileDialog
+                : typeof api.openFileDialog === "function"
+                    ? api.openFileDialog
+                    : null
+
+        if (!picker) {
+            toast.error("Electron API not available")
+            return null
+        }
+
+        try {
+            return await picker()
+        } catch (error) {
+            console.error("Error opening file dialog:", error)
+            toast.error("Failed to open file dialog")
+            return null
+        }
+    }
+
+    const handlePickDemFile = useCallback(async () => {
+        const filePath = await openRasterFileDialog()
+        if (!filePath) return
+        pageContext.current.demFilePath = filePath
+        triggerRepaint()
+    }, [])
+
+    const handlePickLumFile = useCallback(async () => {
+        const filePath = await openRasterFileDialog()
+        if (!filePath) return
+        pageContext.current.lumFilePath = filePath
+        triggerRepaint()
+    }, [])
+
+    const handleClearDemFile = () => {
+        pageContext.current.demFilePath = ""
+        triggerRepaint()
+    }
+
+    const handleClearLumFile = () => {
+        pageContext.current.lumFilePath = ""
         triggerRepaint()
     }
 
@@ -748,6 +819,81 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                             />
                         </div>
                     </div>
+                    {/* TODO：DEM和LUM文件上传 */}
+                    <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                        <h2 className="text-lg text-black font-semibold">Raster Resource Upload</h2>
+                        <div className="space-y-1 flex flex-col">
+                            {/* DEM */}
+                            <div className="flex flex-col p-2 space-y-0.5">
+                                <div className="text-black font-semibold">DEM File</div>
+                                <div className="flex items-center gap-2">
+                                    <div className="min-w-0">
+                                        <Input
+                                            value={pageContext.current.demFilePath ? getFileNameFromPath(pageContext.current.demFilePath) : ""}
+                                            readOnly
+                                            placeholder="Select DEM file"
+                                            className="h-8 w-full min-w-0 rounded-sm text-base text-black border-slate-300"
+                                        />
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        className="cursor-pointer gap-1 shrink-0"
+                                        onClick={handlePickDemFile}
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        Upload
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="cursor-pointer text-red-500 shrink-0"
+                                        onClick={handleClearDemFile}
+                                        disabled={!pageContext.current.demFilePath}
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                            <Separator className="bg-slate-200 w-full" />
+                            {/* LUM */}
+                            <div className="flex flex-col p-2 space-y-0.5">
+                                <div className="text-black font-semibold">LUM File</div>
+                                <div className="flex items-center gap-2">
+                                    <div className="min-w-0">
+                                        <Input
+                                            value={pageContext.current.lumFilePath ? getFileNameFromPath(pageContext.current.lumFilePath) : ""}
+                                            readOnly
+                                            placeholder="Select LUM file"
+                                            className="h-8 w-full min-w-0 rounded-sm text-base text-black border-slate-300"
+                                        />
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        className="cursor-pointer gap-1 shrink-0"
+                                        onClick={handlePickLumFile}
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        Upload
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="cursor-pointer text-red-500 shrink-0"
+                                        onClick={handleClearLumFile}
+                                        disabled={!pageContext.current.lumFilePath}
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     {/* ----------- */}
                     {/* Patch Drop Zone */}
                     {/* ----------- */}
@@ -1054,7 +1200,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                             disabled={pageContext.current.selectedPatches.length === 0}
                         >
                             <SquaresUnite className="w-4 h-4 " />
-                            Merge
+                            Assembly
                         </Button>
                     </div>
                 </div>

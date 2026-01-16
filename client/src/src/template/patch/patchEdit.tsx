@@ -233,7 +233,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (!map) return
 
         if (!(node as ResourceNode).lockId) {
-            console.log('1111111111111111111')
             const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
             (node as ResourceNode).lockId = linkResponse.lock_id
         }
