@@ -5,6 +5,8 @@ icrms:
     module_path: icrms.ipatch
   - tag: gridmen/IVector/1.0.0
     module_path: icrms.ivector
+  - tag: gridmen/IGrid/1.0.0
+    module_path: icrms.igrid
 node_templates:
   - name: schema
     module_path: templates.schema
@@ -12,3 +14,5 @@ node_templates:
     module_path: templates.patch
   - name: vector
     module_path: templates.vector
+  - name: grid
+    module_path: templates.grid
