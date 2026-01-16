@@ -289,13 +289,9 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
         console.log('Creating vector with data:', newVector)
 
-
-        const rawFeatureJson = drawInstance.getAll()
-        const hex = getHexColorByValue(pageContext.current.vectorData.color)
-        // draw 模式下可能包含“草稿/未完成”几何（例如只有 2 个点的 Polygon），保存前过滤。
-        const featureJson = toValidFeatureCollection(rawFeatureJson, hex)
-        // pageContext.current.drawVector = featureJson
-        // pageContext.current.hasVector = featureJson.features.length > 0
+        const featureJson = drawInstance.getAll()
+        pageContext.current.drawVector = featureJson
+        pageContext.current.hasVector = featureJson.features.length > 0
 
         setSelectedToolSafe('select')
         safeChangeMode('simple_select')
