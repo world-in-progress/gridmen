@@ -48,10 +48,9 @@ class Patch(IPatch):
             epsg: int = schema_data['epsg']
             grid_info: list[list[float]] = schema_data['grid_info']
             first_size: list[float] = grid_info[0]
-            # Try 'alignment_origin', fallback to 'base_point' for backward compatibility
-            alignment_origin: list[float] = schema_data.get('alignment_origin', schema_data.get('base_point'))
+            alignment_origin: list[float] = schema_data.get('alignment_origin')
             if alignment_origin is None:
-                raise KeyError("Neither 'alignment_origin' nor 'base_point' found in patch schema data")
+                raise KeyError("Missing 'alignment_origin' in patch schema data")
         except (KeyError, IndexError) as e:
             raise ValueError(f'Failed to decode patch meta file: {e}')
 
@@ -247,7 +246,7 @@ class Patch(IPatch):
 
         Args:
             levels (list[int]): Array of levels for each cell to subdivide
-            global_ids (list[int]): Array of global IDs for each cell to subdivide
+            global_ids (list[int): Array of global IDs for each cell to subdivide
 
         Returns:
             tuple[list[int], list[int]]: The levels and global IDs of the subdivided cells.
@@ -493,7 +492,7 @@ class Patch(IPatch):
     def get_deleted_cell_infos(self) -> tuple[list[int], list[int]]:
         """Method to get all deleted cells' global ids and levels
         Returns:
-            tuple[list[int], list[int]]: deleted cells' global ids and levels
+            tuple[list[int]]: deleted cells' global ids and levels
         """
         self._load_patch()
         

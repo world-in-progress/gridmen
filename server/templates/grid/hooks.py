@@ -1177,7 +1177,7 @@ def assembly(resource_dir: str, node_key: str, schema_node_key: str, patch_node_
         epsg: int = schema['epsg']
         grid_info: list[list[float]] = schema['grid_info']
         first_level_resolution: list[float] = grid_info[0]
-        alignment_origin: list[float] = schema['base_point']
+        alignment_origin: list[float] = schema['alignment_origin']
         
         # Init bounds from all patches
         meta_bounds = _get_bounds(patch_paths)
