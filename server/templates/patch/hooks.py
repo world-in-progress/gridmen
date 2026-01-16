@@ -33,6 +33,7 @@ def MOUNT(node_key: str, params: dict | None):
         patch_meta = {
             'name': patch_name,
             'bounds': patch_bounds,  # default bounds
+            'schema_node_key': schema_node_key,
             'schema': schema_data
         }
 

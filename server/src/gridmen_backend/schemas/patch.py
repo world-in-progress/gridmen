@@ -13,6 +13,7 @@ class PatchMeta(BaseModel):
     alignment_origin: tuple[float, float] # [lon, lat], base point of the patch
     subdivide_rules: list[tuple[int, int]] # rules for subdividing the patch
     bounds: tuple[float, float, float, float] # [ min_lon, min_lat, max_lon, max_lat ]
+    schema_node_key: str # The schema node key
 
 class MultiCellInfo(BaseModel):
     levels: list[int]
@@ -71,4 +72,6 @@ class MultiCellInfoResponse(BaseResponse):
 class PickByFeatureRequest(BaseModel):
     patch_token: NodeToken
     file_or_feature_token: NodeToken | str  # if str, it is treated as feature file path related to Shp or GeoJSON
+
+
     

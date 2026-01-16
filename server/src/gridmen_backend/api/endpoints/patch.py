@@ -31,6 +31,7 @@ def get_patch_meta(node_key: str, lock_id: str = None):
                 bounds=patch_meta.bounds,
                 alignment_origin=patch_meta.alignment_origin,
                 subdivide_rules=patch_meta.subdivide_rules,
+                schema_node_key=patch_meta.schema_node_key,
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get patch meta information: {str(e)}')

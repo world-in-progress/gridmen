@@ -11,12 +11,14 @@ class PatchSchema:
     - bounds (list[float]): the bounds of the patch in the format [min_x, min_y, max_x, max_y]
     - first_size (float): the size of the first patch (unit: m)
     - subdivide_rules (list[tuple[int, int]]): the subdivision rules of the patch in the format [(sub_width, sub_height)]
+    - schema_node_key (str): the schema node key
     """
     epsg: int
     bounds: list[float]  # [min_x, min_y, max_x, max_y]
     first_size: list[float] # [width, height]
     subdivide_rules: list[list[int]]  # [(sub_width, sub_height), ...]
     alignment_origin: tuple[float, float] # [lon, lat], base point of the patch
+    schema_node_key: str # The schema node key
 
 @cc.transferable
 class CellAttribute:
@@ -302,7 +304,7 @@ class IPatch:
     
     def get_cell_bboxes(self, levels: list[int], global_ids: list[int]) -> list[float]:
         ...
-        
+
     def save(self) -> PatchSaveInfo:
         ...
 

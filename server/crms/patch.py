@@ -39,7 +39,7 @@ class Patch:
             with open(self.meta_file, 'r') as f:
                 meta = json.load(f)
             bounds: list[float] = meta['bounds']
-            
+            schema_node_key: str = meta['schema_node_key']
             # Read schema info from nested 'schema' object
             schema_data = meta.get('schema')
             if not schema_data:
@@ -75,6 +75,7 @@ class Patch:
         self.grid_info = grid_info
         self.bounds: list = bounds
         self.first_size: list[float] = first_size
+        self.schema_node_key: str = schema_node_key
         self.alignment_origin: list[float] = alignment_origin
         self.subdivide_rules: list[list[int]] = subdivide_rules
         self._pd_cache = pd.DataFrame(columns=[ATTR_DELETED, ATTR_ACTIVATE, ATTR_INDEX_KEY])
@@ -160,6 +161,7 @@ class Patch:
         schema.bounds = tuple(self.bounds)
         schema.first_size = tuple(self.first_size)
         schema.subdivide_rules = self.subdivide_rules
+        schema.schema_node_key = self.schema_node_key
         schema.alignment_origin = tuple(self.alignment_origin)
         return schema
 
@@ -497,7 +499,7 @@ class Patch:
         deleted_cells = self.cache[self.cache[ATTR_DELETED] == True]
         levels, global_ids = _decode_index_batch(deleted_cells.index.values)
         return levels.tolist(), global_ids.tolist()
-    
+
     def terminate(self) -> bool:
         """Save the patch data to Parquet file
         Returns:

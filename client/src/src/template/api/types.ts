@@ -53,6 +53,7 @@ export interface PatchMeta {
     alignment_origin: [number, number]
     subdivide_rules: [number, number][]
     bounds: [number, number, number, number]
+    schema_node_key: string
 }
 
 export interface VectorFileInfo {
