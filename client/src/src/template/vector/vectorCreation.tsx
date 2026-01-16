@@ -40,6 +40,7 @@ import { Badge } from "@/components/ui/badge"
 import { MapViewContext } from "@/views/mapView/mapView"
 import { useLayerGroupStore, useToolPanelStore } from "@/store/storeSet"
 import { toast } from "sonner"
+import { toValidFeatureCollection } from "@/utils/utils"
 
 interface VectorCreationProps {
     node: IResourceNode
@@ -139,15 +140,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                             feature.properties = feature.properties || {}
                             feature.properties.user_color = feature.properties.user_color ?? loadColor
                         }
-                        const validVectors: GeoJSON.FeatureCollection = {
-                            type: "FeatureCollection",
-                            features: pageContext.current.drawVector.features.filter((vector) => {
-                                if (vector.geometry.type === "Polygon") {
-                                    return vector.geometry.coordinates[0].length >= 4;
-                                }
-                                return true;
-                            })
-                        }
+                        const validVectors: GeoJSON.FeatureCollection = toValidFeatureCollection(pageContext.current.drawVector, loadColor)
 
                         try {
                             drawInstance.add(validVectors)
@@ -296,7 +289,11 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
         console.log('Creating vector with data:', newVector)
 
-        const featureJson = drawInstance.getAll()
+
+        const rawFeatureJson = drawInstance.getAll()
+        const hex = getHexColorByValue(pageContext.current.vectorData.color)
+        // draw 模式下可能包含“草稿/未完成”几何（例如只有 2 个点的 Polygon），保存前过滤。
+        const featureJson = toValidFeatureCollection(rawFeatureJson, hex)
         // pageContext.current.drawVector = featureJson
         // pageContext.current.hasVector = featureJson.features.length > 0
 
@@ -313,6 +310,8 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 templateName: 'vector',
                 mountParamsString: JSON.stringify(newVector)
             })
+
+            console.log('draw featureJson:', featureJson)
 
             await api.vector.saveVector(node.nodeInfo, null, featureJson)
 

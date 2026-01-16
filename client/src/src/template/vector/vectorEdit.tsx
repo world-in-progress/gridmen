@@ -32,6 +32,7 @@ import { MapViewContext } from "@/views/mapView/mapView"
 import { toast } from "sonner"
 import { linkNode } from "../api/node"
 import { useLayerGroupStore, useToolPanelStore } from "@/store/storeSet"
+import { toValidFeatureCollection } from "@/utils/utils"
 
 interface VectorEditProps {
     node: IResourceNode
@@ -105,41 +106,6 @@ const getVectorTypeIcon = (type: string) => {
             return <Square className="w-6 h-6 text-purple-500" />
         default:
             return null
-    }
-}
-
-const toValidFeatureCollection = (fc: any, hexColor: string): GeoJSON.FeatureCollection => {
-    const features = Array.isArray(fc?.features) ? fc.features : []
-
-    const validFeatures = features
-        .filter((f: any) => {
-            const t = f?.geometry?.type
-            if (!t) return false
-            if (t === "Polygon") {
-                const ring = f?.geometry?.coordinates?.[0]
-                return Array.isArray(ring) && ring.length >= 4
-            }
-            if (t === "MultiPolygon") {
-                const ring = f?.geometry?.coordinates?.[0]?.[0]
-                return Array.isArray(ring) && ring.length >= 4
-            }
-            return true
-        })
-        .map((f: any) => {
-            const id = f?.id ?? (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
-            return {
-                ...f,
-                id,
-                properties: {
-                    ...(f?.properties ?? {}),
-                    user_color: hexColor,
-                },
-            }
-        })
-
-    return {
-        type: "FeatureCollection",
-        features: validFeatures,
     }
 }
 
@@ -265,7 +231,6 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
         triggerRepaint()
     }, [drawInstance])
 
-    // 监听 draw 事件，同步 feature_json，并保持 draw 模式连续绘制
     useEffect(() => {
         if (!map || !drawInstance) return
 
@@ -332,7 +297,10 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
         syncDrawVectorFromDraw()
     }, [drawInstance, syncDrawVectorFromDraw])
 
-    const handleUpdateVector = useCallback(async () => {
+    const handleUpdateVector = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
+        e.preventDefault()
+        e.stopPropagation()
+
         const lockId = (node as ResourceNode).lockId
         if (!lockId) {
             toast.error("Vector lockId not ready")
@@ -344,15 +312,17 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
             return
         }
 
-        const featureJson = drawInstance.getAll()
+        const rawFeatureJson = drawInstance.getAll()
+        const hex = getHexColorByValue(pageContext.current.vectorData.color)
+
+        const featureJson = toValidFeatureCollection(rawFeatureJson, hex)
         const updateData = {
             color: pageContext.current.vectorData.color,
             epsg: pageContext.current.vectorData.epsg,
             feature_json: featureJson as any,
         }
 
-        // pageContext.current.drawVector = featureJson
-        // pageContext.current.hasVector = featureJson.features.length > 0
+        console.log('draw featureJson:', featureJson)
 
         setSelectedToolSafe('select')
         safeChangeMode('simple_select')
@@ -379,7 +349,7 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
             console.error("Failed to update vector:", error)
             toast.error(`Failed to update vector: ${error}`)
         }
-    }, [drawInstance, node])
+    }, [drawInstance, node, safeChangeMode, setSelectedToolSafe])
 
     return (
         <div className="w-full h-full flex flex-col">
@@ -545,7 +515,15 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
                                         </SelectContent>
                                     </Select>
                                 </div>
-
+                                <div className="text-sm w-full flex flex-row items-center justify-center">
+                                    <Button
+                                        className="w-full bg-green-500 hover:bg-green-600 text-white cursor-pointer"
+                                        disabled={!pageContext.current.vectorData.epsg.trim()}
+                                        onClick={handleUpdateVector}
+                                    >
+                                        Save Changes
+                                    </Button>
+                                </div>
                                 <div className="space-y-2 pt-4">
                                     <Label className="text-sm font-medium text-slate-900">Preview</Label>
                                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
@@ -579,15 +557,6 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div className="text-sm w-full flex flex-row items-center justify-center">
-                            <Button
-                                className="w-full bg-green-500 hover:bg-green-600 text-white cursor-pointer"
-                                disabled={!pageContext.current.vectorData.epsg.trim()}
-                                onClick={handleUpdateVector}
-                            >
-                                Save Changes
-                            </Button>
                         </div>
                     </div>
                 </div>

@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Fullscreen, GripVertical, MapPin, RotateCcw, SquareDivide as SquaresUnite, Upload, X } from "lucide-react"
+import { Fullscreen, GripVertical, MapPin, RotateCcw, SquaresUnite, Upload, X } from "lucide-react"
 import { cn } from "@/utils/utils"
 import type { MapViewContext } from "@/views/mapView/mapView"
 import type { IResourceNode } from "../scene/iscene"

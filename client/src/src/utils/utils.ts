@@ -419,30 +419,6 @@ export const adjustPatchBounds = async (
     }
 }
 
-// export const temp = async (
-//     bounds: [number, number, number, number],
-//     gridLevel: [number, number],
-//     fromEPSG: number,
-//     toEPSG: number,
-//     alignmentOrigin: [number, number]
-// ): Promise<{
-//     convertedBounds: [number, number, number, number]
-//     alignedBounds: [number, number, number, number]
-//     expandedBounds: [number, number, number, number]
-// }> => {
-//     const gridWidth = gridLevel[0]
-//     const gridHeight = gridLevel[1]
-
-//     const convertedSW: [number, number] = [bounds[0], bounds[1]]
-//     const convertedNE: [number, number] = [bounds[2], bounds[3]]
-
-//     return {
-//         convertedBounds: convertedBounds,
-//         alignedBounds: alignedBounds,
-//         expandedBounds: expandedBounds,
-//     }
-// }
-
 export const calculateGridCounts = (
     southWest: [number, number],
     basePoint: [number, number],
@@ -472,4 +448,52 @@ export const convertBoundsCoordinates = async (
     const ne = await convertPointCoordinate([coordinates[2], coordinates[3]], fromEPSG, toEPSG)
 
     return [sw![0], sw![1], ne![0], ne![1]]
+}
+
+export const toValidFeatureCollection = (fc: any, hexColor: string): GeoJSON.FeatureCollection => {
+    const features = Array.isArray(fc?.features) ? fc.features : []
+
+    const isFiniteNumber = (v: any) => typeof v === "number" && Number.isFinite(v)
+    const isLngLat = (pt: any) => Array.isArray(pt) && pt.length >= 2 && isFiniteNumber(pt[0]) && isFiniteNumber(pt[1])
+
+    const validFeatures = features
+        .filter((f: any) => {
+            const t = f?.geometry?.type
+            if (!t) return false
+            const coords = f?.geometry?.coordinates
+            if (coords == null) return false
+
+            if (t === "Point") return isLngLat(coords)
+            if (t === "MultiPoint") return Array.isArray(coords) && coords.length > 0 && coords.every(isLngLat)
+            if (t === "LineString") return Array.isArray(coords) && coords.length >= 2 && coords.every(isLngLat)
+            if (t === "MultiLineString") {
+                return Array.isArray(coords) && coords.length > 0 && coords.every((line: any) => Array.isArray(line) && line.length >= 2 && line.every(isLngLat))
+            }
+            if (t === "Polygon") {
+                const ring = f?.geometry?.coordinates?.[0]
+                return Array.isArray(ring) && ring.length >= 4
+            }
+            if (t === "MultiPolygon") {
+                const ring = f?.geometry?.coordinates?.[0]?.[0]
+                return Array.isArray(ring) && ring.length >= 4
+            }
+
+            return true
+        })
+        .map((f: any) => {
+            const id = f?.id ?? (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+            return {
+                ...f,
+                id,
+                properties: {
+                    ...(f?.properties ?? {}),
+                    user_color: hexColor,
+                },
+            }
+        })
+
+    return {
+        type: "FeatureCollection",
+        features: validFeatures,
+    }
 }
