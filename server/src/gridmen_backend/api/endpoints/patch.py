@@ -14,6 +14,7 @@ from icrms.ipatch import IPatch, PatchSaveInfo, PatchSchema
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+ogr.UseExceptions()
 
 # APIs for grid patch ################################################
 

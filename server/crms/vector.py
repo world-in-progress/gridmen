@@ -50,6 +50,9 @@ class Vector:
             # Ensure the feature_json is in FeatureCollection format
             feature_collection = self._ensure_feature_collection(feature_json)
             
+            # Clean invalid features
+            feature_collection = self._clean_invalid_feature(feature_collection)
+            
             with open(feature_path, 'w', encoding='utf-8') as f:
                 json.dump(feature_collection, f, ensure_ascii=False, indent=2)
             return {
@@ -144,8 +147,14 @@ class Vector:
         # Ensure the feature_json is in FeatureCollection format
         file_path = os.path.join(self.path, self.name + '.geojson')
         try:
+            # Ensure the feature_json is in FeatureCollection format
+            feature_collection = self._ensure_feature_collection(feature_json)
+            
+            # Clean invalid features
+            feature_collection = self._clean_invalid_feature(feature_collection)
+            
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(feature_json, f, ensure_ascii=False, indent=2)
+                json.dump(feature_collection, f, ensure_ascii=False, indent=2)
             return {
                 'success': True,
                 'message': 'Feature updated successfully',
@@ -510,6 +519,55 @@ class Vector:
         
         else:
             raise ValueError(f'Unsupported GeoJSON type: {geojson_type}')
+    
+    def _clean_invalid_feature(self, feature_collection: dict[str, Any]) -> dict[str, Any]:
+        """
+        Clean invalid features from a FeatureCollection
+        
+        Args:
+            feature_collection: GeoJSON FeatureCollection
+        """
+        if feature_collection.get('type') != 'FeatureCollection':
+            return feature_collection
+
+        valid_features = []
+        original_features = feature_collection.get('features', [])
+        
+        for feature in original_features:
+            geometry = feature.get('geometry')
+            # Allow features without geometry (pure attribute features)
+            if not geometry:
+                valid_features.append(feature)
+                continue
+            
+            geom_type = geometry.get('type')
+            coordinates = geometry.get('coordinates')
+            if not coordinates:
+                logger.warning('Feature with empty coordinates found, skipping')
+                continue
+            
+            # Basic validation for common geometry types
+            is_valid = True
+            if geom_type == 'Polygon':
+                for ring in coordinates:
+                    if not isinstance(ring, list) or len(ring) < 4:
+                        is_valid = False
+                        break
+            elif geom_type == 'MultiPolygon':
+                for polygon in coordinates:
+                    for ring in polygon:
+                        if not isinstance(ring, list) or len(ring) < 4:
+                            is_valid = False
+                            break
+            elif geom_type == 'LineString':
+                if len(coordinates) < 2:
+                    is_valid = False
+            
+            if is_valid:
+                valid_features.append(feature)
+        
+        feature_collection['features'] = valid_features
+        return feature_collection
         
     def terminate(self):
         """

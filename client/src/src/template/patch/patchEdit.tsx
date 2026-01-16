@@ -643,10 +643,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             // store.get<{ on: Function; off: Function }>('isLoading')!.on()
 
             if (featurePickResource.kind === 'file') {
-                topologyLayer.executePickCellsByFeature(featurePickResource.filePath)
+                topologyLayer.executePickCellsByFeature(featurePickResource.filePath, pickingTab)
                 return
             } else if (featurePickResource.kind === 'vector') {
-                topologyLayer.executePickCellsByVectorNode(featurePickResource.nodeInfo, pageContext.current.vectorLockId)
+                topologyLayer.executePickCellsByVectorNode(featurePickResource.nodeInfo, pageContext.current.vectorLockId, pickingTab)
                 return
             }
         } catch (error) {
@@ -654,7 +654,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             // store.get<{ on: Function; off: Function }>('isLoading')!.off()
             toast.error('Failed to execute feature pick')
         }
-    }, [featurePickResource, topologyLayer])
+    }, [featurePickResource, topologyLayer, pickingTab])
 
     const onTopologyOperationClick = (operationType: string) => {
         if (highSpeedMode && operationType !== null) {
@@ -1218,7 +1218,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                     <div className='mb-1 p-1 gap-1 shadow-md'>
                                         <div className='flex flex-row gap-1 items-center'>
                                             <FolderOpen className='h-4 w-4' />
-                                            <span>Select Grids By Vector</span>
+                                            <span>Pick or Unpick Cells By Vector</span>
                                         </div>
                                         <div className='space-y-2 mt-2'>
                                             <div
@@ -1273,7 +1273,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                     disabled={!featurePickResource}
                                                     className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                                                 >
-                                                    Select
+                                                    Apply
                                                 </Button>
                                             </div>
                                         </div>

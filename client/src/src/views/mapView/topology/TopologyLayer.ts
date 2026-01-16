@@ -552,19 +552,20 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         return this.patchCore.check(storageId)
     }
 
-    executePickCellsByFeature(path: string) {
+    executePickCellsByFeature(path: string, addMode = true) {
         this.startCallback()
         this.patchCore.getCellInfoByFeature(path, (storageIds: number[]) => {
-            this._hit(storageIds)
+            this._hit(storageIds, addMode)
             this.endCallback()
             store.get<{ on: Function; off: Function }>('isLoading')!.off()
         })
     }
 
-    executePickCellsByVectorNode(vectorNodeInfo: string, vectorNodeLockId: string | null) {
+    executePickCellsByVectorNode(vectorNodeInfo: string, vectorNodeLockId: string | null, addMode = true) {
+        console.log('addmode', addMode)
         this.startCallback()
         this.patchCore.getCellInfoByVectorNode(vectorNodeInfo, vectorNodeLockId, (storageIds: number[]) => {
-            this._hit(storageIds)
+            this._hit(storageIds, addMode)
             this.endCallback()
             store.get<{ on: Function; off: Function }>('isLoading')!.off()
         })
