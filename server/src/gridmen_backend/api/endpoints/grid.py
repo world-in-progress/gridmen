@@ -13,47 +13,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/grid', tags=['grid-related apis'])
 
-@router.post('/mount', response_model=BaseResponse)
-def mount_grid(
-    node_key: str,
-    schema_node_key: str = Query(..., description="Node key of the schema resource"),
-    patch_node_keys: list[str] = Query(..., description="List of patch node keys"),
-    dem_path: str = Query(None, description="Path to DEM file"),
-    lum_path: str = Query(None, description="Path to LUM file"),
-    grading_threshold: int = Query(-1, description="Grading threshold")
-):
-    """
-    Mount a grid resource with assembly.
-    
-    This endpoint creates a grid resource by assembling schema, patches, 
-    and optional DEM and LUM data.
-    """
-    try:
-        # Prepare mount parameters for the grid assembly
-        mount_params = {
-            'assembly': {
-                'schema_node_key': schema_node_key,
-                'patch_node_keys': patch_node_keys,
-                'dem_path': dem_path,
-                'lum_path': lum_path,
-                'grading_threshold': grading_threshold
-            }
-        }
-        
-        # Mount the grid node using the noodle framework
-        mount_params_string = json.dumps(mount_params)
-        success, error = noodle.mount(node_key, 'grid', mount_params_string)
-        
-        if not success:
-            raise HTTPException(status_code=500, detail=f'Failed to mount grid: {error}')
-        
-        return BaseResponse(
-            success=True,
-            message=f'Grid {node_key} mounted successfully'
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to mount grid: {str(e)}')
-
 
 @router.get('/info', response_model=BaseResponse)
 def get_grid_info(node_key: str):

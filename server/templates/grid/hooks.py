@@ -48,6 +48,25 @@ def MOUNT(node_key: str, params: dict | None = None):
 
         print(f"Starting assembly for grid: {node_key}")
         assembly(resource_dir, node_key, schema_node_key, patch_node_keys, grading_threshold, dem_path, lum_path)
+    else:
+        # If no assembly params provided, and no existing meta file, create a default one
+        meta_path = resource_dir / 'grid.meta.json'
+        if not meta_path.exists():
+            default_meta = {
+                'epsg': 4326,
+                'bounds': [0.0, 0.0, 0.0, 0.0],
+                'grid_info': [],
+                'level_info': [],
+                'subdivide_rules': [],
+                'alignment_origin': [0.0, 0.0],
+                'description': 'Initialized empty grid resource'
+            }
+            try:
+                with open(meta_path, 'w', encoding='utf-8') as f:
+                    json.dump(default_meta, f, indent=4)
+                print(f"Created default grid.meta.json at {meta_path}")
+            except Exception as e:
+                print(f"Warning: Failed to create default grid.meta.json: {e}")
 
 def UNMOUNT(node_key: str):
     """
