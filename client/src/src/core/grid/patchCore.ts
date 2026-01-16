@@ -422,6 +422,10 @@ export default class PatchCore {
             callback && callback(patchInfo)
         })
     }
+
+    remove() {
+        this._dispatcher.remove()
+    }
 }
 
 // Helpers //////////////////////////////////////////////////////////////////////////////////////////////////////

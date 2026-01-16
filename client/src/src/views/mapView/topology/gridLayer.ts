@@ -18,11 +18,11 @@ let CHECK_OFF_EVENT: Function
 const LEVEL_PALETTE_LENGTH = 256 // Patch level range is 0 - 255 (UInt8)
 const DEFAULT_MAX_CELL_NUM = 4096 * 4096 // 16M cells, a size that most GPUs can handle
 
-export default class TopologyLayer implements NHCustomLayerInterface {
+export default class GridLayer implements NHCustomLayerInterface {
     // Layer-related ///////////////////////////////////////////////////////
 
     visible = true
-    id = 'TopologyLayer'
+    id = 'GridLayer'
     type = 'custom' as const
     layerGroup!: CustomLayerGroup
 
@@ -1068,8 +1068,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         }
         this._overlayCanvas = null;
         this._overlayCtx = null;
-
-        this._patchCore?.remove()
     }
 
     // Draw Box //////////////////////////////////////////////////

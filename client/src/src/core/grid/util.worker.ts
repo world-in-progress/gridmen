@@ -125,6 +125,14 @@ export async function getPatchInfo(
     callback(null, renderInfo)
 }
 
+export async function getGridBlockInfo(
+    this: WorkerSelf & Record<'patchManager', PatchManager>,
+    blockInfo: number,
+    callback: Callback<any>
+) {
+    
+}
+
 export async function savePatch(
     this: WorkerSelf & Record<'patchManager', PatchManager>,
     data: {

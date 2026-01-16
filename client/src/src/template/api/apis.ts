@@ -1,5 +1,6 @@
 export * as node from './node'
 export * as proj from './proj'
+export * as grid from './grid'
 export * as patch from './patch'
 export * as vector from './vector'
 

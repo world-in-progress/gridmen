@@ -9,6 +9,14 @@ export type PatchContext = {
     rules: [number, number][]
 }
 
+export type GridContext = {
+    nodeInfo: string
+    lockId: string
+    srcCS: string
+    targetCS: string
+    bBox: BoundingBox2D
+}
+
 export interface StructuredCellRenderVertices {
     tl: Float32Array
     tr: Float32Array
@@ -145,6 +153,26 @@ export class MultiCellInfoParser {
         }
     }
 }
+
+export type BlockCellInfo = {
+    bBoxes: Float64Array
+    altitudes: Float32Array
+    lums: Uint8Array
+}
+
+// export class GridBlockParser {
+//     static fromBuffer(buffer: ArrayBuffer): BlockCellInfo {
+//         if (buffer.byteLength < 4) {
+//             return {
+//                 bBoxes: new Float64Array(0),
+//                 altitudes: new Float32Array(0),
+//                 lums: new Uint8Array(0),
+//             }
+//         }
+
+
+//     }
+// }
 
 export class CellKeyHashTable {
     private _keyHashTable: Uint32Array
