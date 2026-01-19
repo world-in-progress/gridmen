@@ -176,12 +176,16 @@ export default function PatchCreation({
     const adjustCoords = async () => {
         if (pageContext.current.originBounds && pageContext.current.originBounds.length === 4 && pageContext.current.schema) {
             const bounds = pageContext.current.originBounds
+            console.log('originBounds', bounds)
             const gridLevel = pageContext.current.schema.grid_info[0]
             const fromEPSG = 4326
             const toEPSG = pageContext.current.schema.epsg
             const alignmentOrigin = pageContext.current.schema.alignment_origin
 
             const { convertedBounds, alignedBounds, expandedBounds } = await adjustPatchBounds(bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
+            console.log('convertedBounds', convertedBounds)
+            console.log('expandedBounds', expandedBounds)
+
 
             pageContext.current.convertedBounds = convertedBounds
             pageContext.current.adjustedBounds = expandedBounds
@@ -294,9 +298,7 @@ export default function PatchCreation({
     }
 
     const drawBoundsByParams = async () => {
-        console.log('1')
         if (pageContext.current.hasBounds) {
-            console.log('2')
             toast.info('Map bounds have been adjusted')
             return
         }
@@ -307,25 +309,21 @@ export default function PatchCreation({
         }
 
         if (pageContext.current.inputBounds && pageContext.current.inputBounds.length === 4 && pageContext.current.schema) {
-            console.log('3')
+
             console.log('inputBounds', pageContext.current.inputBounds)
-            clearMapAllMarkers()
-            addMapMarker(map, pageContext.current.schema.alignment_origin, pageContext.current.schema.schemaNodeKey)
-            clearDrawPatchBounds()
-            clearGridLines()
             const inputBoundsOn4326 = await covertBoundsTo4326(pageContext.current.inputBounds!, pageContext.current.schema.epsg)
+            console.log('inputBoundsOn4326', inputBoundsOn4326)
 
             if (!inputBoundsOn4326) {
-                console.log('4')
                 toast.error('Failed to convert bounds to EPSG:4326')
                 return
             }
 
             pageContext.current.originBounds = inputBoundsOn4326
+            addMapPatchBounds(map, inputBoundsOn4326, node.key)
 
             adjustCoords()
 
-            addMapPatchBounds(map, inputBoundsOn4326, '4326')
         }
     }
 
