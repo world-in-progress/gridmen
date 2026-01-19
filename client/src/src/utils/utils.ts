@@ -35,6 +35,28 @@ export const convertPointCoordinate = async (originPoint: [number, number], from
     }
 }
 
+// export const convertBoundsCoordinates = async (bounds: [number, number, number, number], fromEPSG: number, toEPSG: number): Promise<[number, number, number, number]> => {
+
+//     const originSW: [number, number] = [bounds[0], bounds[1]]
+//     const originNE: [number, number] = [bounds[2], bounds[3]]
+
+//     const fromEPSGDefs = await apis.proj.getProj4Defs(fromEPSG)
+//     const toEPSGDefs = await apis.proj.getProj4Defs(toEPSG)
+
+//     try {
+//         proj4.defs(`EPSG:${fromEPSG}`, fromEPSGDefs)
+//         proj4.defs(`EPSG:${toEPSG}`, toEPSGDefs)
+
+//         const convertedSW = proj4(`EPSG:${fromEPSG}`, `EPSG:${toEPSG}`, originSW)
+//         const convertedNE = proj4(`EPSG:${fromEPSG}`, `EPSG:${toEPSG}`, originNE)
+
+//         return [convertedSW[0], convertedSW[1], convertedNE[0], convertedNE[1]]
+//     } catch (error) {
+//         console.error('Error converting bounds coordinates:', error)
+//         return bounds
+//     }
+// }
+
 const markerMap = new Map<string, mapboxgl.Marker>()
 const patchBoundsMap = new Map<string, { sourceId: string, fillLayerId: string, outlineLayerId: string }>()
 

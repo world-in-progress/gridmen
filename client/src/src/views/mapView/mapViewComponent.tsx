@@ -136,6 +136,8 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                     center: [initialLongitude, initialLatitude],
                     zoom: initialZoom,
                     maxZoom: maxZoom,
+                    pitch: 0,
+                    pitchWithRotate: false,
                     attributionControl: false,
                     boxZoom: false,
                 })

@@ -5,9 +5,9 @@ import { BaseResponse, MultiCellBaseInfo, PatchMeta } from './types'
 const API_PREFIX = `/api/patch`
 const UNDELETED_FLAG = 0
 
-export const getPatchMeta = async (nodeInfo: string, lockId: string) => {
+export const getPatchMeta = async (nodeInfo: string, lockId: string | null) => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-    const url = `${address}${API_PREFIX}/meta?node_key=${nodeKey}&lock_id=${lockId}`
+    const url = `${address}${API_PREFIX}/meta?node_key=${nodeKey}` + (lockId ? `&lock_id=${lockId}` : '')
 
     try {
         const response = await fetch(url, { method: 'GET' })

@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Fullscreen, GripVertical, MapPin, RotateCcw, SquaresUnite, Upload, X } from 'lucide-react'
-import { cn } from '@/utils/utils'
+import { addMapPatchBounds, clearMapAllPatchBounds, clearMapPatchBounds, cn, convertBoundsCoordinates } from '@/utils/utils'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { IResourceNode } from '../scene/iscene'
 import { IViewContext } from '@/views/IViewContext'
@@ -21,9 +21,21 @@ import { toast } from 'sonner'
 import * as api from '../api/apis'
 import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Checkbox } from "@/components/ui/checkbox"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useLayerGroupStore, useToolPanelStore } from "@/store/storeSet"
+
+interface PatchMapInfo {
+    nodeInfo: string
+    bounds: [number, number, number, number]
+}
+
+interface SelectedPatchItem {
+    nodeInfo: string
+    nodeLockId: string | null
+    schemaNodeKey: string
+}
 
 interface GridCreationProps {
     node: IResourceNode
@@ -32,29 +44,21 @@ interface GridCreationProps {
 
 interface PageContext {
     name: string
-    selectedPatches: PatchResourceItem[]
-    patchesBounds: Record<string, [number, number, number, number]>
+    patchMap: Map<string, PatchMapInfo[]>
+    selectedPatches: SelectedPatchItem[]
     selectedVectors: VectorResourceItem[]
 
-    demFilePath?: string
-    lumFilePath?: string
+    demFilePath: string
+    lumFilePath: string
 }
 
 type VectorAggOp = "set" | "add" | "subtract" | "max"
 
-interface PatchResourceItem {
-    key: string
-    name: string
-    nodeInfo?: string
-    nodeLockId?: string | null
-}
-
 interface VectorResourceItem {
-    key: string
-    name: string
-    nodeInfo?: string
-    nodeLockId?: string | null
-    vectorInfo?: Record<string, any>
+    nodeInfo: string
+    nodeLockId: string | null
+
+    vectorInfo: Record<string, any>
 
     demEnabled: boolean
     demOp: VectorAggOp
@@ -113,6 +117,38 @@ const djb2Hash = (input: string) => {
     let hash = 5381
     for (let i = 0; i < input.length; i++) hash = (hash * 33) ^ input.charCodeAt(i)
     return (hash >>> 0).toString(16)
+}
+
+const schemaBorderColorClasses = [
+    "border-sky-500",
+    "border-emerald-500",
+    "border-amber-500",
+    "border-fuchsia-500",
+    "border-rose-500",
+    "border-indigo-500",
+]
+
+const schemaBorderHexColors: Record<string, string> = {
+    "border-sky-500": "#0ea5e9",
+    "border-emerald-500": "#10b981",
+    "border-amber-500": "#f59e0b",
+    "border-fuchsia-500": "#d946ef",
+    "border-rose-500": "#f43f5e",
+    "border-indigo-500": "#6366f1",
+    "border-slate-200": "#e2e8f0",
+}
+
+const pickSchemaHexColor = (schemaNodeKey: string | undefined | null) => {
+    const borderClass = pickSchemaBorderClass(schemaNodeKey)
+    return schemaBorderHexColors[borderClass] ?? "#0ea5e9"
+}
+
+const pickSchemaBorderClass = (schemaNodeKey: string | undefined | null) => {
+    const key = String(schemaNodeKey ?? "").trim()
+    if (!key) return "border-slate-200"
+    let hash = 0
+    for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0
+    return schemaBorderColorClasses[hash % schemaBorderColorClasses.length]
 }
 
 const toSafeMapId = (raw: string) => {
@@ -284,8 +320,8 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
     const pageContext = React.useRef<PageContext>({
         name: "",
+        patchMap: new Map<string, PatchMapInfo[]>(),
         selectedPatches: [],
-        patchesBounds: {},
         selectedVectors: [],
 
         demFilePath: "",
@@ -294,7 +330,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
     const [isDragOver, setIsDragOver] = useState(false)
     const [isVectorDragOver, setIsVectorDragOver] = useState(false)
-    const [mergeDialogOpen, setMergeDialogOpen] = useState(false)
+    const [assemblyDialogOpen, setAssemblyDialogOpen] = useState(false)
     const [highlightedResource, setHighlightedResource] = useState<string | null>(null)
 
     const [, triggerRepaint] = useReducer((x) => x + 1, 0)
@@ -312,6 +348,29 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             pageContext.current = { ...(node as ResourceNode).context }
         } else {
             pageContext.current.name = node.name.split(".")[0]
+        }
+
+        // Normalize patchMap to Map (supports legacy persisted shapes)
+        const rawPatchMap: any = (pageContext.current as any).patchMap
+        if (rawPatchMap instanceof Map) {
+            pageContext.current.patchMap = rawPatchMap
+        } else if (Array.isArray(rawPatchMap)) {
+            // Common legacy shape: Array<[schemaNodeKey, PatchMapInfo[]]>
+            try {
+                pageContext.current.patchMap = new Map<string, PatchMapInfo[]>(rawPatchMap as any)
+            } catch {
+                pageContext.current.patchMap = new Map<string, PatchMapInfo[]>()
+            }
+        } else if (rawPatchMap && typeof rawPatchMap === "object") {
+            // Common legacy shape: Record<string, PatchMapInfo[]>
+            pageContext.current.patchMap = new Map<string, PatchMapInfo[]>(Object.entries(rawPatchMap) as any)
+        } else {
+            pageContext.current.patchMap = new Map<string, PatchMapInfo[]>()
+        }
+
+        // Ensure selectedPatches exists
+        if (!Array.isArray((pageContext.current as any).selectedPatches)) {
+            ; (pageContext.current as any).selectedPatches = []
         }
 
         if (typeof pageContext.current.demFilePath !== "string") {
@@ -333,6 +392,13 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
             if (typeof item.lumEnabled !== "boolean") item.lumEnabled = Boolean(item.lumEnabled)
             if (typeof item.lumValue !== "string") item.lumValue = item.lumValue == null ? "" : String(item.lumValue)
+        }
+
+        // Backward compatibility for older saved context
+        for (const item of pageContext.current.selectedPatches as any[]) {
+            if (typeof item?.schemaNodeKey !== "string") {
+                item.schemaNodeKey = item?.schemaNodeKey == null ? "" : String(item.schemaNodeKey)
+            }
         }
 
         triggerRepaint()
@@ -419,20 +485,17 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
         const reorderRaw = e.dataTransfer.getData("application/gridmen-vector-reorder")
         if (reorderRaw) {
-            try {
-                const payload = JSON.parse(reorderRaw) as { fromIndex: number }
-                if (typeof payload.fromIndex !== "number") return
-                const toIndex = pageContext.current.selectedPatches.length - 1
-                if (payload.fromIndex === toIndex) return
+            const payload = JSON.parse(reorderRaw) as { fromIndex: number }
+            if (typeof payload.fromIndex !== "number") return
+            const toIndex = pageContext.current.selectedPatches.length - 1
+            if (payload.fromIndex === toIndex) return
 
-                const list = pageContext.current.selectedPatches
-                const [moved] = list.splice(payload.fromIndex, 1)
-                list.splice(Math.max(0, toIndex), 0, moved)
-                triggerRepaint()
-                return
-            } catch {
-                // ignore
-            }
+            const list = pageContext.current.selectedPatches
+            const [moved] = list.splice(payload.fromIndex, 1)
+            list.splice(Math.max(0, toIndex), 0, moved)
+            triggerRepaint()
+
+            return
         }
 
         const raw = e.dataTransfer.getData("application/gridmen-node") || e.dataTransfer.getData("text/plain")
@@ -440,7 +503,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         addPatchFromExplorerDrop(raw)
     }
 
-    const addPatchFromExplorerDrop = (raw: string) => {
+    const addPatchFromExplorerDrop = async (raw: string) => {
         try {
             const payload = JSON.parse(raw) as {
                 nodeKey: string
@@ -455,38 +518,67 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                 return
             }
 
-            const exists = pageContext.current.selectedPatches.some((p) => p.key === payload.nodeKey)
+            const exists = pageContext.current.selectedPatches.some((p) => p.nodeInfo === payload.nodeInfo)
             if (exists) {
                 toast.info("This patch is already in the list")
                 return
             }
 
+            console.log("Adding patch from drop:", payload.nodeInfo, payload.nodeLockId)
+            const getPatchResponse = await api.patch.getPatchMeta(payload.nodeInfo, payload.nodeLockId)
+            console.log("Fetched patch info:", getPatchResponse)
+
+            const schemaNodeKey = getPatchResponse.schema_node_key
+            const patchInfo: PatchMapInfo = {
+                nodeInfo: payload.nodeInfo,
+                bounds: getPatchResponse.bounds,
+            }
+
+            const existing = pageContext.current.patchMap.get(schemaNodeKey)
+            if (Array.isArray(existing)) {
+                existing.push(patchInfo)
+            } else {
+                pageContext.current.patchMap.set(schemaNodeKey, [patchInfo])
+            }
+
+            console.log(pageContext.current.patchMap)
+
+            const patchOriginBounds = getPatchResponse.bounds
+            const patchConvertedBounds = (await convertBoundsCoordinates(patchOriginBounds, getPatchResponse.epsg, 4326,)) as [number, number, number, number]
+            const schemaHex = pickSchemaHexColor(schemaNodeKey)
+            addMapPatchBounds(map, patchConvertedBounds, payload.nodeInfo, false, {
+                lineColor: schemaHex,
+                fillColor: schemaHex,
+                opacity: 0.12,
+                lineWidth: 3,
+            })
+
             pageContext.current.selectedPatches.push({
-                key: payload.nodeKey,
-                name: payload.nodeKey.split(".").pop() || "Patch",
                 nodeInfo: payload.nodeInfo,
                 nodeLockId: payload.nodeLockId,
+                schemaNodeKey: getPatchResponse.schema_node_key,
             })
 
             triggerRepaint()
 
         } catch {
-            const nodeKey = raw
-            if (!nodeKey) return
-            if (!nodeKey.toLowerCase().includes("patch")) {
+            const nodeInfo = raw
+            if (!nodeInfo) return
+            if (!nodeInfo.toLowerCase().includes("patch")) {
                 toast.error("Please drag a patch resource")
                 return
             }
 
-            const exists = pageContext.current.selectedPatches.some((p) => p.key === nodeKey)
+            const exists = pageContext.current.selectedPatches.some((p) => p.nodeInfo === nodeInfo)
             if (exists) {
                 toast.info("This patch is already in the list")
                 return
             }
 
             pageContext.current.selectedPatches.push({
-                key: nodeKey,
-                name: nodeKey.split(".").pop() || "Patch",
+                nodeInfo: nodeInfo,
+                nodeLockId: null,
+                schemaNodeKey: "",
             })
 
             triggerRepaint()
@@ -518,7 +610,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                 return
             }
 
-            const exists = pageContext.current.selectedVectors.some((v) => v.key === payload.nodeKey)
+            const exists = pageContext.current.selectedVectors.some((v) => v.nodeInfo === payload.nodeInfo)
             if (exists) {
                 toast.info("This vector is already in the list")
                 return
@@ -532,8 +624,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             addVectorPreviewToMap(payload.nodeKey, getVectorResponse.data)
 
             pageContext.current.selectedVectors.push({
-                key: payload.nodeKey,
-                name: payload.sourceTreeTitle || payload.nodeKey.split(".").pop() || "Vector",
                 nodeInfo: payload.nodeInfo,
                 nodeLockId: payload.nodeLockId,
                 vectorInfo: getVectorResponse.data,
@@ -548,7 +638,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
             triggerRepaint()
         } catch {
-            // Fallback: only text/plain nodeKey is available (templateName unknown)
             const nodeKey = raw
             if (!nodeKey) return
             if (!nodeKey.toLowerCase().includes("vector")) {
@@ -556,15 +645,16 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                 return
             }
 
-            const exists = pageContext.current.selectedVectors.some((v) => v.key === nodeKey)
+            const exists = pageContext.current.selectedVectors.some((v) => v.nodeInfo === nodeKey)
             if (exists) {
                 toast.info("This vector is already in the list")
                 return
             }
 
             pageContext.current.selectedVectors.push({
-                key: nodeKey,
-                name: nodeKey.split(".").pop() || "Vector",
+                nodeInfo: nodeKey,
+                nodeLockId: null,
+                vectorInfo: {},
 
                 demEnabled: false,
                 demOp: "max",
@@ -583,20 +673,16 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
         const reorderRaw = e.dataTransfer.getData("application/gridmen-vector-reorder")
         if (reorderRaw) {
-            try {
-                const payload = JSON.parse(reorderRaw) as { fromIndex: number }
-                if (typeof payload.fromIndex !== "number") return
-                const toIndex = pageContext.current.selectedVectors.length - 1
-                if (payload.fromIndex === toIndex) return
+            const payload = JSON.parse(reorderRaw) as { fromIndex: number }
+            if (typeof payload.fromIndex !== "number") return
+            const toIndex = pageContext.current.selectedVectors.length - 1
+            if (payload.fromIndex === toIndex) return
 
-                const list = pageContext.current.selectedVectors
-                const [moved] = list.splice(payload.fromIndex, 1)
-                list.splice(Math.max(0, toIndex), 0, moved)
-                triggerRepaint()
-                return
-            } catch {
-                // ignore
-            }
+            const list = pageContext.current.selectedVectors
+            const [moved] = list.splice(payload.fromIndex, 1)
+            list.splice(Math.max(0, toIndex), 0, moved)
+            triggerRepaint()
+            return
         }
 
         const raw = e.dataTransfer.getData("application/gridmen-node") || e.dataTransfer.getData("text/plain")
@@ -646,126 +732,128 @@ export default function GridCreation({ node, context }: GridCreationProps) {
     const handleVectorRemove = (index: number) => {
         const item = pageContext.current.selectedVectors[index]
         if (!item) return
-        removeVectorPreviewFromMap(item.key)
+        removeVectorPreviewFromMap(item.nodeInfo)
         pageContext.current.selectedVectors = pageContext.current.selectedVectors.filter((_, i) => i !== index)
         triggerRepaint()
     }
 
     const handleVectorReset = () => {
         for (const v of pageContext.current.selectedVectors) {
-            if (v?.key) removeVectorPreviewFromMap(v.key)
+            if (v?.nodeInfo) removeVectorPreviewFromMap(v.nodeInfo)
         }
         pageContext.current.selectedVectors = []
         triggerRepaint()
     }
 
     const handlePatchClick = (resourceKey: string) => {
-        const patchName = resourceKey.split(".").pop()!
 
         setHighlightedResource(resourceKey)
-
-        if (pageContext.current.patchesBounds[patchName]) {
-            // const patchBoundsOn4326 = convertToWGS84(
-            //     pageContext.current.patchesBounds[patchName],
-            //     pageContext.current.schema.epsg.toString()
-            // )
-            // highlightPatchBounds(patchBoundsOn4326, patchName)
-        }
     }
 
     const handlePatchRemove = (index: number) => {
         const item = pageContext.current.selectedPatches[index]
         if (!item) return
-        const resourceKey = item.key
-        const patchName = resourceKey.split(".").pop()!
 
-        // clearBoundsById(patchName)
-
-        delete pageContext.current.patchesBounds[patchName]
+        const schemaNodeKey = item.schemaNodeKey
+        const list = pageContext.current.patchMap.get(schemaNodeKey)
+        if (Array.isArray(list)) {
+            const next = list.filter((p) => p.nodeInfo !== item.nodeInfo)
+            if (next.length > 0) {
+                pageContext.current.patchMap.set(schemaNodeKey, next)
+            } else {
+                pageContext.current.patchMap.delete(schemaNodeKey)
+            }
+        }
 
         pageContext.current.selectedPatches = pageContext.current.selectedPatches.filter((_, i) => i !== index)
+        clearMapPatchBounds(map, item.nodeInfo)
 
         triggerRepaint()
     }
 
     const handleReset = () => {
-        Object.keys(pageContext.current.patchesBounds).forEach((id) => {
-            // clearBoundsById(id)
+
+        pageContext.current.selectedPatches.forEach((patch) => {
+            clearMapPatchBounds(map, patch.nodeInfo)
         })
 
         pageContext.current.selectedPatches = []
-        pageContext.current.patchesBounds = {}
+        pageContext.current.patchMap = new Map<string, PatchMapInfo[]>()
 
         for (const v of pageContext.current.selectedVectors) {
-            if (v?.key) removeVectorPreviewFromMap(v.key)
+            if (v?.nodeInfo) removeVectorPreviewFromMap(v.nodeInfo)
         }
         pageContext.current.selectedVectors = []
 
         triggerRepaint()
     }
 
+    const handleAssemblyClick = () => {
+        if (pageContext.current.demFilePath === "" || pageContext.current.lumFilePath === "") {
+            toast.error("Please upload both DEM and LUM files before creating the grid")
+            return
+        }
+
+        if (pageContext.current.patchMap.size > 1) {
+            toast.error("Please delete patches with different schemas before creating the grid")
+            return
+        } else if (pageContext.current.patchMap.size === 1 && pageContext.current.selectedPatches.length > 0) {
+            setAssemblyDialogOpen(true)
+        }
+    }
+
+    const handleConfirmAssembly = async () => {
+        const patchList = pageContext.current.selectedPatches.map((p) => p.nodeInfo)
+        const vectorData = pageContext.current.selectedVectors.map((v) => ({
+            vectorNodeInfo: v.nodeInfo,
+            demOps: {
+                demOp: v.demOp,
+                demValue: v.demValue,
+            },
+            lumOps: {
+                lumValue: v.lumValue,
+            },
+        }))
+
+        const gridData = {
+            demPath: pageContext.current.demFilePath,
+            lumPath: pageContext.current.lumFilePath,
+            patch: patchList,
+            vector: vectorData,
+        }
+
+        console.log("Submitting grid creation with data:", gridData)
+
+        try {
+            await api.node.mountNode({
+                nodeInfo: node.nodeInfo,
+                templateName: "grid",
+                mountParamsString: JSON.stringify(gridData),
+            })
+
+            // 清理patch
+            patchList.forEach((patch) => { clearMapPatchBounds(map, patch) })
+
+            // TODO：清理vector
+
+
+            node.isTemp = false
+                ; (node as ResourceNode).tree.tempNodeExist = false
+                ; (node.tree as ResourceTree).selectedNode = null
+                ; (node.tree as ResourceTree).notifyDomUpdate()
+
+            const { isEditMode } = useLayerGroupStore.getState()
+            useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
+
+            await (node.tree as ResourceTree).refresh()
+            toast.success("Created successfully")
+        } catch (error) {
+            toast.error("Failed to create grid")
+        }
+    }
+
     const fitGridBounds = () => {
-        if (Object.keys(pageContext.current.patchesBounds).length === 0) {
-            toast.error("No patches selected")
-            return
-        }
 
-        let minX = Number.POSITIVE_INFINITY
-        let minY = Number.POSITIVE_INFINITY
-        let maxX = Number.NEGATIVE_INFINITY
-        let maxY = Number.NEGATIVE_INFINITY
-
-        Object.values(pageContext.current.patchesBounds).forEach((bounds) => {
-            minX = Math.min(minX, bounds[0])
-            minY = Math.min(minY, bounds[1])
-            maxX = Math.max(maxX, bounds[2])
-            maxY = Math.max(maxY, bounds[3])
-        })
-
-        const bounds = [minX, minY, maxX, maxY] as [number, number, number, number]
-
-        // const boundsOn4326 = convertToWGS84(bounds, pageContext.current.schema.epsg.toString())
-
-        // const map = store.get<mapboxgl.Map>('map')!
-        // map.fitBounds([
-        //     [boundsOn4326[0], boundsOn4326[1]],
-        //     [boundsOn4326[2], boundsOn4326[3]]
-        // ], {
-        //     padding: 80,
-        //     duration: 1000
-        // })
-    }
-
-    const handleMergeClick = () => {
-        if (pageContext.current.name === "") {
-            toast.error("Please enter a grid name")
-            return
-        }
-        if (pageContext.current.selectedPatches.length > 0) {
-            setMergeDialogOpen(true)
-        }
-    }
-
-    const handleConfirmMerge = async () => {
-        // const treeger_address = 'http://127.0.0.1:8000'
-        // const gridInfo: GridInfo = {
-        //     patches: pageContext.current.selectedResources.map((resource) => ({
-        //         node_key: resource,
-        //         treeger_address: treeger_address
-        //     }))
-        // }
-        // const response = await createGrid((node as ResourceNode), pageContext.current.gridName, gridInfo)
-
-        // store.get<{ on: Function; off: Function }>('isLoading')!.off()
-        // setMergeDialogOpen(false)
-        // clearDrawPatchBounds()
-        // resetForm()
-
-        toast.success("Created successfully")
-
-        const tree = node.tree as ResourceTree
-        await tree.alignNodeInfo(node, true)
-        tree.notifyDomUpdate()
     }
 
     return (
@@ -819,7 +907,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                             />
                         </div>
                     </div>
-                    {/* TODO：DEM和LUM文件上传 */}
                     <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
                         <h2 className="text-lg text-black font-semibold">Raster Resource Upload</h2>
                         <div className="space-y-1 flex flex-col">
@@ -897,6 +984,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                     {/* ----------- */}
                     {/* Patch Drop Zone */}
                     {/* ----------- */}
+                    {/* TODO:用map来维护 */}
                     <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
                         <h2 className="text-lg text-black font-semibold mb-2">Patch Drop Zone</h2>
                         <div>
@@ -916,18 +1004,21 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                         <Upload className="w-8 h-8 mb-2" />
                                         <p className="text-sm font-medium mb-1">Drag patches here</p>
                                         <p className="text-xs text-center">Drop patches from the EXPLORER</p>
+                                        <p className="text-md font-semibold text-center">With same schema</p>
                                     </div>
                                 ) : (
                                     <div className="h-[30vh] overflow-y-auto scrollbar-hide pr-1">
-                                        <div className="space-y-0.5">
+                                        <div className="space-y-1">
                                             {pageContext.current.selectedPatches.map((patch, index) => {
-                                                const patchKey = patch.key
-                                                const patchName = patch.name || patchKey.split(".").pop() || "Patch"
+                                                const patchKey = patch.nodeInfo
+                                                const patchName = patchKey.split(".").pop() || "Patch"
+                                                const borderClass = pickSchemaBorderClass(patch.schemaNodeKey)
                                                 return (
                                                     <div
                                                         key={patchKey}
                                                         className={cn(
-                                                            "bg-white border border-slate-200 rounded-lg p-3 flex flex-col gap-2 hover:shadow-sm transition-all duration-200",
+                                                            "bg-white rounded-lg p-3 flex flex-col gap-2 hover:shadow-sm transition-all duration-200",
+                                                            `border-2 ${borderClass}`,
                                                             highlightedResource === patchKey && "border-4 border-yellow-300",
                                                         )}
                                                     >
@@ -968,7 +1059,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                     </div>
                                 )}
                             </div>
-
                             <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
                                 <span>{pageContext.current.selectedPatches.length || 0} patches uploaded</span>
                                 <Button
@@ -1017,7 +1107,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
                                                 return (
                                                     <div
-                                                        key={item.key}
+                                                        key={item.nodeInfo}
                                                         draggable
                                                         onDragStart={handleVectorItemDragStart(index)}
                                                         onDragOver={handleVectorItemDragOver}
@@ -1030,9 +1120,9 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                     <GripVertical className="h-4 w-4 text-white" />
                                                                 </div>
                                                                 <div className="min-w-0 flex-1">
-                                                                    <p className="text-slate-900 text-sm font-medium truncate mb-0.5">{item.name}</p>
+                                                                    <p className="text-slate-900 text-sm font-medium truncate mb-0.5">{item.nodeInfo.split(".").pop()}</p>
                                                                     <p className="text-xs text-slate-500 truncate font-mono bg-slate-50 px-2 py-0.5 rounded inline-block">
-                                                                        {item.key}
+                                                                        {item.nodeInfo}
                                                                     </p>
                                                                 </div>
                                                             </div>
@@ -1195,7 +1285,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                         </Button>
                         <Button
                             type="button"
-                            onClick={handleMergeClick}
+                            onClick={handleAssemblyClick}
                             className="bg-green-500 hover:bg-green-600 text-white cursor-pointer"
                             disabled={pageContext.current.selectedPatches.length === 0}
                         >
@@ -1205,7 +1295,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                     </div>
                 </div>
             </div>
-            <AlertDialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
+            <AlertDialog open={assemblyDialogOpen} onOpenChange={setAssemblyDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Confirm Merge Patches</AlertDialogTitle>
@@ -1218,7 +1308,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                 <ul className="list-disc list-inside space-y-1">
                                     {pageContext.current.selectedPatches.map((patch, index) => (
                                         <li key={index} className="text-sm">
-                                            {(patch.name || patch.key.split(".").pop() || "Patch")} <span className="text-gray-500 text-xs">({patch.key})</span>
+                                            {(patch.nodeInfo.split(".").pop() || "Patch")} <span className="text-gray-500 text-xs">({patch.nodeInfo})</span>
                                         </li>
                                     ))}
                                 </ul>
@@ -1227,7 +1317,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleConfirmMerge} className="bg-green-600 hover:bg-green-500 cursor-pointer">
+                        <AlertDialogAction onClick={handleConfirmAssembly} className="bg-green-600 hover:bg-green-500 cursor-pointer">
                             Confirm
                         </AlertDialogAction>
                     </AlertDialogFooter>
