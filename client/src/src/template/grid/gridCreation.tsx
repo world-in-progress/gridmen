@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from "react"
-import React, { useCallback, useEffect, useReducer, useRef, useState } from "react"
 import {
     AlertDialog,
     AlertDialogTitle,
@@ -325,7 +324,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         selectedPatches: [],
         selectedVectors: [],
 
-        schema: null,
         demFilePath: "",
         lumFilePath: "",
     })
@@ -334,8 +332,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
     const [isVectorDragOver, setIsVectorDragOver] = useState(false)
     const [assemblyDialogOpen, setAssemblyDialogOpen] = useState(false)
     const [highlightedResource, setHighlightedResource] = useState<string | null>(null)
-
-    const tempSchemaKeyRef = useRef<string | null>(null)
 
     const tempSchemaKeyRef = useRef<string | null>(null)
 
