@@ -308,8 +308,6 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 mountParamsString: JSON.stringify(newVector)
             })
 
-            console.log('draw featureJson:', featureJson)
-
             await api.vector.saveVector(node.nodeInfo, null, featureJson)
 
             node.isTemp = false
@@ -340,7 +338,6 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
     }
 
     const handleReselectVectorType = () => {
-
         drawInstance.deleteAll()
         pageContext.current.hasVector = false
         pageContext.current.vectorData = {
@@ -383,6 +380,19 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                     templateName: 'vector',
                     mountParamsString: JSON.stringify(newVector)
                 })
+
+                await api.vector.saveUploadedVector(node.nodeInfo, null, filePath)
+
+                node.isTemp = false
+                    ; (node as ResourceNode).tree.tempNodeExist = false
+                    ; (node.tree as ResourceTree).selectedNode = null
+                    ; (node.tree as ResourceTree).notifyDomUpdate()
+
+                const { isEditMode } = useLayerGroupStore.getState()
+                useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
+
+                await (node.tree as ResourceTree).refresh()
+                toast.success('Patch Created successfully')
             } catch (e) {
                 console.error("Failed to mount node for uploaded vector:", e)
                 toast.error(`Failed to mount node for uploaded vector: ${e}`)
@@ -523,7 +533,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                     value={uploadFilePath}
                                     readOnly={true}
                                     placeholder="Select or paste a local file path"
-                                    className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
+                                    className="w-full h-8 bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
                                 />
                                 <Button
                                     variant={'default'}
@@ -534,8 +544,43 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                     Select
                                 </Button>
                             </div>
+                            {/* TODO: 设置颜色的下拉框 */}
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="text-sm w-full font-medium text-slate-900">
+                                    Vector Color:
+                                </div>
+                                <Select
+                                    value={pageContext.current.vectorData.color}
+                                    onValueChange={(value: any) => {
+                                        pageContext.current.vectorData.color = value
+                                        applyVectorColorToDraw(getHexColorByValue(value))
+                                        triggerRepaint()
+                                    }}
+                                >
+                                    <SelectTrigger className="w-full h-8 cursor-pointer bg-white border-slate-300 text-slate-900">
+                                        <SelectValue placeholder="Select color" />
+                                    </SelectTrigger>
+                                    <SelectContent className="bg-white border-slate-200">
+                                        {vectorColorMap.map((item) => (
+                                            <SelectItem
+                                                key={item.value}
+                                                value={item.value}
+                                                className="cursor-pointer text-slate-900 hover:bg-slate-100"
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="w-4 h-4 rounded-full border border-slate-300"
+                                                        style={{ backgroundColor: item.color }}
+                                                    />
+                                                    <span>{item.name}</span>
+                                                </div>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <p className="text-xs text-slate-600">
-                                Click Select to pick a file.
+                                Click Select to pick a file and set its color.
                             </p>
                         </TabsContent>
                     </Tabs>
@@ -685,11 +730,10 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                                                 value={pageContext.current.vectorData.color}
                                                 onValueChange={(value: any) => {
                                                     pageContext.current.vectorData.color = value
-                                                    applyVectorColorToDraw(getHexColorByValue(value))
                                                     triggerRepaint()
                                                 }}
                                             >
-                                                <SelectTrigger className="w-full cursor-pointer bg-white border-slate-300 text-slate-900">
+                                                <SelectTrigger className="w-full h-8 cursor-pointer bg-white border-slate-300 text-slate-900">
                                                     <SelectValue placeholder="Select color" />
                                                 </SelectTrigger>
                                                 <SelectContent className="bg-white border-slate-200">

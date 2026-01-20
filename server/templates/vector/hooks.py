@@ -21,7 +21,7 @@ def MOUNT(node_key: str, mount_params: dict | None):
     epsg: str = mount_params.get('epsg', None)
     color: str = mount_params.get('color', None)
     
-    if name is None or epsg is None or color is None:
+    if name is None:
         raise ValueError(f'Missing required mount parameters for Feature ({node_key}).')
     
     meta_path = resource_dir / 'meta.json'

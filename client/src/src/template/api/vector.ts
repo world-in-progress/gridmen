@@ -30,15 +30,13 @@ export const saveVector = async (nodeInfo: string, lockId: string | null, featur
     }
 }
 
-export const saveUploadedVector = async (nodeInfo: string, lockId: string, fileInfo: VectorFileInfo) => {
+export const saveUploadedVector = async (nodeInfo: string, lockId: string | null, filePath: string) => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-    const url = `${address}${API_PREFIX}/save_uploaded?node_key=${nodeKey}&lock_id=${lockId}`
+    const url = `${address}${API_PREFIX}/save_uploaded?node_key=${nodeKey}` + (lockId ? `&lock_id=${lockId}` : '')
 
     try {
         const requestBody = {
-            node_key: nodeKey,
-            file_path: fileInfo.filePath,
-            file_type: fileInfo.fileType
+            file_path: filePath,
         }
 
         const response = await fetch(url, {
@@ -61,7 +59,7 @@ export const saveUploadedVector = async (nodeInfo: string, lockId: string, fileI
 
 export const getVector = async (nodeInfo: string, lockId: string | null) => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-    const url = `${address}${API_PREFIX}/?node_key=${nodeKey}` + (lockId ? `&lock_id=${lockId}` : '')
+    const url = `${address}${API_PREFIX}/?node_key=${nodeKey}` + (lockId ? `&lock_id=${lockId}` : '') + '&target_epsg=4326'
 
     try {
         const response = await fetch(url, { method: 'GET' })

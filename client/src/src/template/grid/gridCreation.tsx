@@ -211,11 +211,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         const featureJson = vectorInfo?.feature_json
         if (!featureJson || featureJson?.type !== "FeatureCollection") return
 
-        const epsg = String(vectorInfo?.epsg ?? "4326")
-        if (epsg && epsg !== "4326") {
-            toast.warning(`Vector EPSG=${epsg} is not supported for preview (expected 4326)`)
-        }
-
         const safeId = toSafeMapId(vectorKey)
         const sourceId = `grid-vector-src-${safeId}`
         const fillLayerId = `grid-vector-fill-${safeId}`
