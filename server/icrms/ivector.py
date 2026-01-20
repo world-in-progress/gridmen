@@ -20,7 +20,7 @@ class IVector:
     def save_uploaded_feature(self, file_path: str, file_type: str) -> dict[str, bool | str]:
         ...
 
-    def get_feature(self) -> dict[str, Any]:
+    def get_feature(self, target_epsg: str) -> dict[str, Any]:
         ...
 
     def get_feature_json_computation(self) -> dict[str, Any]:

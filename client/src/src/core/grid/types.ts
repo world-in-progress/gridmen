@@ -154,10 +154,15 @@ export class MultiCellInfoParser {
     }
 }
 
-export type BlockCellInfo = {
+export type MultiBlockCellInfo = {
     bBoxes: Float64Array
     altitudes: Float32Array
     lums: Uint8Array
+}
+
+export type GridBlockMetaInfo = {
+    epsg: number
+    blockExtents: number[]
 }
 
 // export class GridBlockParser {

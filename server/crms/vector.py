@@ -15,8 +15,8 @@ DEFAULT_EPSG = '4326'  # Default EPSG code for GeoJSON storage
 
 class VectorMeta(BaseModel):
     name: str
-    epsg: str
-    color: str
+    epsg: str | None
+    color: str | None
 
 class Vector:
     """
@@ -66,8 +66,9 @@ class Vector:
                 'message': str(e)
             }
 
-    def save_uploaded_feature(self, file_path: str, file_type: str) -> dict[str, bool | str]:
+    def save_uploaded_feature(self, file_path: str) -> dict[str, bool | str]:
         feature_path = self.path / f'{self.name}.geojson'
+        file_type = Path(file_path).suffix.lower().strip('.')
         try:
             if file_type == 'shp':
                 feature_json, source_epsg = self._shp_to_geojson_with_epsg(file_path)
@@ -81,13 +82,24 @@ class Vector:
             else:
                 raise ValueError(f'Unsupported file type: {file_type}')
             
-            # Convert to EPSG:4326 for storage if needed
-            if source_epsg and source_epsg != DEFAULT_EPSG:
-                logger.info(f'Converting feature from EPSG:{source_epsg} to EPSG:{DEFAULT_EPSG} for storage')
-                feature_json = self._transform_geojson_coordinates(feature_json, source_epsg, DEFAULT_EPSG)
+            # # Convert to EPSG:4326 for storage if needed
+            # if source_epsg and source_epsg != DEFAULT_EPSG:
+            #     logger.info(f'Converting feature from EPSG:{source_epsg} to EPSG:{DEFAULT_EPSG} for storage')
+            #     feature_json = self._transform_geojson_coordinates(feature_json, source_epsg, DEFAULT_EPSG)
+            
+            self.epsg = source_epsg
             
             with open(feature_path, 'w', encoding='utf-8') as f:
                 json.dump(feature_json, f, ensure_ascii=False, indent=2)
+                
+            with open(self.meta_path, 'w', encoding='utf-8') as f:
+                meta = VectorMeta(
+                    name=self.name,
+                    epsg=self.epsg,
+                    color=self.color
+                )
+                f.write(meta.model_dump_json(indent=2))
+                
             return {
                 'success': True,
                 'message': f'Feature saved successfully as FeatureCollection (converted from EPSG:{source_epsg} to EPSG:{DEFAULT_EPSG})' if source_epsg and source_epsg != DEFAULT_EPSG else 'Feature saved successfully as FeatureCollection'
@@ -99,13 +111,20 @@ class Vector:
                 'message': str(e)
             }
 
-    def get_feature(self) -> dict[str, Any]:
+    def get_feature(self, target_epsg: str = DEFAULT_EPSG) -> dict[str, Any]:
         """
         Get feature json
         """
         file_path = os.path.join(self.path, self.name + '.geojson')
+        
         with open(file_path, 'r', encoding='utf-8') as f:
             feature_json = json.load(f)
+            
+        
+        if self.epsg != target_epsg:
+            logger.info(f'Transforming GeoJSON coordinates from EPSG:{self.epsg} to EPSG:{target_epsg}')
+            feature_json = self._transform_geojson_coordinates(feature_json, self.epsg, target_epsg)
+            
         return {
             'name': self.name,
             'color': self.color,

@@ -14,8 +14,8 @@ layout(location = 5) in vec2 trLow;
 layout(location = 6) in vec2 blLow;
 layout(location = 7) in vec2 brLow;
 layout(location = 8) in uint level;
-layout(location = 9) in uint assignment;
-
+layout(location = 9) in uint hit;
+layout(location = 10) in uint deleted;
 
 uniform mat4 uMatrix;
 uniform vec2 centerLow;

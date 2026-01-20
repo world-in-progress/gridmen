@@ -2,7 +2,7 @@ import proj4 from 'proj4'
 import * as apis from '../../template/api/apis'
 import type { Converter } from 'proj4/dist/lib/core'
 import { MercatorCoordinate } from '../math/mercatorCoordinate'
-import { PatchContext, StructuredCellRenderVertices } from './types'
+import { GridContext, StructuredCellRenderVertices } from './types'
 
 interface PatchLevelInfo {
     width: number
@@ -10,28 +10,13 @@ interface PatchLevelInfo {
 }
 
 export default class PatchManager {
-    private _context: PatchContext
+    private _context: GridContext
     private _centerX!: Float32Array
     private _centerY!: Float32Array
     private _projConverter!: Converter
-    private _levelInfos: PatchLevelInfo[]
 
-    constructor(context: PatchContext) {
-        this._levelInfos = [{ width: 1, height: 1 }]
-
+    constructor(context: GridContext) {
         this._context = context
-        this._context.rules.forEach((_, level, rules) => {
-            let width: number, height: number
-            if (level == 0) {
-                width = 1
-                height = 1
-            } else {
-                width = this._levelInfos[level - 1].width * rules[level - 1][0]
-                height =
-                    this._levelInfos[level - 1].height * rules[level - 1][1]
-            }
-            this._levelInfos[level] = { width, height }
-        })
     }
 
     async init(): Promise<void> {
@@ -59,48 +44,12 @@ export default class PatchManager {
         this._centerY = encodeFloatToDouble(mercatorCenter[1])
     }
 
-    // Not used (but kept for later use if necessary)
-    set context(context: PatchContext) {
-        // Update projection converter
-        // Caution: proj4.defs should be set before this
-        this._projConverter = proj4(context.srcCS, context.targetCS)
-
-        // Update subdivide rules first
-        this._context = context
-
-        // Update level infos then
-        this._levelInfos = [{ width: 1, height: 1 }];
-        this._context.rules.forEach((_, level, rules) => {
-            let width: number, height: number;
-            if (level == 0) {
-                width = 1;
-                height = 1;
-            } else {
-                width = this._levelInfos[level - 1].width * rules[level - 1][0];
-                height =
-                    this._levelInfos[level - 1].height * rules[level - 1][1];
-            }
-            this._levelInfos[level] = { width, height };
-        });
-    }
-
-    createCellRenderVertices(
-        level: number,
-        globalId: number,
+    createBlockCellRenderVertices(
+        xMin: number, yMin: number,
+        xMax: number, yMax: number,
         vertices: Float32Array,
         verticesLow: Float32Array
     ) {
-        const bBox = this._context.bBox
-        const { width, height } = this._levelInfos[level]
-
-        const globalU = globalId % width
-        const globalV = Math.floor(globalId / width)
-
-        const xMin = lerp(bBox.xMin, bBox.xMax, globalU / width)
-        const yMin = lerp(bBox.yMin, bBox.yMax, globalV / height)
-        const xMax = lerp(bBox.xMin, bBox.xMax, (globalU + 1) / width)
-        const yMax = lerp(bBox.yMin, bBox.yMax, (globalV + 1) / height)
-
         const targetCoords = [
             this._projConverter.forward([xMin, yMax]), // srcTL
             this._projConverter.forward([xMax, yMax]), // srcTR
@@ -119,11 +68,10 @@ export default class PatchManager {
         })
     }
 
-    createStructuredCellRenderVertices(
-        levels: number[] | Uint8Array,
-        globalIds: number[] | Uint32Array
+    createStructuredBlockRenderVertices(
+        bBoxes: Float64Array
     ): StructuredCellRenderVertices {
-        const cellNum = levels.length
+        const cellNum = bBoxes.length / 4   // bBox: xMin, yMin, xMax, yMax
         const tlBuffer = new Float32Array(cellNum * 2)
         const trBuffer = new Float32Array(cellNum * 2)
         const blBuffer = new Float32Array(cellNum * 2)
@@ -138,9 +86,8 @@ export default class PatchManager {
         const verticesLow = new Float32Array(8)
 
         for (let i = 0; i < cellNum; i++) {
-            const level = levels[i]
-            const globalId = globalIds[i]
-            this.createCellRenderVertices(level, globalId, vertices, verticesLow)
+            const [ xMin, yMin, xMax, yMax ] = bBoxes.slice(i * 4, i * 4 + 4)
+            this.createBlockCellRenderVertices(xMin, yMin, xMax, yMax, vertices, verticesLow)
             tlBuffer[i * 2 + 0] = vertices[0]
             tlBuffer[i * 2 + 1] = vertices[1]
             trBuffer[i * 2 + 0] = vertices[2]
@@ -174,10 +121,6 @@ export default class PatchManager {
 }
 
 // Helpers //////////////////////////////////////////////////////////////////////////////////////////////////////
-
-function lerp(a: number, b: number, t: number): number {
-    return a + t * (b - a)
-}
 
 function encodeFloatToDouble(value: number) {
     const result = new Float32Array(2)

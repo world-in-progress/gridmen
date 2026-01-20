@@ -3,7 +3,7 @@ from pynoodle import noodle
 from fastapi import APIRouter, HTTPException, Body
 
 from ...schemas.base import BaseResponse
-from ...schemas.vector import FeatureSaveBody, GetFeatureJsonResponse, GetFeatureResponse, UploadFeatureSaveBody
+from ...schemas.vector import FeatureSaveBody, GetFeatureJsonResponse, GetFeatureResponse, UploadFeatureSaveBody, UploadFeatureFromFile
 
 from icrms.ivector import IVector, UpdateFeatureBody
 
@@ -26,20 +26,20 @@ def save_feature(node_key: str, lock_id: str | None = None, body: FeatureSaveBod
         raise HTTPException(status_code=500, detail=f'Error saving feature: {e}')
 
 @router.post('/save_uploaded', response_model=BaseResponse)
-def save_uploaded_feature(node_key: str, lock_id: str | None = None, body: UploadFeatureSaveBody=Body(..., description='save uploaded feature')):
+def save_uploaded_feature(node_key: str, lock_id: str | None = None, body: UploadFeatureFromFile=Body(..., description='save uploaded feature from file')):
     try:
         with noodle.connect(IVector, node_key, 'pw', lock_id=lock_id) as vector:
-            vector.save_uploaded_feature(body.file_path, body.file_type)
+            vector.save_uploaded_feature(body.file_path)
         return BaseResponse(success=True, message='Uploaded feature saved successfully')
     except Exception as e:
         logger.error(f'Error saving uploaded feature: {e}')
         raise HTTPException(status_code=500, detail=f'Error saving uploaded feature: {e}')
 
 @router.get('/', response_model=GetFeatureResponse)
-def get_feature(node_key: str, lock_id: str | None = None):
+def get_feature(node_key: str, lock_id: str | None = None, target_epsg: str = '4326'):
     try:
         with noodle.connect(IVector, node_key, 'pr', lock_id=lock_id) as vector:
-            feature_data = vector.get_feature()
+            feature_data = vector.get_feature(target_epsg)
         return GetFeatureResponse(success=True, message='Feature retrieved successfully', data=feature_data)
     except Exception as e:
         logger.error(f'Error retrieving feature: {e}')

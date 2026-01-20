@@ -18,3 +18,6 @@ class UploadFeatureSaveBody(BaseModel):
     node_key: str
     file_path: str
     file_type: str
+
+class UploadFeatureFromFile(BaseModel):
+    file_path: str

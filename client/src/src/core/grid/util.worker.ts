@@ -1,12 +1,13 @@
-import * as api from '@/template/api/apis'
+import GridManager from './gridManager'
 import PatchManager from './patchManager'
+import * as api from '@/template/api/apis'
 import { Callback, WorkerSelf } from '../types'
-import { PatchContext, MultiCellBaseInfo } from './types'
+import { PatchContext, GridContext, MultiCellBaseInfo } from './types'
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
 
-type WorkerContext = WorkerSelf & Record<'patchManager', PatchManager>
+type WorkerContext = WorkerSelf & Record<'patchManager', PatchManager> & Record<'gridManager', GridManager>
 
 export function setPatchManager(
     this: WorkerContext,
@@ -15,6 +16,17 @@ export function setPatchManager(
 ) {
     this.patchManager = new PatchManager(context)
     this.patchManager.init().then(_ => {
+        callback()
+    })
+}
+
+export function setGridManager(
+    this: WorkerContext,
+    context: GridContext,
+    callback: Callback<any>
+) {
+    this.gridManager = new GridManager(context)
+    this.gridManager.init().then(_ => {
         callback()
     })
 }
@@ -123,6 +135,17 @@ export async function getPatchInfo(
         deleted: combinedDeleted,
     }
     callback(null, renderInfo)
+}
+
+export async function getGridBlockMeta(
+    this: WorkerContext,
+    nodeToken: {
+        nodeInfo: string
+        lockId: string
+    },
+    callback: Callback<any>
+) {
+
 }
 
 export async function getGridBlockInfo(
