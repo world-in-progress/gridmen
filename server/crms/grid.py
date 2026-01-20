@@ -1,7 +1,8 @@
-from typing import Any, Dict, List, Optional
-import struct
+import json
 import mmap
-from dataclasses import dataclass
+import struct
+from pathlib import Path
+
 
 # --- Data Structures for IO (HydroElement/HydroSides) ---
 
@@ -182,14 +183,7 @@ class HydroSides:
                 ns_record = s.ns
                 f.write(' '.join(map(str, ns_record)) + '\n')
 
-"""
-Grid CRM (Customer Resource Management) module.
-
-This module implements the Grid resource management functionality.
-"""
-import json
-from pathlib import Path
-
+# --- Grid CRM (Customer Resource Management) module ---
 
 class Grid:
     """
