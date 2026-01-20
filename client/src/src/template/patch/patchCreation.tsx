@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMapPatchBounds, clearMarkerByNodeKey, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
+import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMapPatchBounds, clearMarkerByNodeKey, convertBoundsCoordinates, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
 import { PatchData } from './types'
 
 interface PatchCreationProps {
@@ -130,6 +130,7 @@ export default function PatchCreation({
     })
 
     const tempSchemaKeyRef = useRef<string | null>(null)
+    const AlignmentOriginOn4326 = useRef<[number, number] | null>(null)
 
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
@@ -176,16 +177,12 @@ export default function PatchCreation({
     const adjustCoords = async () => {
         if (pageContext.current.originBounds && pageContext.current.originBounds.length === 4 && pageContext.current.schema) {
             const bounds = pageContext.current.originBounds
-            console.log('originBounds', bounds)
             const gridLevel = pageContext.current.schema.grid_info[0]
             const fromEPSG = 4326
             const toEPSG = pageContext.current.schema.epsg
             const alignmentOrigin = pageContext.current.schema.alignment_origin
 
             const { convertedBounds, alignedBounds, expandedBounds } = await adjustPatchBounds(bounds, gridLevel, fromEPSG, toEPSG, alignmentOrigin)
-            console.log('convertedBounds', convertedBounds)
-            console.log('expandedBounds', expandedBounds)
-
 
             pageContext.current.convertedBounds = convertedBounds
             pageContext.current.adjustedBounds = expandedBounds
@@ -228,12 +225,11 @@ export default function PatchCreation({
             }
 
             clearMarkerByNodeKey(tempSchemaKeyRef.current!)
-            const AlignmentOriginOn4326 = await convertPointCoordinate(schema.alignment_origin, schema.epsg, 4326)
-            addMapMarker(map, AlignmentOriginOn4326!, schema.schemaNodeKey)
+            AlignmentOriginOn4326.current = await convertPointCoordinate(schema.alignment_origin, schema.epsg, 4326)
+            addMapMarker(map, AlignmentOriginOn4326.current!, schema.schemaNodeKey)
             tempSchemaKeyRef.current = schema.schemaNodeKey
 
             pageContext.current.schema = schema
-            console.log('Dragged schema', pageContext.current.schema)
         }
         triggerRepaint()
     }
@@ -261,7 +257,7 @@ export default function PatchCreation({
             pageContext.current.originBounds = [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]]
             await adjustCoords()
             pageContext.current.inputBounds = pageContext.current.convertedBounds
-            addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], node.key)
+            addMapPatchBounds(map, [customEvent.detail.coordinates.southWest[0], customEvent.detail.coordinates.southWest[1], customEvent.detail.coordinates.northEast[0], customEvent.detail.coordinates.northEast[1]], node.key, false)
         }
         document.removeEventListener('rectangle-draw-complete', onDrawComplete)
         setIsDrawingBounds(false)
@@ -279,13 +275,6 @@ export default function PatchCreation({
         console.log('clearGridLines')
     }
     /////////////////////////////////////////////////////
-
-    const covertBoundsTo4326 = async (bounds: [number, number, number, number], fromEPSG: number): Promise<[number, number, number, number] | null> => {
-        const SW = await convertPointCoordinate([bounds[0], bounds[1]], fromEPSG, 4326)
-        const NE = await convertPointCoordinate([bounds[2], bounds[3]], fromEPSG, 4326)
-        if (!SW || !NE) return null
-        return [SW[0], SW[1], NE[0], NE[1]]
-    }
 
     const handleSetInputBounds = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
         if (!pageContext.current.inputBounds) {
@@ -310,9 +299,7 @@ export default function PatchCreation({
 
         if (pageContext.current.inputBounds && pageContext.current.inputBounds.length === 4 && pageContext.current.schema) {
 
-            console.log('inputBounds', pageContext.current.inputBounds)
-            const inputBoundsOn4326 = await covertBoundsTo4326(pageContext.current.inputBounds!, pageContext.current.schema.epsg)
-            console.log('inputBoundsOn4326', inputBoundsOn4326)
+            const inputBoundsOn4326 = await convertBoundsCoordinates(pageContext.current.inputBounds!, pageContext.current.schema.epsg, 4326)
 
             if (!inputBoundsOn4326) {
                 toast.error('Failed to convert bounds to EPSG:4326')
@@ -322,7 +309,7 @@ export default function PatchCreation({
             pageContext.current.originBounds = inputBoundsOn4326
             addMapPatchBounds(map, inputBoundsOn4326, node.key)
 
-            adjustCoords()
+            await adjustCoords()
 
         }
     }
@@ -458,10 +445,16 @@ export default function PatchCreation({
                             >
                                 {pageContext.current.schema?.name ? (
                                     <div className='space-y-2'>
-                                        <div className='inline-flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-red-50 to-red-100 border-2 border-red-200 rounded-md shadow-md transition-all duration-200 group-hover:shadow-md group-hover:border-red-300'>
-                                            <MapPin className='w-4 h-4 text-red-500' fill='none' stroke='currentColor' viewBox='0 0 24 24' />
+                                        <div className='inline-flex items-center gap-2 px-6 py-1.5 bg-red-50 border-2 border-red-300 rounded-md shadow-md transition-all duration-200 group-hover:shadow-md group-hover:border-red-500'>
+                                            <MapPin className='w-4 h-4 text-red-400 hover:text-red-600 cursor-pointer' fill='none' stroke='currentColor' viewBox='0 0 24 24' onClick={() => {
+                                                map.flyTo({
+                                                    center: AlignmentOriginOn4326.current ?? [0, 0],
+                                                    zoom: 15,
+                                                    duration: 1000,
+                                                })
+                                            }} />
                                             <span className='font-semibold text-black text-md'>{pageContext.current.schema.name}</span>
-                                            <X className='w-4 h-4 text-gray-400 cursor-pointer hover:text-gray-600' onClick={deleteDragSchema} />
+                                            <X className='w-4 h-4 text-gray-400 cursor-pointer hover:text-gray-800' onClick={deleteDragSchema} />
                                         </div>
                                         <div className='flex items-center justify-center gap-2 text-sm text-gray-500'>
                                             <ArrowRightLeft className='w-4 h-4' />

@@ -54,15 +54,14 @@ export default class PatchTemplate implements ITemplate {
                     <Info className='w-4 h-4' />
                     <span>Check</span>
                 </ContextMenuItem>)}
-
                 {(node as ResourceNode).tree.leadIP === undefined && (
                     <>
                         {!node.isTemp && (
                             <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, PatchMenuItem.EDIT_PATCH) }}>
                                 <Edit3 className='w-4 h-4' />
                                 <span>Edit</span>
-                            </ContextMenuItem>)}
-
+                            </ContextMenuItem>
+                        )}
                         < ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, PatchMenuItem.DELETE_PATCH) }}>
                             <Delete className='w-4 h-4 text-white rotate-180' />
                             <span className='text-white' >Delete</span>
@@ -79,9 +78,17 @@ export default class PatchTemplate implements ITemplate {
                 useToolPanelStore.getState().setActiveTab('create')
                 break
             case PatchMenuItem.CHECK_PATCH: {
-                const patchInfo = await api.node.getNodeParams(node.nodeInfo);
-                (node as ResourceNode).mountParams = patchInfo
-                useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                if (!(node as ResourceNode).lockId) {
+                    const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'r');
+                    (node as ResourceNode).lockId = linkResponse.lock_id
+                }
+                if ((node as ResourceNode).mountParams === undefined) {
+                    const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
+                    (node as ResourceNode).mountParams = patchInfo
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                } else {
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                }
             }
                 break
             case PatchMenuItem.EDIT_PATCH: {
@@ -89,9 +96,13 @@ export default class PatchTemplate implements ITemplate {
                     const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
-                const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
-                (node as ResourceNode).mountParams = patchInfo
-                useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                if ((node as ResourceNode).mountParams === undefined) {
+                    const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
+                    (node as ResourceNode).mountParams = patchInfo
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                } else {
+                    useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
+                }
             }
                 break
             case PatchMenuItem.DELETE_PATCH:

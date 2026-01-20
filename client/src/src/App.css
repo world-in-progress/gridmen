@@ -221,6 +221,41 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;  /* Chrome, Safari and Opera */
   }
+
+  /* Show scrollbar only on hover (use with overflow-y-auto/overflow-auto) */
+  .scrollbar-hover {
+    scrollbar-gutter: stable;
+    -ms-overflow-style: none; /* IE/old Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hover:hover {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: rgba(156, 163, 175, 0.8) transparent;
+  }
+
+  .scrollbar-hover::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+  }
+
+  .scrollbar-hover:hover::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .scrollbar-hover::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-hover::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.55);
+    border-radius: 6px;
+  }
+
+  .scrollbar-hover:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.85);
+  }
 }
 
 

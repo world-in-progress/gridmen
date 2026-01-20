@@ -3,7 +3,6 @@ import mapboxgl from 'mapbox-gl'
 import { twMerge } from "tailwind-merge"
 import { clsx, type ClassValue } from "clsx"
 import * as apis from '@/template/api/apis'
-import MapboxDraw from '@mapbox/mapbox-gl-draw'
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -213,6 +212,7 @@ export const addMapPatchBounds = (
         lineWidth?: number,
     }
 ) => {
+    console.log('addMapPatchBounds called with id:', id, 'and bounds:', bounds)
     if (!map || !bounds || bounds.length < 4 || !id) return
 
     const sourceId = `bounds-source-${id}`
@@ -220,10 +220,8 @@ export const addMapPatchBounds = (
     const outlineLayerId = `bounds-outline-${id}`
 
     const addBounds = () => {
-        // Clear existing bounds with the same ID first
         clearMapPatchBounds(map, id)
 
-        // Remove existing layers/source with the same ID before adding new ones
         if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId)
         if (map.getLayer(outlineLayerId)) map.removeLayer(outlineLayerId)
         if (map.getSource(sourceId)) map.removeSource(sourceId)
@@ -258,7 +256,6 @@ export const addMapPatchBounds = (
         const opacity = options?.opacity !== undefined ? options.opacity : defaultOpacity
         const lineWidth = options?.lineWidth !== undefined ? options.lineWidth : defaultLineWidth
 
-        // Inner filled layer
         map.addLayer({
             id: fillLayerId,
             type: 'fill',
@@ -270,7 +267,6 @@ export const addMapPatchBounds = (
             }
         })
 
-        // Outline layer
         map.addLayer({
             id: outlineLayerId,
             type: 'line',
@@ -282,18 +278,16 @@ export const addMapPatchBounds = (
             }
         })
 
-        // Fly to bounds
-        if (fit !== false) {
+        if (fit) {
             map.fitBounds([
                 [bounds[0], bounds[1]],
                 [bounds[2], bounds[3]]
             ], {
-                padding: 50,
+                padding: 200,
                 duration: 1000
             })
         }
 
-        // Store in map for later reference
         patchBoundsMap.set(id, { sourceId, fillLayerId, outlineLayerId })
     }
 

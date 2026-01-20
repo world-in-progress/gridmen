@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import {
+    X,
     Grip,
     Save,
     Brush,
-    Delete,
     ArrowUp,
     ArrowLeft,
     ArrowDown,
@@ -11,11 +11,11 @@ import {
     ArrowRight,
     FolderOpen,
     SquareDashed,
+    SplinePointer,
     SquareMousePointer,
     SquareDashedMousePointer,
-    SplinePointer,
-    X,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import store from '@/store/store'
 import {
     AlertDialog,
@@ -24,14 +24,12 @@ import {
     AlertDialogCancel,
     AlertDialogFooter,
     AlertDialogHeader,
-    AlertDialogTrigger,
     AlertDialogContent,
     AlertDialogDescription,
 } from '@/components/ui/alert-dialog'
-import { linkNode, unlinkNode } from '../api/node'
+import { linkNode } from '../api/node'
 import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
-import { SchemaData } from '../schema/types'
 import { ResourceNode } from '../scene/scene'
 import PatchCore from '@/core/grid/patchCore'
 import { Button } from '@/components/ui/button'
@@ -40,6 +38,7 @@ import { PatchContext } from '@/core/grid/types'
 import { IResourceNode } from '../scene/iscene'
 import { useSettingStore } from '@/store/storeSet'
 import { IViewContext } from '@/views/IViewContext'
+import CapacityBar from '@/components/ui/capacityBar'
 import { Separator } from '@/components/ui/separator'
 import { MapViewContext } from '@/views/mapView/mapView'
 import { convertBoundsCoordinates } from '@/utils/utils'
@@ -48,8 +47,6 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
 import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { toast } from 'sonner'
-import CapacityBar from '@/components/ui/capacityBar'
 
 interface PatchEditProps {
     node: IResourceNode
@@ -190,7 +187,7 @@ const toPreviewFeatureCollection = (input: any, forcedHexColor: string): GeoJSON
 
 export default function PatchEdit({ node, context }: PatchEditProps) {
     const mapContext = context as MapViewContext
-    const map = mapContext.map
+    const map = mapContext.map!
     const drawInstance = mapContext.drawInstance
 
     const pageContext = useRef<PageContext>({
@@ -230,7 +227,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }, [])
 
     const loadContext = async () => {
-        if (!map) return
 
         if (!(node as ResourceNode).lockId) {
             const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
@@ -845,144 +841,145 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 </div>
             </div>
             <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-3/4 mx-auto'>
-                    <div className='p-3 rounded-md shadow-sm'>
-                        <h2 className='text-xl font-bold text-white'>Current Editing Information</h2>
-                        <div className='text-sm text-white mt-1 grid gap-1'>
-                            <div>
-                                <span className='font-bold'>Patch Name: </span>
-                                {pageContext.current?.patch?.name}
-                            </div>
-                            <div>
-                                <span className='font-bold'>EPSG: </span>
-                                {pageContext.current?.patch?.epsg}
-                            </div>
-                            <div className='flex items-start flex-row'>
-                                <div className={`font-bold w-[35%]`}>Grid Levels(m): </div>
-                                <div className='space-y-1'>
-                                    {pageContext.current?.patch?.subdivide_rules && (
-                                        pageContext.current?.patch?.subdivide_rules.map(
-                                            (level: number[], index: number) => {
-                                                const color = topologyLayer!.paletteColorList ?
-                                                    [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
-                                                const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined
+                <div className='w-4/5 mx-auto p-2'>
+                    <div className='text-sm text-white mt-1 grid gap-1'>
+                        <div>
+                            <span className='font-bold'>Patch Name: </span>
+                            {pageContext.current.patch?.name}
+                        </div>
+                        <div>
+                            <span className='font-bold'>Schema: </span>
+                            {pageContext.current.patch?.schema_node_key.split('.').pop()}
+                        </div>
+                        <div>
+                            <span className='font-bold'>EPSG: </span>
+                            {pageContext.current.patch?.epsg}
+                        </div>
+                        <div className='flex items-start flex-row gap-0.5'>
+                            <div className={`font-bold w-[35%]`}>Grid Levels(m): </div>
+                            <div className='space-y-1'>
+                                {pageContext.current?.patch?.subdivide_rules && (
+                                    pageContext.current?.patch?.subdivide_rules.map(
+                                        (level: number[], index: number) => {
+                                            const color = topologyLayer!.paletteColorList ?
+                                                [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
+                                            const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined
 
-                                                return (
-                                                    <div key={index} className='text-sm'
-                                                        style={{ color: colorStyle }}
-                                                    >
-                                                        level {index + 1}: [{level.join(', ')}]
-                                                    </div>
-                                                )
-                                            }
-                                        )
-                                    )}
-                                </div>
+                                            return (
+                                                <div key={index} className='text-sm'
+                                                    style={{ color: colorStyle }}
+                                                >
+                                                    level {index + 1}: [{level.join(', ')}]
+                                                </div>
+                                            )
+                                        }
+                                    )
+                                )}
                             </div>
-                            <div className='font-bold'>
-                                <span className='text-white'>BoundingBox:</span>
-                                {/* {bounds ? ( */}
-                                <div className='grid grid-cols-3 gap-1 text-xs text-white mt-4'>
-                                    {/* Top Left Corner */}
-                                    <div className='relative h-8 flex items-center justify-center'>
-                                        <div className='absolute top-0 left-1/4 w-3/4 h-1/2 border-t border-l border-gray-300 rounded-tl'></div>
+                        </div>
+                        <div className='font-bold'>
+                            <span className='text-white'>BoundingBox:</span>
+                            {/* {bounds ? ( */}
+                            <div className='grid grid-cols-3 gap-1 text-xs text-white mt-4'>
+                                {/* Top Left Corner */}
+                                <div className='relative h-8 flex items-center justify-center'>
+                                    <div className='absolute top-0 left-1/4 w-3/4 h-1/2 border-t border-l border-gray-300 rounded-tl'></div>
+                                </div>
+                                {/* North/Top */}
+                                <div className='text-center'>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div className='flex flex-col items-center'>
+                                                    <ArrowUp className='h-4 w-4 text-blue-500' />
+                                                    <span className='font-bold text-blue-500 text-sm mb-1'>N</span>
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <div className='text-[12px] space-y-1'>
+                                                    <p className='font-bold text-blue-500'>North</p>
+                                                    <p>{pageContext.current?.patch?.bounds[3].toFixed(6)}</p>
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                </div>
+                                {/* Top Right Corner */}
+                                <div className='relative h-8 flex items-center justify-center'>
+                                    <div className='absolute top-0 right-1/4 w-3/4 h-1/2 border-t border-r border-gray-300 rounded-tr'></div>
+                                </div>
+                                {/* West/Left */}
+                                <div className='text-center'>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div className='flex flex-row items-center justify-center gap-1 mt-2'>
+                                                    <ArrowLeft className='h-4 w-4 text-green-500' />
+                                                    <span className='font-bold text-green-500 text-sm mr-1 mt-1'>W</span>
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <div className='text-[12px]'>
+                                                    <p className='font-bold mb-1 text-green-500'>West</p>
+                                                    <p>{pageContext.current?.patch?.bounds[0].toFixed(6)}</p>
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                </div>
+                                {/* Center */}
+                                <div className='text-center'>
+                                    <span className='font-bold text-[14px] text-orange-500'>Center</span>
+                                    <div className='text-[12px]'>
+                                        <div>{pageContext.current?.patch && ((pageContext.current?.patch?.bounds[0] + pageContext.current?.patch?.bounds[2]) / 2).toFixed(6)}</div>
+                                        <div>{pageContext.current?.patch && ((pageContext.current?.patch?.bounds[1] + pageContext.current?.patch?.bounds[3]) / 2).toFixed(6)}</div>
                                     </div>
-                                    {/* North/Top */}
-                                    <div className='text-center'>
-                                        <TooltipProvider>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <div className='flex flex-col items-center'>
-                                                        <ArrowUp className='h-4 w-4 text-blue-500' />
-                                                        <span className='font-bold text-blue-500 text-sm mb-1'>N</span>
-                                                    </div>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    <div className='text-[12px] space-y-1'>
-                                                        <p className='font-bold text-blue-500'>North</p>
-                                                        <p>{pageContext.current?.patch?.bounds[3].toFixed(6)}</p>
-                                                    </div>
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </TooltipProvider>
-                                    </div>
-                                    {/* Top Right Corner */}
-                                    <div className='relative h-8 flex items-center justify-center'>
-                                        <div className='absolute top-0 right-1/4 w-3/4 h-1/2 border-t border-r border-gray-300 rounded-tr'></div>
-                                    </div>
-                                    {/* West/Left */}
-                                    <div className='text-center'>
-                                        <TooltipProvider>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <div className='flex flex-row items-center justify-center gap-1 mt-2'>
-                                                        <ArrowLeft className='h-4 w-4 text-green-500' />
-                                                        <span className='font-bold text-green-500 text-sm mr-1 mt-1'>W</span>
-                                                    </div>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    <div className='text-[12px]'>
-                                                        <p className='font-bold mb-1 text-green-500'>West</p>
-                                                        <p>{pageContext.current?.patch?.bounds[0].toFixed(6)}</p>
-                                                    </div>
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </TooltipProvider>
-                                    </div>
-                                    {/* Center */}
-                                    <div className='text-center'>
-                                        <span className='font-bold text-[14px] text-orange-500'>Center</span>
-                                        <div className='text-[12px]'>
-                                            <div>{pageContext.current?.patch && ((pageContext.current?.patch?.bounds[0] + pageContext.current?.patch?.bounds[2]) / 2).toFixed(6)}</div>
-                                            <div>{pageContext.current?.patch && ((pageContext.current?.patch?.bounds[1] + pageContext.current?.patch?.bounds[3]) / 2).toFixed(6)}</div>
-                                        </div>
-                                    </div>
-                                    {/* East/Right */}
-                                    <div className='text-center'>
-                                        <TooltipProvider>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <div className='flex flex-row items-center justify-center gap-1 mt-2'>
-                                                        <span className='font-bold text-red-500 text-sm mt-1 ml-4'>E</span>
-                                                        <ArrowRight className='h-4 w-4 text-red-500' />
-                                                    </div>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    <div className='text-[12px]'>
-                                                        <p className='font-bold mb-1 text-red-500'>East</p>
-                                                        <p>{pageContext.current?.patch?.bounds[2].toFixed(6)}</p>
-                                                    </div>
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </TooltipProvider>
-                                    </div>
-                                    {/* Bottom Left Corner */}
-                                    <div className='relative h-8 flex items-center justify-center'>
-                                        <div className='absolute bottom-0 left-1/4 w-3/4 h-1/2 border-b border-l border-gray-300 rounded-bl'></div>
-                                    </div>
-                                    {/* South/Bottom */}
-                                    <div className='text-center'>
-                                        <TooltipProvider>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <div className='flex flex-col items-center'>
-                                                        <span className='font-bold text-purple-500 text-sm mt-1'>S</span>
-                                                        <ArrowDown className='h-4 w-4 text-purple-500' />
-                                                    </div>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    <div className='text-[12px]'>
-                                                        <p className='font-bold mb-1 text-purple-500'>South</p>
-                                                        <p>{pageContext.current?.patch?.bounds[1].toFixed(6)}</p>
-                                                    </div>
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </TooltipProvider>
-                                    </div>
-                                    {/* Bottom Right Corner */}
-                                    <div className='relative h-8 flex items-center justify-center'>
-                                        <div className='absolute bottom-0 right-1/4 w-3/4 h-1/2 border-b border-r border-gray-300 rounded-br'></div>
-                                    </div>
+                                </div>
+                                {/* East/Right */}
+                                <div className='text-center'>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div className='flex flex-row items-center justify-center gap-1 mt-2'>
+                                                    <span className='font-bold text-red-500 text-sm mt-1 ml-4'>E</span>
+                                                    <ArrowRight className='h-4 w-4 text-red-500' />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <div className='text-[12px]'>
+                                                    <p className='font-bold mb-1 text-red-500'>East</p>
+                                                    <p>{pageContext.current?.patch?.bounds[2].toFixed(6)}</p>
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                </div>
+                                {/* Bottom Left Corner */}
+                                <div className='relative h-8 flex items-center justify-center'>
+                                    <div className='absolute bottom-0 left-1/4 w-3/4 h-1/2 border-b border-l border-gray-300 rounded-bl'></div>
+                                </div>
+                                {/* South/Bottom */}
+                                <div className='text-center'>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div className='flex flex-col items-center'>
+                                                    <span className='font-bold text-purple-500 text-sm mt-1'>S</span>
+                                                    <ArrowDown className='h-4 w-4 text-purple-500' />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <div className='text-[12px]'>
+                                                    <p className='font-bold mb-1 text-purple-500'>South</p>
+                                                    <p>{pageContext.current?.patch?.bounds[1].toFixed(6)}</p>
+                                                </div>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                </div>
+                                {/* Bottom Right Corner */}
+                                <div className='relative h-8 flex items-center justify-center'>
+                                    <div className='absolute bottom-0 right-1/4 w-3/4 h-1/2 border-b border-r border-gray-300 rounded-br'></div>
                                 </div>
                             </div>
                         </div>

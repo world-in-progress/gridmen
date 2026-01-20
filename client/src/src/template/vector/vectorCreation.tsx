@@ -385,6 +385,43 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         syncDrawVectorFromDraw()
     }, [drawInstance, syncDrawVectorFromDraw])
 
+    useEffect(() => {
+        const isEditableTarget = (target: EventTarget | null) => {
+            const el = target as HTMLElement | null
+            if (!el) return false
+            if (el.isContentEditable) return true
+            const tag = el.tagName?.toUpperCase()
+            return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (typeSelectDialogOpen) return
+            if (event.defaultPrevented) return
+
+            if (event.ctrlKey || event.metaKey) {
+                if (event.key === "D" || event.key === "d") {
+                    event.preventDefault()
+                    handleClickDraw()
+                    return
+                }
+                if (event.key === "S" || event.key === "s") {
+                    event.preventDefault()
+                    handleClickSelect()
+                    return
+                }
+            }
+
+            if (event.key === "Delete") {
+                if (isEditableTarget(event.target)) return
+                event.preventDefault()
+                handleDeleteSelected()
+            }
+        }
+
+        window.addEventListener("keydown", handleKeyDown)
+        return () => window.removeEventListener("keydown", handleKeyDown)
+    }, [handleClickDraw, handleClickSelect, handleDeleteSelected, typeSelectDialogOpen])
+
     return (
         <div className="w-full h-full flex flex-col">
             <Dialog open={typeSelectDialogOpen} onOpenChange={setTypeSelectDialogOpen}>

@@ -696,6 +696,7 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
 
     return (
         <div
+            className='flex flex-col flex-1 min-h-0'
             onDragOver={handleRootDragOver}
             onDrop={handleRootDrop}
         >
@@ -729,31 +730,34 @@ const TreeRenderer = ({ title, resourceTree, triggerFocus }: TreeRendererProps) 
                     </Button>
                 </div>
             </div>
-            {showNewResourceInfo && resourceTree && !resourceTree.selectedNode && (
-                <div style={{ paddingLeft: `0px` }}>
-                    <CreationBar resourceTree={resourceTree} onCreated={() => setShowNewResourceInfo(false)} onCancel={() => setShowNewResourceInfo(false)} />
-                </div>
-            )}
+            <div className='flex-1 min-h-0 overflow-y-auto scrollbar-hover'>
+                {showNewResourceInfo && resourceTree && !resourceTree.selectedNode && (
+                    <div style={{ paddingLeft: `0px` }}>
+                        <CreationBar resourceTree={resourceTree} onCreated={() => setShowNewResourceInfo(false)} onCancel={() => setShowNewResourceInfo(false)} />
+                    </div>
+                )}
 
-            {showNewFolderInput && resourceTree && !resourceTree.selectedNode && (
-                <div style={{ paddingLeft: `0px` }}>
-                    <FolderCreationBar resourceTree={resourceTree} onCreated={() => setShowNewFolderInput(false)} onCancel={() => setShowNewFolderInput(false)} />
-                </div>
-            )}
-            {resourceTree && resourceTree.root.children && Array.from(resourceTree.root.children.values()).map(childNode => (
-                <NodeRenderer
-                    key={childNode.id}
-                    node={childNode}
-                    resourceTree={resourceTree}
-                    depth={0}
-                    triggerFocus={triggerFocus}
-                    dragSourceTreeTitle={title}
-                    showNewResourceInfo={showNewResourceInfo}
-                    setShowNewResourceInfo={setShowNewResourceInfo}
-                    showNewFolderInput={showNewFolderInput}
-                    setShowNewFolderInput={setShowNewFolderInput}
-                />
-            ))}
+                {showNewFolderInput && resourceTree && !resourceTree.selectedNode && (
+                    <div style={{ paddingLeft: `0px` }}>
+                        <FolderCreationBar resourceTree={resourceTree} onCreated={() => setShowNewFolderInput(false)} onCancel={() => setShowNewFolderInput(false)} />
+                    </div>
+                )}
+                {resourceTree && resourceTree.root.children && Array.from(resourceTree.root.children.values()).map(childNode => (
+                    <NodeRenderer
+                        key={childNode.id}
+                        node={childNode}
+                        resourceTree={resourceTree}
+                        depth={0}
+                        triggerFocus={triggerFocus}
+                        dragSourceTreeTitle={title}
+                        showNewResourceInfo={showNewResourceInfo}
+                        setShowNewResourceInfo={setShowNewResourceInfo}
+                        showNewFolderInput={showNewFolderInput}
+                        setShowNewFolderInput={setShowNewFolderInput}
+                    />
+                ))}
+            </div>
+
         </div>
     )
 }
@@ -781,12 +785,23 @@ export default function ResourceTreeComponent({
 }: ResourceTreeComponentProps) {
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
+    const { setSelectedNodeKey } = useSelectedNodeStore()
+
+    const handleNodeRemoveWithTempReset = useCallback((node: IResourceNode) => {
+        if (node?.isTemp) {
+            const { selectedNodeKey } = useSelectedNodeStore.getState()
+            if (selectedNodeKey === node.key) {
+                setSelectedNodeKey('.')
+            }
+        }
+        onNodeRemove(node)
+    }, [onNodeRemove, setSelectedNodeKey])
 
     useEffect(() => {
         if (privateTree) {
             privateTree.bindHandlers({
                 onNodeMenuOpen: onNodeMenuOpen,
-                onNodeRemove: onNodeRemove,
+                onNodeRemove: handleNodeRemoveWithTempReset,
                 onNodeClick: onNodeClick,
                 onNodeDoubleClick: onNodeDoubleClick
             })
@@ -796,13 +811,13 @@ export default function ResourceTreeComponent({
                 unsubscribe()
             }
         }
-    }, [privateTree, onNodeMenuOpen, onNodeRemove, onNodeClick, onNodeDoubleClick])
+    }, [privateTree, onNodeMenuOpen, handleNodeRemoveWithTempReset, onNodeClick, onNodeDoubleClick])
 
     useEffect(() => {
         if (publicTree) {
             publicTree.bindHandlers({
                 onNodeMenuOpen: onNodeMenuOpen,
-                onNodeRemove: onNodeRemove,
+                onNodeRemove: handleNodeRemoveWithTempReset,
                 onNodeClick: onNodeClick,
                 onNodeDoubleClick: onNodeDoubleClick
             })
@@ -812,7 +827,7 @@ export default function ResourceTreeComponent({
                 unsubscribe()
             }
         }
-    }, [publicTree, onNodeMenuOpen, onNodeRemove, onNodeClick, onNodeDoubleClick])
+    }, [publicTree, onNodeMenuOpen, handleNodeRemoveWithTempReset, onNodeClick, onNodeDoubleClick])
 
     useEffect(() => {
         if (focusNode) {
@@ -826,16 +841,17 @@ export default function ResourceTreeComponent({
     }, [focusNode, triggerFocus])
 
     return (
-        <div className="flex h-full bg-[#252526] overflow-y-auto">
-            <div className="w-full">
+        <div className="flex h-full bg-[#252526]">
+            <div className="w-full h-full flex flex-col min-h-0">
                 <div className='text-sm font-semibold text-gray-400 py-2 ml-2 tracking-wide'>
                     EXPLORER
                 </div>
                 {/* WorkSpace */}
-                <TreeRenderer resourceTree={privateTree} title={"WorkSpace"} triggerFocus={triggerFocus} />
-                <Separator className='my-2 bg-[#585858] w-full' />
-                {/* Public */}
-                <TreeRenderer resourceTree={publicTree} title={"Public"} triggerFocus={triggerFocus} />
+                <div className="flex-1 min-h-0 flex flex-col">
+                    <TreeRenderer resourceTree={privateTree} title={"WorkSpace"} triggerFocus={triggerFocus} />
+                    <Separator className='bg-[#585858] w-full shrink-0' />
+                    <TreeRenderer resourceTree={publicTree} title={"Public"} triggerFocus={triggerFocus} />
+                </div>
             </div>
         </div>
     )

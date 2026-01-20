@@ -5,7 +5,7 @@ import SchemaCheck from "./schemaCheck"
 import { ITemplate } from "../iTemplate"
 import SchemaCreation from "./schemaCreation"
 import { IResourceNode } from "../scene/iscene"
-import { useLayerStore } from '@/store/storeSet'
+import { useLayerStore, useToolPanelStore } from '@/store/storeSet'
 import { IViewContext } from "@/views/IViewContext"
 import { ResourceNode, ResourceTree } from "../scene/scene"
 import { Delete, Edit3, FilePlusCorner, Info } from "lucide-react"
@@ -44,7 +44,7 @@ export default class SchemaTemplate implements ITemplate {
     renderMenu(node: IResourceNode, handleContextMenu: (node: IResourceNode, menuItem: any) => void): React.JSX.Element {
         return (
             <ContextMenuContent>
-                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CHECK_SCHEMA) }}>
+                {node.isTemp && (<ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.CREATE_SCHEMA) }}>
                     <FilePlusCorner className='w-4 h-4' />
                     <span>Create</span>
                 </ContextMenuItem>)}
@@ -52,13 +52,14 @@ export default class SchemaTemplate implements ITemplate {
                     <Info className='w-4 h-4' />
                     <span>Check</span>
                 </ContextMenuItem>)}
-
                 {(node as ResourceNode).tree.leadIP === undefined && (
                     <>
-                        <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.EDIT_SCHEMA) }}>
-                            <Edit3 className='w-4 h-4' />
-                            <span>Edit</span>
-                        </ContextMenuItem>
+                        {!node.isTemp && (
+                            <ContextMenuItem className='cursor-pointer' onSelect={() => { handleContextMenu(node, SchemaMenuItem.EDIT_SCHEMA) }}>
+                                <Edit3 className='w-4 h-4' />
+                                <span>Edit</span>
+                            </ContextMenuItem>
+                        )}
                         <ContextMenuItem className='cursor-pointer flex bg-red-500 hover:!bg-red-600' onSelect={() => { handleContextMenu(node, SchemaMenuItem.DELETE_SCHEMA) }}>
                             <Delete className='w-4 h-4 text-white rotate-180' />
                             <span className='text-white'>Delete</span>
@@ -72,7 +73,7 @@ export default class SchemaTemplate implements ITemplate {
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
             case SchemaMenuItem.CREATE_SCHEMA:
-
+                useToolPanelStore.getState().setActiveTab('create')
                 break
             case SchemaMenuItem.CHECK_SCHEMA: {
                 if (!(node as ResourceNode).lockId) {
@@ -81,8 +82,8 @@ export default class SchemaTemplate implements ITemplate {
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const schemaNode = await api.node.getNodeParams(node.nodeInfo)
-                    const parsed = JSON.parse((schemaNode as unknown as any).mount_params)
-                        ; (node as ResourceNode).mountParams = parsed
+                    const parsed = JSON.parse((schemaNode as any).mount_params);
+                    (node as ResourceNode).mountParams = parsed
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
                 } else {
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
@@ -91,13 +92,13 @@ export default class SchemaTemplate implements ITemplate {
                 break
             case SchemaMenuItem.EDIT_SCHEMA: {
                 if (!(node as ResourceNode).lockId) {
-                    const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'w');
+                    const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const schemaNode = await api.node.getNodeParams(node.nodeInfo)
-                    const parsed = JSON.parse((schemaNode as unknown as any).mount_params)
-                        ; (node as ResourceNode).mountParams = parsed
+                    const parsed = JSON.parse((schemaNode as unknown as any).mount_params);
+                    (node as ResourceNode).mountParams = parsed
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
                 } else {
                     useLayerStore.getState().addNodeToLayerGroup(node as ResourceNode)
@@ -107,7 +108,7 @@ export default class SchemaTemplate implements ITemplate {
             case SchemaMenuItem.DELETE_SCHEMA:
                 {
                     if (node.isTemp) {
-                        ; (node as ResourceNode).tree.tempNodeExist = false
+                        (node as ResourceNode).tree.tempNodeExist = false
                         await (node.tree as ResourceTree).removeNode(node)
                         toast.success(`Schema ${node.name} deleted successfully`)
                         return

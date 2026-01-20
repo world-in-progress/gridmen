@@ -4,16 +4,16 @@ import * as api from '../api/apis'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { GridLayerInfo, SchemaData } from './types'
+import { IResourceNode } from '../scene/iscene'
 import { IViewContext } from '@/views/IViewContext'
+import { GridLayerInfo, SchemaData } from './types'
+import { useToolPanelStore } from '@/store/storeSet'
+import { useLayerGroupStore } from '@/store/storeSet'
 import { MapViewContext } from '@/views/mapView/mapView'
+import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Crosshair, MapPin, MapPinPlus, Save, X } from 'lucide-react'
 import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate, pickCoordsFromMap } from '@/utils/utils'
-import { ResourceNode, ResourceTree } from '../scene/scene'
-import { IResourceNode } from '../scene/iscene'
-import { useLayerGroupStore } from '@/store/storeSet'
-import { useToolPanelStore } from '@/store/storeSet'
 
 interface SchemaCreationProps {
     node: IResourceNode
@@ -53,22 +53,11 @@ const schemaTips = [
 ]
 
 const gridLevelText = {
-    title: 'Grid Level',
-    addButton: 'Add Grid Level',
     noLayers: 'No layers added yet. Click the button above to add a layer.',
     rulesTitle: 'Grid levels should follow these rules:',
     rule1: 'Each level should have smaller cell dimensions than the previous level',
     rule2: "Previous level's width/height must be a multiple of the current level's width/height",
     rule3: 'First level defines the base grid cell size, and higher levels define increasingly finer grids'
-}
-
-const gridItemText = {
-    level: 'Level',
-    remove: 'Remove',
-    width: 'Width/m',
-    height: 'Height/m',
-    widthPlaceholder: 'Width',
-    heightPlaceholder: 'Height'
 }
 
 const validateGridLayers = (gridLayers: GridLayerInfo[]): { errors: Record<number, string>, isValid: boolean } => {
@@ -612,13 +601,13 @@ export default function SchemaCreation({
                     {/* ----------- */}
                     <div className='p-3 bg-white text-black rounded-md shadow-sm border border-gray-200'>
                         <div className='flex justify-between items-center mb-2'>
-                            <h3 className='text-lg font-semibold'>{gridLevelText.title}</h3>
+                            <h3 className='text-lg font-semibold'>Grid Level</h3>
                             <Button
                                 type='button'
                                 className='px-2 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors text-sm shadow-sm cursor-pointer'
                                 onClick={handleAddGridLayer}
                             >
-                                <span className='text-lg'>+</span> {gridLevelText.addButton}
+                                <span className='text-lg'>+</span> Add Grid Level
                             </Button>
                         </div>
                         {/* ---------- */}
@@ -629,34 +618,35 @@ export default function SchemaCreation({
                                 {pageContext.current.gridLayers.map(layer => (
                                     <div key={layer.id} className='p-2 bg-gray-50 rounded border border-gray-200'>
                                         <div className='flex justify-between items-center mb-2'>
-                                            <h4 className='text-sm font-medium'>{gridItemText.level} {layer.id + 1}</h4>
+                                            <h4 className='text-sm font-medium'>Level {layer.id + 1}</h4>
                                             <Button
                                                 type='button'
-                                                className='px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs cursor-pointer'
+                                                size={'sm'}
+                                                className='px-2 bg-red-100 text-red-500 rounded-md hover:bg-red-200 text-xs cursor-pointer'
                                                 onClick={() => handleRemoveLayer(layer.id)}
                                             >
-                                                {gridItemText.remove}
+                                                Remove
                                             </Button>
                                         </div>
                                         <div className='grid grid-cols-2 gap-2'>
                                             <div>
-                                                <label className='block text-xs mb-1'>{gridItemText.width}</label>
+                                                <label className='block text-xs mb-1'>Width/m</label>
                                                 <input
                                                     type='number'
                                                     className='w-full px-2 py-1 text-sm border border-gray-300 rounded'
                                                     value={layer.width}
                                                     onChange={(e) => handleUpdateGridSize(layer.id, e.target.value, layer.height)}
-                                                    placeholder={gridItemText.widthPlaceholder}
+                                                    placeholder={'Width'}
                                                 />
                                             </div>
                                             <div>
-                                                <label className='block text-xs mb-1'>{gridItemText.height}</label>
+                                                <label className='block text-xs mb-1'>Height/m</label>
                                                 <input
                                                     type='number'
                                                     className='w-full px-2 py-1 text-sm border border-gray-300 rounded'
                                                     value={layer.height}
                                                     onChange={(e) => handleUpdateGridSize(layer.id, layer.width, e.target.value)}
-                                                    placeholder={gridItemText.heightPlaceholder}
+                                                    placeholder={'Height'}
                                                 />
                                             </div>
                                         </div>
