@@ -14,6 +14,7 @@ class PatchMeta(BaseModel):
     subdivide_rules: list[tuple[int, int]] # rules for subdividing the patch
     bounds: tuple[float, float, float, float] # [ min_lon, min_lat, max_lon, max_lat ]
     schema_node_key: str # The schema node key
+    grid_info: list[tuple[float, float]]    # [(width_in_meter, height_in_meter), ...], grid size in each level
 
 class MultiCellInfo(BaseModel):
     levels: list[int]

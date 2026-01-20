@@ -30,33 +30,33 @@ export const saveVector = async (nodeInfo: string, lockId: string | null, featur
     }
 }
 
-// export const saveUploadedVector = async (nodeInfo: string, lockId: string, fileInfo: VectorFileInfo) => {
-//     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
-//     const url = `${address}${API_PREFIX}/save_uploaded?node_key=${nodeKey}&lock_id=${lockId}`
+export const saveUploadedVector = async (nodeInfo: string, lockId: string, fileInfo: VectorFileInfo) => {
+    const { address, nodeKey } = decodeNodeInfo(nodeInfo)
+    const url = `${address}${API_PREFIX}/save_uploaded?node_key=${nodeKey}&lock_id=${lockId}`
 
-//     try {
-//         const requestBody = {
-//             node_key: nodeKey,
-//             file_path: fileInfo.filePath,
-//             file_type: fileInfo.fileType
-//         }
+    try {
+        const requestBody = {
+            node_key: nodeKey,
+            file_path: fileInfo.filePath,
+            file_type: fileInfo.fileType
+        }
 
-//         const response = await fetch(url, {
-//             method: 'POST',
-//             headers: { 'Content-Type': 'application/json' },
-//             body: JSON.stringify(requestBody),
-//         })
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+        })
 
-//         if (!response.ok) {
-//             throw new Error(`HTTP error! Status: ${response.status}`)
-//         }
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`)
+        }
 
-//         const responseData: BaseResponse = await response.json()
-//         return responseData
-//     } catch (error) {
-//         throw new Error(`Failed to upload vector file: ${error}`)
-//     }
-// }
+        const responseData: BaseResponse = await response.json()
+        return responseData
+    } catch (error) {
+        throw new Error(`Failed to upload vector file: ${error}`)
+    }
+}
 
 
 export const getVector = async (nodeInfo: string, lockId: string | null) => {

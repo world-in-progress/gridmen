@@ -17,6 +17,7 @@ import { IResourceNode } from '@/template/scene/iscene'
 import CustomLayerGroup from './topology/customLayerGroup'
 import store from '@/store/store'
 
+// TODO；将初试中心设置移入zustand放在setting中
 const initialLongitude = 114.051537
 const initialLatitude = 22.446937
 const initialZoom = 11

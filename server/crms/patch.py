@@ -163,6 +163,7 @@ class Patch:
         schema.subdivide_rules = self.subdivide_rules
         schema.schema_node_key = self.schema_node_key
         schema.alignment_origin = tuple(self.alignment_origin)
+        schema.grid_info = [tuple(size) for size in self.grid_info]
         return schema
 
     def _save(self) -> dict[str, str | bool]:

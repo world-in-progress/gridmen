@@ -54,6 +54,7 @@ export interface PatchMeta {
     subdivide_rules: [number, number][]
     bounds: [number, number, number, number]
     schema_node_key: string
+    grid_info: [number, number][]
 }
 
 export interface VectorFileInfo {

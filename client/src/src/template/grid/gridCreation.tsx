@@ -986,7 +986,6 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                     {/* ----------- */}
                     {/* Patch Drop Zone */}
                     {/* ----------- */}
-                    {/* TODO:用map来维护 */}
                     <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
                         <h2 className="text-lg text-black font-semibold mb-2">Patch Drop Zone</h2>
                         <div>

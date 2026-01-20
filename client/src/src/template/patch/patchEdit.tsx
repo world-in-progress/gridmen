@@ -74,18 +74,12 @@ interface GridCheckingInfo {
     deleted: boolean
 }
 
-type FeaturePickResource =
-    | {
-        kind: 'file'
-        filePath: string
-        name: string
-    }
-    | {
-        kind: 'vector'
-        nodeKey: string
-        nodeInfo: string
-        name: string
-    }
+interface FeaturePickResource {
+    kind: 'vector'
+    nodeKey: string
+    nodeInfo: string
+    name: string
+}
 
 type TopologyOperationType = 'subdivide' | 'merge' | 'delete' | 'recover' | null
 
@@ -515,32 +509,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         setDeleteSelectDialogOpen(true)
     }
 
-    const getFileNameFromPath = (filePath: string) => {
-        const normalized = filePath.replace(/\\/g, '/')
-        return normalized.split('/').pop() || filePath
-    }
-
-    const handleUploadFeatureFile = useCallback(async () => {
-
-        if (!window.electronAPI || typeof window.electronAPI.openFileDialog !== 'function') {
-            toast.error('Electron API not available')
-            return
-        }
-
-        try {
-            const filePath = await window.electronAPI.openFileDialog()
-            if (!filePath) return
-            setFeaturePickResource({
-                kind: 'file',
-                filePath,
-                name: getFileNameFromPath(filePath)
-            })
-        } catch (error) {
-            console.error('Error opening file dialog:', error)
-            toast.error('Failed to open file dialog')
-        }
-    }, [])
-
     const handleVectorNodeDragOver = (e: React.DragEvent) => {
         e.preventDefault()
         e.currentTarget.classList.add('border-blue-500', 'bg-blue-50')
@@ -637,10 +605,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         try {
             // store.get<{ on: Function; off: Function }>('isLoading')!.on()
 
-            if (featurePickResource.kind === 'file') {
-                topologyLayer.executePickCellsByFeature(featurePickResource.filePath, pickingTab)
-                return
-            } else if (featurePickResource.kind === 'vector') {
+            if (featurePickResource.kind === 'vector') {
                 topologyLayer.executePickCellsByVectorNode(featurePickResource.nodeInfo, pageContext.current.vectorLockId, pickingTab)
                 return
             }
@@ -858,8 +823,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                         <div className='flex items-start flex-row gap-0.5'>
                             <div className={`font-bold w-[35%]`}>Grid Levels(m): </div>
                             <div className='space-y-1'>
-                                {pageContext.current?.patch?.subdivide_rules && (
-                                    pageContext.current?.patch?.subdivide_rules.map(
+                                {pageContext.current?.patch?.grid_info && (
+                                    pageContext.current?.patch?.grid_info.map(
                                         (level: number[], index: number) => {
                                             const color = topologyLayer!.paletteColorList ?
                                                 [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
@@ -1227,9 +1192,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                     <div className='space-y-2'>
                                                         <div className='flex items-center justify-between bg-white rounded-md p-2 border border-blue-300'>
                                                             <span className='text-sm font-medium text-gray-900'>
-                                                                {featurePickResource.kind === 'file'
-                                                                    ? `File: ${featurePickResource.name}`
-                                                                    : `Vector: ${featurePickResource.name}`}
+                                                                {featurePickResource.name}
                                                             </span>
                                                             <button
                                                                 onClick={handleClearUploadedFeature}
@@ -1243,27 +1206,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                     <div className='space-y-2 py-1'>
                                                         <SplinePointer className='h-8 w-8 mx-auto text-gray-400 group-hover:text-indigo-500 transition-colors' />
                                                         <p className='text-sm text-gray-400 group-hover:text-indigo-500 transition-colors'>
-                                                            Drag a Vector node here, or Upload a file
+                                                            Drag a Vector node here
                                                         </p>
                                                     </div>
                                                 )}
                                             </div>
                                             <div className='flex gap-2'>
-                                                {featurePickResource ? (
-                                                    <Button
-                                                        onClick={handleClearUploadedFeature}
-                                                        className='flex-1 bg-red-600 hover:bg-red-700 text-white cursor-pointer'
-                                                    >
-                                                        Clear
-                                                    </Button>
-                                                ) : (
-                                                    <Button
-                                                        onClick={handleUploadFeatureFile}
-                                                        className='flex-1 bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
-                                                    >
-                                                        Upload
-                                                    </Button>
-                                                )}
                                                 <Button
                                                     onClick={handleSelectFeaturePick}
                                                     disabled={!featurePickResource}
@@ -1271,6 +1219,14 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                 >
                                                     Apply
                                                 </Button>
+                                                <Button
+                                                    onClick={handleClearUploadedFeature}
+                                                    disabled={!featurePickResource}
+                                                    className='flex-1 bg-red-500 hover:bg-red-600 text-white cursor-pointer'
+                                                >
+                                                    Clear
+                                                </Button>
+
                                             </div>
                                         </div>
                                     </div>

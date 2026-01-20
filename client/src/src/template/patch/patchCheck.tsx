@@ -166,8 +166,8 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
                         <div className='flex items-start flex-row gap-0.5'>
                             <div className={`font-bold w-[35%]`}>Grid Levels(m): </div>
                             <div className='space-y-1'>
-                                {pageContext.current?.subdivide_rules && (
-                                    pageContext.current?.subdivide_rules.map(
+                                {pageContext.current?.grid_info && (
+                                    pageContext.current?.grid_info.map(
                                         (level: number[], index: number) => {
                                             const color = topologyLayer!.paletteColorList ?
                                                 [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
