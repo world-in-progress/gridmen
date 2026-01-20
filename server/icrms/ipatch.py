@@ -16,6 +16,7 @@ class PatchSchema:
     epsg: int
     bounds: list[float]  # [min_x, min_y, max_x, max_y]
     first_size: list[float] # [width, height]
+    grid_info: list[tuple[float, float]]    # [(width_in_meter, height_in_meter), ...], grid size in each level
     subdivide_rules: list[list[int]]  # [(sub_width, sub_height), ...]
     alignment_origin: tuple[float, float] # [lon, lat], base point of the patch
     schema_node_key: str # The schema node key
