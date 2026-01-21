@@ -17,10 +17,17 @@ const settingCategories: SettingCategory[] = [
         ],
     },
     {
+        id: "map-view",
+        name: "Map View",
+        subcategories: [
+            { id: "map-view-general", name: "General" },
+        ],
+    },
+    {
         id: "topology-editor",
         name: "Topology Editor",
         subcategories: [
-            { id: "general", name: "Controlling" }
+            { id: "controlling", name: "Controlling" }
         ],
     }
 ]

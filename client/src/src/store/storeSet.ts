@@ -4,11 +4,19 @@ import { ResourceNode } from '@/template/scene/scene'
 
 export const DEFAULT_LEAD_IP = 'http://127.0.0.1:8001'
 
+export const DEFAULT_MAP_INITIAL_LONGITUDE = 114.051537
+export const DEFAULT_MAP_INITIAL_LATITUDE = 22.446937
+
 export const useSettingStore = create<SettingsProps>((set) => ({
     publicIP: DEFAULT_LEAD_IP,
     highSpeedMode: false,
+    mapInitialLongitude: DEFAULT_MAP_INITIAL_LONGITUDE,
+    mapInitialLatitude: DEFAULT_MAP_INITIAL_LATITUDE,
     setLeadIP: (leadIP: string) => set({ publicIP: leadIP }),
     setHighSpeedMode: (highSpeedMode: boolean) => set({ highSpeedMode }),
+    setMapInitialLongitude: (lng: number) => set({ mapInitialLongitude: lng }),
+    setMapInitialLatitude: (lat: number) => set({ mapInitialLatitude: lat }),
+    setMapInitialCenter: (lng: number, lat: number) => set({ mapInitialLongitude: lng, mapInitialLatitude: lat }),
 }))
 
 export const useSelectedNodeStore = create<SelectedNodeStore>((set) => ({
