@@ -45,110 +45,139 @@ def MOUNT(node_key: str, params: dict | None = None):
     resource_dir = Path.cwd() / 'resource' / rel_path
     resource_dir.mkdir(parents=True, exist_ok=True)
     
-    if params:
-        # Handle assembly if present
-        if 'assembly' in params:
-            assembly_params = params['assembly']
-            # Extract necessary parameters for assembly
-            schema_node_key = assembly_params.get('schema_node_key')
-            patch_node_keys = assembly_params.get('patch_node_keys')
-            grading_threshold = -1
-            dem_path = assembly_params.get('dem_path')
-            lum_path = assembly_params.get('lum_path')
-            meta_path = resource_dir / 'grid.meta.json'
-
-            if not schema_node_key or not patch_node_keys:
-                 raise ValueError("Assembly requires 'schema_node_key' and 'patch_node_keys'.")
-
-            print(f"Starting assembly for grid: {node_key}")
-            meta_info = assembly(resource_dir, schema_node_key, patch_node_keys, grading_threshold, dem_path, lum_path)
-            ne = HydroElements(str(resource_dir / 'cell_topo.bin'))
-            ns = HydroSides(str(resource_dir / 'edge_topo.bin'))
-            ne.export_ne(str(resource_dir / 'ne.txt'))
-            ns.export_ns(str(resource_dir / 'ns.txt'))
-
-            with open(meta_path, 'w', encoding='utf-8') as f:
-                json.dump(meta_info, f, indent=4)
-        
-        # Handle vector if present
-        if 'vector' in params:
-            vector_params = params['vector']
-            
-            # Load existing NE and NS files
-            ne_path = resource_dir / 'ne.txt'
-            ns_path = resource_dir / 'ns.txt'
-            
-            print(f"[DEBUG] Checking vector modification paths: ne_path={ne_path}, ns_path={ns_path}")
-            print(f"[DEBUG] ne_path exists: {ne_path.exists()}, ns_path exists: {ns_path.exists()}")
-            
-            if ne_path.exists() and ns_path.exists():
-                print(f"[DEBUG] Loading existing NE and NS files for vector modification: {ne_path}, {ns_path}")
-                logger.info(f"Loading existing NE and NS files for vector modification: {ne_path}, {ns_path}")
-                
-                # Load the existing data
-                print(f"[DEBUG] Calling get_ne({ne_path})")
-                ne_data = get_ne(ne_path)
-                print(f"[DEBUG] get_ne() completed successfully")
-                
-                print(f"[DEBUG] Calling get_ns({ns_path})")
-                ns_data = get_ns(ns_path)
-                print(f"[DEBUG] get_ns() completed successfully")
-                
-                # Prepare model data dictionary
-                model_data = {
-                    'ne': ne_data,
-                    'ns': ns_data
-                }
-                
-                # Apply vector modifications
-                modified_model_data = apply_vector_modification(vector_params, model_data)
-                
-                # Extract modified data
-                modified_ne_data = modified_model_data['ne']
-                modified_ns_data = modified_model_data['ns']
-                
-                # Write the modified data back to files
-                write_ne(ne_path, modified_ne_data)
-                write_ns(ns_path, modified_ns_data)
-                
-                logger.info(f"Successfully applied vector modifications and updated NE and NS files.")
-            else:
-                logger.warning(f"NE or NS files not found at {resource_dir}. Skipping vector modification.")
+    if not params:
+        _create_default_meta_if_not_exists(resource_dir)
+        return
+    
+    # Handle assembly if present
+    if 'assembly' in params:
+        _handle_assembly(params['assembly'], node_key, resource_dir)
+    
+    # Handle vector if present
+    if 'vector' in params:
+        _handle_vector_modification(params['vector'], resource_dir)
     
     # Update the meta file to include vector parameters if they exist
-    if params and 'vector' in params:
-        meta_path = resource_dir / 'grid.meta.json'
-        if meta_path.exists():
-            with open(meta_path, 'r', encoding='utf-8') as f:
-                meta_info = json.load(f)
-            
-            # Merge vector params into existing meta info
-            if 'vector' not in meta_info:
-                meta_info['vector'] = {}
-            meta_info['vector'].update(params['vector'])
-            
+    if 'vector' in params:
+        _update_meta_with_vector_params(params['vector'], resource_dir)
+
+# ===== Grid Mount Handlers =====
+def _handle_assembly(assembly_params: dict, node_key: str, resource_dir: Path):
+    """处理网格装配逻辑"""
+    schema_node_key = assembly_params.get('schema_node_key')
+    patch_node_keys = assembly_params.get('patch_node_keys')
+    grading_threshold = -1
+    dem_path = assembly_params.get('dem_path')
+    lum_path = assembly_params.get('lum_path')
+    meta_path = resource_dir / 'grid.meta.json'
+
+    if not schema_node_key or not patch_node_keys:
+        raise ValueError("Assembly requires 'schema_node_key' and 'patch_node_keys'.")
+
+    print(f"Starting assembly for grid: {node_key}")
+    try:
+        meta_info = assembly(resource_dir, schema_node_key, patch_node_keys, grading_threshold, dem_path, lum_path)
+        ne = HydroElements(str(resource_dir / 'cell_topo.bin'))
+        ns = HydroSides(str(resource_dir / 'edge_topo.bin'))
+        ne.export_ne(str(resource_dir / 'ne.txt'))
+        ns.export_ns(str(resource_dir / 'ns.txt'))
+
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta_info, f, indent=4)
+    except Exception as e:
+        logger.error(f"Error during assembly for {node_key}: {e}")
+        raise
+
+def _handle_vector_modification(vector_params: dict, resource_dir: Path):
+    """处理矢量数据修改逻辑"""
+    # Load existing NE and NS files
+    ne_path = resource_dir / 'ne.txt'
+    ns_path = resource_dir / 'ns.txt'
+    
+    print(f"[DEBUG] Checking vector modification paths: ne_path={ne_path}, ns_path={ns_path}")
+    print(f"[DEBUG] ne_path exists: {ne_path.exists()}, ns_path exists: {ns_path.exists()}")
+    
+    if not (ne_path.exists() and ns_path.exists()):
+        logger.warning(f"NE or NS files not found at {resource_dir}. Skipping vector modification.")
+        return
+    
+    try:
+        print(f"[DEBUG] Loading existing NE and NS files for vector modification: {ne_path}, {ns_path}")
+        logger.info(f"Loading existing NE and NS files for vector modification: {ne_path}, {ns_path}")
+        
+        # Load the existing data
+        print(f"[DEBUG] Calling get_ne({ne_path})")
+        ne_data = get_ne(ne_path)
+        print(f"[DEBUG] get_ne() completed successfully")
+        
+        print(f"[DEBUG] Calling get_ns({ns_path})")
+        ns_data = get_ns(ns_path)
+        print(f"[DEBUG] get_ns() completed successfully")
+        
+        # Prepare model data dictionary
+        model_data = {
+            'ne': ne_data,
+            'ns': ns_data
+        }
+        
+        # Apply vector modifications
+        modified_model_data = apply_vector_modification(vector_params, model_data)
+        
+        # Extract modified data
+        modified_ne_data = modified_model_data['ne']
+        modified_ns_data = modified_model_data['ns']
+        
+        # Write the modified data back to files
+        write_ne(ne_path, modified_ne_data)
+        write_ns(ns_path, modified_ns_data)
+        
+        logger.info(f"Successfully applied vector modifications and updated NE and NS files.")
+    except Exception as e:
+        logger.error(f"Error during vector modification: {e}")
+        raise
+
+def _update_meta_with_vector_params(vector_params: dict, resource_dir: Path):
+    """更新元数据文件以包含矢量参数"""
+    meta_path = resource_dir / 'grid.meta.json'
+    if not meta_path.exists():
+        return
+        
+    try:
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta_info = json.load(f)
+        
+        # Merge vector params into existing meta info
+        if 'vector' not in meta_info:
+            meta_info['vector'] = {}
+        meta_info['vector'].update(vector_params)
+        
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta_info, f, indent=4)
+            logger.info(f"Updated grid.meta.json with vector parameters.")
+    except Exception as e:
+        logger.error(f"Error updating meta file with vector params: {e}")
+        raise
+
+def _create_default_meta_if_not_exists(resource_dir: Path):
+    """如果不存在则创建默认元数据文件"""
+    meta_path = resource_dir / 'grid.meta.json'
+    if not meta_path.exists():
+        default_meta = {
+            'epsg': 4326,
+            'bounds': [0.0, 0.0, 0.0, 0.0],
+            'grid_info': [],
+            'level_info': [],
+            'subdivide_rules': [],
+            'alignment_origin': [0.0, 0.0],
+            'description': 'Initialized empty grid resource'
+        }
+        try:
             with open(meta_path, 'w', encoding='utf-8') as f:
-                json.dump(meta_info, f, indent=4)
-                logger.info(f"Updated grid.meta.json with vector parameters.")
-    else:
-        # If no params provided, and no existing meta file, create a default one
-        meta_path = resource_dir / 'grid.meta.json'
-        if not meta_path.exists():
-            default_meta = {
-                'epsg': 4326,
-                'bounds': [0.0, 0.0, 0.0, 0.0],
-                'grid_info': [],
-                'level_info': [],
-                'subdivide_rules': [],
-                'alignment_origin': [0.0, 0.0],
-                'description': 'Initialized empty grid resource'
-            }
-            try:
-                with open(meta_path, 'w', encoding='utf-8') as f:
-                    json.dump(default_meta, f, indent=4)
-                print(f"Created default grid.meta.json at {meta_path}")
-            except Exception as e:
-                print(f"Warning: Failed to create default grid.meta.json: {e}")
+                json.dump(default_meta, f, indent=4)
+            print(f"Created default grid.meta.json at {meta_path}")
+        except Exception as e:
+            print(f"Warning: Failed to create default grid.meta.json: {e}")
+            raise
 
 def UNMOUNT(node_key: str):
     """
@@ -1428,7 +1457,6 @@ class NsData:
     z_side_list: list[float]
     s_type_list: list[int]
 
-
 def write_ne(ne_path: str, ne_data: NeData) -> None:
     """
     将NeData对象写入NE文件
@@ -1466,7 +1494,6 @@ def write_ne(ne_path: str, ne_data: NeData) -> None:
             row_parts.append(f"{ne_data.under_suf_list[i]}")
             
             f.write(' '.join(row_parts) + '\n')
-
 
 def write_ns(ns_path: str, ns_data: NsData) -> None:
     """
@@ -1657,65 +1684,6 @@ def get_ns(ns_path: str) -> NsData:
     except Exception as e:
         logger.error(f"Failed to load NS file: {e}")
         raise e
-
-# def get_rainfall(rainfall_path: str) -> RainfallData:
-#     rainfall_date_list = []
-#     rainfall_station_list = []
-#     rainfall_value_list = []
-#     with open(rainfall_path,'r',encoding='utf-8') as f:
-#         # 跳过第一行
-#         next(f)
-#         for row_data in f:
-#             row_data = row_data.split(',')
-#             rainfall_date_list.append(row_data[0])
-#             rainfall_station_list.append(row_data[1])
-#             rainfall_value_list.append(float(row_data[2]))
-#     rainfall = RainfallData(
-#         rainfall_date_list,
-#         rainfall_station_list,
-#         rainfall_value_list
-#     )
-#     return rainfall
-
-# def get_gate(gate_path: str) -> Gate:
-#     ud_stream_list = []
-#     gate_height_list = []
-#     grid_id_list = []
-#     with open(gate_path,'r',encoding='utf-8') as f:
-#         for row_data in f:
-#             row_data = row_data.strip().split(',')
-#             ud_stream_list.append(int(row_data[0]))
-#             ud_stream_list.append(int(row_data[1]))
-#             gate_height_list.append(int(row_data[2]))
-#             grid_id_row = []
-#             for value in row_data[3:]:
-#                 grid_id_row.append(int(value))
-#             grid_id_list.append(grid_id_row)
-#     gate = Gate(
-#         ud_stream_list=ud_stream_list,
-#         gate_height_list=gate_height_list,
-#         grid_id_list=grid_id_list
-#     )
-#     return gate
-
-# def get_tide(tide_path: str) -> TideData:
-#     tide_date_list = []
-#     tide_time_list = []
-#     tide_value_list = []
-#     with open(tide_path,'r',encoding='utf-8') as f:
-#         # 跳过第一行
-#         next(f)
-#         for row_data in f:
-#             row_data = row_data.split(',')
-#             tide_date_list.append(row_data[0])
-#             tide_time_list.append(row_data[1])
-#             tide_value_list.append(float(row_data[2]))
-#     tide = TideData(
-#         tide_date_list,
-#         tide_time_list,
-#         tide_value_list
-#     )
-#     return tide
 
 # ==================== 几何计算类函数 ====================
 
@@ -2321,8 +2289,6 @@ def get_grids_intersecting_with_line(feature_json: dict, grid_result: np.ndarray
     
     return intersecting_grid_ids
 
-# ==================== 操作应用类函数 ====================
-
 def _get_feature_from_node(node_key: str) -> dict:
     """
     根据node_key加载矢量节点的GeoJSON数据
@@ -2360,6 +2326,8 @@ def _get_feature_from_node(node_key: str) -> dict:
     except Exception as e:
         logger.error(f"Failed to load geojson from {geojson_path}: {e}")
         return {}
+
+# ==================== 操作应用类函数 ====================
 
 def apply_vector_modification(vector_params: dict, model_data: dict) -> dict:
     """
@@ -2468,7 +2436,6 @@ def apply_vector_modification(vector_params: dict, model_data: dict) -> dict:
     model_data['ns'] = ns_data
     
     return model_data
-
 
 def apply_add_gate_action(vector_params: dict, model_data: dict, grid_result: np.ndarray) -> dict:
     """
