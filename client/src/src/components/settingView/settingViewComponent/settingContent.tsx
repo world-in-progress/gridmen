@@ -1,7 +1,12 @@
+import { useEffect, useRef, useState } from "react"
+import mapboxgl from "mapbox-gl"
 import SettingItem from "./settingItem"
 import { Input } from "@/components/ui/input"
 import { DEFAULT_LEAD_IP, useSettingStore } from "@/store/storeSet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { MapPin } from "lucide-react"
 
 interface SettingContentProps {
     activeCategory: string
@@ -12,9 +17,133 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
     const {
         publicIP: leadIP,
         highSpeedMode,
+        mapInitialLongitude,
+        mapInitialLatitude,
         setHighSpeedMode,
-        setLeadIP
+        setLeadIP,
+        setMapInitialCenter,
+        setMapInitialLongitude,
+        setMapInitialLatitude,
     } = useSettingStore()
+
+    const [lngInput, setLngInput] = useState(() => String(mapInitialLongitude))
+    const [latInput, setLatInput] = useState(() => String(mapInitialLatitude))
+    const [pickPopoverOpen, setPickPopoverOpen] = useState(false)
+
+    const mapWrapperRef = useRef<HTMLDivElement>(null)
+    const pickMapRef = useRef<mapboxgl.Map | null>(null)
+    const pickMarkerRef = useRef<mapboxgl.Marker | null>(null)
+
+    useEffect(() => {
+        setLngInput(String(mapInitialLongitude))
+    }, [mapInitialLongitude])
+
+    useEffect(() => {
+        setLatInput(String(mapInitialLatitude))
+    }, [mapInitialLatitude])
+
+    const parseAndClampLngLat = (lngRaw: string, latRaw: string): { lng: number, lat: number } | null => {
+        const lng = Number(lngRaw)
+        const lat = Number(latRaw)
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+        if (lng < -180 || lng > 180) return null
+        if (lat < -90 || lat > 90) return null
+        return { lng, lat }
+    }
+
+    const commitLng = (raw: string) => {
+        const next = parseAndClampLngLat(raw, String(mapInitialLatitude))
+        if (!next) {
+            setLngInput(String(mapInitialLongitude))
+            return
+        }
+        setMapInitialLongitude(next.lng)
+    }
+
+    const commitLat = (raw: string) => {
+        const next = parseAndClampLngLat(String(mapInitialLongitude), raw)
+        if (!next) {
+            setLatInput(String(mapInitialLatitude))
+            return
+        }
+        setMapInitialLatitude(next.lat)
+    }
+
+    useEffect(() => {
+        if (!pickPopoverOpen) {
+            pickMapRef.current?.remove()
+            pickMapRef.current = null
+            pickMarkerRef.current = null
+            return
+        }
+
+        mapboxgl.accessToken = import.meta.env.VITE_MAP_TOKEN
+
+        let disposed = false
+        let rafId = 0
+
+        const init = () => {
+            if (disposed) return
+
+            const container = mapWrapperRef.current
+            if (!container) {
+                rafId = requestAnimationFrame(init)
+                return
+            }
+
+            // Ensure a clean instance when reopening
+            pickMapRef.current?.remove()
+            pickMapRef.current = null
+            pickMarkerRef.current = null
+
+            const map = new mapboxgl.Map({
+                container,
+                style: 'mapbox://styles/mapbox/streets-v12',
+                center: [mapInitialLongitude, mapInitialLatitude],
+                zoom: 11,
+                attributionControl: false,
+            })
+
+            const marker = new mapboxgl.Marker({ color: '#F06B00' })
+                .setLngLat([mapInitialLongitude, mapInitialLatitude])
+                .addTo(map)
+
+            pickMapRef.current = map
+            pickMarkerRef.current = marker
+
+            const handleClick = (e: mapboxgl.MapMouseEvent) => {
+                const lng = Number(e.lngLat.lng.toFixed(6))
+                const lat = Number(e.lngLat.lat.toFixed(6))
+                marker.setLngLat([lng, lat])
+                setMapInitialCenter(lng, lat)
+                setPickPopoverOpen(false)
+            }
+
+            map.on('click', handleClick)
+            requestAnimationFrame(() => {
+                map.resize()
+            })
+
+            // Cleanup for this open session
+            return () => {
+                map.off('click', handleClick)
+                map.remove()
+                pickMapRef.current = null
+                pickMarkerRef.current = null
+            }
+        }
+
+        let cleanup: (() => void) | undefined
+        rafId = requestAnimationFrame(() => {
+            cleanup = init()
+        })
+
+        return () => {
+            disposed = true
+            if (rafId) cancelAnimationFrame(rafId)
+            cleanup?.()
+        }
+    }, [pickPopoverOpen, mapInitialLongitude, mapInitialLatitude, setMapInitialCenter])
 
     const renderPublicSetting = () => (
         <div className="space-y-0">
@@ -47,15 +176,71 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
         </div>
     )
 
-
+    const renderMapViewGeneralSetting = () => (
+        <div className="space-y-0">
+            <SettingItem title="Map View: Center" description="Set initial map center (WGS84).">
+                <div className="flex items-center gap-2">
+                    <div className="grid grid-cols-[80px_144px] items-center gap-y-2">
+                        <div className="text-xs text-gray-400 text-left">Longitude:</div>
+                        <Input
+                            value={lngInput}
+                            className="w-36 h-6 bg-gray-700 border-gray-600 text-white"
+                            onChange={(e) => setLngInput(e.target.value)}
+                            onBlur={(e) => commitLng(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') commitLng((e.target as HTMLInputElement).value)
+                            }}
+                            placeholder="114.051537"
+                        />
+                        <div className="text-xs text-gray-400 text-left">Latitude:</div>
+                        <Input
+                            value={latInput}
+                            className="w-36 h-6 bg-gray-700 border-gray-600 text-white"
+                            onChange={(e) => setLatInput(e.target.value)}
+                            onBlur={(e) => commitLat(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') commitLat((e.target as HTMLInputElement).value)
+                            }}
+                            placeholder="22.446937"
+                        />
+                    </div>
+                    <Popover open={pickPopoverOpen} onOpenChange={setPickPopoverOpen}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                variant="secondary"
+                                className="flex flex-col gap-0 bg-blue-500 h-15 w-15 hover:bg-blue-600 text-white cursor-pointer"
+                                title="Pick from mini map"
+                            >
+                                <MapPin className="w-8 h-8" />
+                                <span className="text-sm">Pick</span>
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" sideOffset={8} className="w-[400px] p-4">
+                            <div className="space-y-2">
+                                <div className="text-sm font-semibold">Pick Map Center</div>
+                                <div className="text-xs text-gray-400">Click on the mini map to set Longitude/Latitude.</div>
+                                <div className="w-full h-[360px] rounded-md overflow-hidden border border-gray-300 shadow-md">
+                                    <div className='w-full h-[400px]' ref={mapWrapperRef} />
+                                </div>
+                                <div className="text-xs text-gray-400">Current: {mapInitialLongitude.toFixed(6)}, {mapInitialLatitude.toFixed(6)}</div>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+                </div>
+            </SettingItem>
+        </div>
+    )
 
     const getSettingContent = () => {
         switch (activeCategory) {
             case "public-tree":
             case "lead-ip":
                 return renderPublicSetting()
-            case "general":
+            case "map-view":
+            case "map-view-general":
+                return renderMapViewGeneralSetting()
             case "topology-editor":
+            case "controlling":
                 return renderGeneralSetting()
             default:
                 return (
@@ -68,19 +253,13 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
 
     return (
         <div className="flex-1 bg-[#1E1E1E]">
-            <div className=" px-6 py-4">
+            <div className="px-6 py-4">
                 <div className="flex space-x-6">
                     <button className="text-blue-400 border-b-2 border-blue-400 pb-2">User</button>
                     <button className="text-gray-400 hover:text-white pb-2">Workspace</button>
                 </div>
             </div>
-
-            <div className="px-6 py-4">
-                <div className="mb-6">
-                    <h2 className="text-xl font-semibold text-white mb-2">Commonly Used</h2>
-                    <p className="text-sm text-gray-400">These are the most commonly used settings.</p>
-                </div>
-
+            <div className="px-4">
                 <div className="max-w-4xl">{getSettingContent()}</div>
             </div>
         </div>
