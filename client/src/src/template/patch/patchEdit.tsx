@@ -41,11 +41,12 @@ import { IViewContext } from '@/views/IViewContext'
 import CapacityBar from '@/components/ui/capacityBar'
 import { Separator } from '@/components/ui/separator'
 import { MapViewContext } from '@/views/mapView/mapView'
-import { convertBoundsCoordinates } from '@/utils/utils'
+import { convertBoundsCoordinates, getHexColorByValue, vectorColorMap } from '@/utils/utils'
 import { boundingBox2D } from '@/core/util/boundingBox2D'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
 import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
+import { ensureTopologyLayerInitialized, getOrCreateTopologyLayer } from '@/views/mapView/topology/topologyLayerManager'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface PatchEditProps {
@@ -120,21 +121,6 @@ const topologyOperations = [
         shortcut: '[ Ctrl+R ]',
     },
 ]
-
-const vectorColorMap = [
-    { value: "sky-500", color: "#0ea5e9", name: "Sky" },
-    { value: "green-500", color: "#22c55e", name: "Green" },
-    { value: "red-500", color: "#ef4444", name: "Red" },
-    { value: "purple-500", color: "#a855f7", name: "Purple" },
-    { value: "yellow-300", color: "#FFDF20", name: "Yellow" },
-    { value: "orange-500", color: "#FF6900", name: "Orange" },
-    { value: "pink-500", color: "#ec4899", name: "Pink" },
-    { value: "indigo-500", color: "#6366f1", name: "Indigo" },
-]
-
-const getHexColorByValue = (value: string | undefined | null) => {
-    return vectorColorMap.find((item) => item.value === value)?.color ?? "#0ea5e9"
-}
 
 const toPreviewFeatureCollection = (input: any, forcedHexColor: string): GeoJSON.FeatureCollection => {
     const features = Array.isArray(input?.features) ? input.features : []
@@ -268,6 +254,9 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         const clg = await waitForClg()
+        // clg.removeLayer('TopologyLayer')
+
+        const topologyLayerId = `TopologyLayer:${(node as ResourceNode).nodeInfo}`
 
         const gridContext: PatchContext = {
             nodeInfo: node.nodeInfo,
@@ -278,11 +267,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             rules: pageContext.current.patch!.subdivide_rules
         }
 
-        const gridLayer = new TopologyLayer(map)
-        clg.addLayer(gridLayer)
+        const gridLayer = getOrCreateTopologyLayer(clg, map, topologyLayerId)
 
         const patchCore: PatchCore = new PatchCore(gridContext)
-        await gridLayer.initialize(map, map.painter.context.gl)
+        await ensureTopologyLayerInitialized(gridLayer, map)
 
         pageContext.current.topologyLayer = gridLayer
         gridLayer.patchCore = patchCore
@@ -306,12 +294,13 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
         (node as ResourceNode).context = {
             ...((node as ResourceNode).context ?? {}),
+            topologyLayerId,
             __cleanup: {
                 ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
                 topology: () => {
                     try {
                         const clg = store.get<CustomLayerGroup>('clg')
-                        clg?.removeLayer('TopologyLayer')
+                        clg?.removeLayer(topologyLayerId)
                     } catch (err) {
                         console.error('PatchEdit cleanup failed to remove TopologyLayer:', err)
                     }
@@ -330,19 +319,15 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const unloadContext = () => {
 
-        // TODO: 无法记录操作按钮的选中状态
-        const clg = store.get<CustomLayerGroup>('clg')!
-        clg.removeLayer('TopologyLayer')
-
         console.log('unloadContext called')
-
+        // topologyLayer!.executeClearSelection()
+        // TODO: 无法记录操作按钮的选中状态
         // console.log(pageContext.current.editingState)
         // pageContext.current.editingState.select = selectTab
         // pageContext.current.editingState.pick = pickingTab
         // pageContext.current.isChecking = checkSwitchOn
     }
 
-    // TODO: 优化事件绑定解绑
     useEffect(() => {
         if (!map) return
         if (!topologyLayer) return

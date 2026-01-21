@@ -12,6 +12,12 @@ import * as api from '../api/apis'
 import { addMapPatchBounds, clearMapPatchBounds, convertBoundsCoordinates } from '@/utils/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
+import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
+import { ensureTopologyLayerInitialized, getOrCreateTopologyLayer } from '@/views/mapView/topology/topologyLayerManager'
+import store from '@/store/store'
+import PatchCore from '@/core/grid/patchCore'
+import { PatchContext } from '@/core/grid/types'
+import { boundingBox2D } from '@/core/util/boundingBox2D'
 
 interface PatchCheckProps {
     node: IResourceNode
@@ -62,22 +68,83 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
             pageContext.current = patchInfo
             boundsOn4326.current = await convertBoundsCoordinates(pageContext.current.bounds, pageContext.current.epsg, 4326)
             console.log('11111111111111111111')
-            addMapPatchBounds(map, boundsOn4326.current, node.nodeInfo)
         } else {
             pageContext.current = (node as ResourceNode).mountParams
             boundsOn4326.current = await convertBoundsCoordinates(pageContext.current!.bounds, pageContext.current!.epsg, 4326)
             console.log('222222222222222222222')
-            addMapPatchBounds(map, boundsOn4326.current, node.nodeInfo)
         }
 
-        const gridLayer = new TopologyLayer(map)
-        setTopologyLayer(gridLayer);
+        const waitForMapLoad = () => {
+            return new Promise<void>((resolve) => {
+                if (map.loaded()) {
+                    resolve()
+                } else {
+                    map.once('load', () => {
+                        resolve()
+                    })
+                }
+            })
+        }
+
+        await waitForMapLoad()
+
+        const waitForClg = () => {
+            return new Promise<CustomLayerGroup>((resolve) => {
+                const checkClg = () => {
+                    const clg = store.get<CustomLayerGroup>('clg')!
+                    if (clg) {
+                        resolve(clg)
+                    } else {
+                        setTimeout(checkClg, 100)
+                    }
+                }
+                checkClg()
+            })
+        }
+
+        const clg = await waitForClg()
+        // clg.removeLayer('TopologyLayer')
+
+        const topologyLayerId = `TopologyLayer:${(node as ResourceNode).nodeInfo}`
+
+        const gridContext: PatchContext = {
+            nodeInfo: node.nodeInfo,
+            lockId: (node as ResourceNode).lockId!,
+            srcCS: `EPSG:${pageContext.current!.epsg}`,
+            targetCS: 'EPSG:4326',
+            bBox: boundingBox2D(...pageContext.current!.bounds as [number, number, number, number]),
+            rules: pageContext.current!.subdivide_rules
+        }
+
+        const gridLayer = getOrCreateTopologyLayer(clg, map, topologyLayerId)
+
+        const patchCore: PatchCore = new PatchCore(gridContext)
+        await ensureTopologyLayerInitialized(gridLayer, map)
+
+        gridLayer.patchCore = patchCore
+
+        setTopologyLayer(gridLayer)
+
+        map.fitBounds(boundsOn4326.current!, {
+            padding: 200,
+            duration: 1000,
+        });
 
         (node as ResourceNode).context = {
             ...((node as ResourceNode).context ?? {}),
             __cleanup: {
                 ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
-                patchCheck: () => clearMapPatchBounds(map, node.nodeInfo),
+                topology: () => {
+                    try {
+                        const clg = store.get<CustomLayerGroup>('clg')
+                        clg?.removeLayer(topologyLayerId)
+                    } catch (err) {
+                        console.error('PatchEdit cleanup failed to remove TopologyLayer:', err)
+                    }
+                    map.dragPan.enable()
+                    map.scrollZoom.enable()
+                    if (map.getCanvas()) map.getCanvas().style.cursor = ''
+                },
             },
         }
 
@@ -85,11 +152,9 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
     }
 
     const unloadContext = () => {
-
-        // TODO: 无法记录操作按钮的选中状态
-        // const clg = store.get<CustomLayerGroup>('clg')!
-        // clg.removeLayer('TopologyLayer')
-
+        // NOTE: Do not remove topology layer here.
+        // Layer lifetime is managed by ResourceNode.close() via __cleanup,
+        // so switching between views (Check/Edit) won't accidentally unload the grid.
         console.log('unloadContext called')
 
         // console.log(pageContext.current.editingState)
@@ -112,7 +177,7 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
                         </AvatarFallback>
                     </Avatar>
                     <h1 className='font-bold text-[25px] relative flex items-center'>
-                        Edit Patch Topology
+                        Check Patch Topology
                         <span className=" bg-[#D63F26] rounded px-0.5 mb-2 text-[12px] inline-flex items-center mx-1">WorkSpace</span>
                     </h1>
                 </div>

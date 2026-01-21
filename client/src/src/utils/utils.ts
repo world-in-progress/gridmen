@@ -4,6 +4,22 @@ import { twMerge } from "tailwind-merge"
 import { clsx, type ClassValue } from "clsx"
 import * as apis from '@/template/api/apis'
 
+export const vectorColorMap = [
+    { value: "sky-500", color: "#0ea5e9", name: "Sky" },
+    { value: "green-500", color: "#22c55e", name: "Green" },
+    { value: "red-500", color: "#ef4444", name: "Red" },
+    { value: "purple-500", color: "#a855f7", name: "Purple" },
+    { value: "yellow-300", color: "#FFDF20", name: "Yellow" },
+    { value: "orange-500", color: "#FF6900", name: "Orange" },
+    { value: "pink-500", color: "#ec4899", name: "Pink" },
+    { value: "indigo-500", color: "#6366f1", name: "Indigo" }
+]
+
+export const getHexColorByValue = (value: string | undefined | null) => {
+    if (!value) return "#0ea5e9"
+    return vectorColorMap.find((item) => item.value === value)?.color ?? "#0ea5e9"
+}
+
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
 }

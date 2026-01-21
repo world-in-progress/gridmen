@@ -32,7 +32,7 @@ import { MapViewContext } from "@/views/mapView/mapView"
 import { toast } from "sonner"
 import { linkNode } from "../api/node"
 import { useLayerGroupStore, useToolPanelStore } from "@/store/storeSet"
-import { toValidFeatureCollection } from "@/utils/utils"
+import { getHexColorByValue, toValidFeatureCollection, vectorColorMap } from "@/utils/utils"
 
 interface VectorEditProps {
     node: IResourceNode
@@ -58,21 +58,6 @@ const vectorTips = [
     { tip3: "Click the button to draw and obtain or manually fill in the coordinates of the reference point." },
     { tip4: "Set the grid size for each level." },
 ]
-
-const vectorColorMap = [
-    { value: "sky-500", color: "#0ea5e9", name: "Sky" },
-    { value: "green-500", color: "#22c55e", name: "Green" },
-    { value: "red-500", color: "#ef4444", name: "Red" },
-    { value: "purple-500", color: "#a855f7", name: "Purple" },
-    { value: "yellow-300", color: "#FFDF20", name: "Yellow" },
-    { value: "orange-500", color: "#FF6900", name: "Orange" },
-    { value: "pink-500", color: "#ec4899", name: "Pink" },
-    { value: "indigo-500", color: "#6366f1", name: "Indigo" }
-]
-
-const getHexColorByValue = (value: string) => {
-    return vectorColorMap.find((item) => item.value === value)?.color ?? "#0ea5e9"
-}
 
 const guessVectorTypeFromFeatureCollection = (fc: any): "point" | "line" | "polygon" => {
     const features = Array.isArray(fc?.features) ? fc.features : []

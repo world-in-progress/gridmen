@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/utils/utils'
-import { Button } from '../ui/button'
+import { Button } from './ui/button'
 import * as api from '@/template/api/apis'
 import { Input } from '@/components/ui/input'
 import { Separator } from "@/components/ui/separator"
