@@ -11,6 +11,7 @@ import { ResourceNode, ResourceTree } from "../scene/scene"
 import { Delete, Edit3, FilePlusCorner, Info } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 import { linkNode } from '../api/node'
+import store from '@/store/store'
 
 enum SchemaMenuItem {
     CREATE_SCHEMA = 'Create Schema',
@@ -71,14 +72,17 @@ export default class SchemaTemplate implements ITemplate {
     }
 
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
+        console.log('SchemaTemplate handleMenuOpen', menuItem)
         switch (menuItem) {
             case SchemaMenuItem.CREATE_SCHEMA:
                 useToolPanelStore.getState().setActiveTab('create')
                 break
             case SchemaMenuItem.CHECK_SCHEMA: {
                 if (!(node as ResourceNode).lockId) {
+                    store.get<{ on: Function, off: Function }>('isLoading')!.on()
                     const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
+                    store.get<{ on: Function, off: Function }>('isLoading')!.off()
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const schemaNode = await api.node.getNodeParams(node.nodeInfo)
@@ -92,8 +96,10 @@ export default class SchemaTemplate implements ITemplate {
                 break
             case SchemaMenuItem.EDIT_SCHEMA: {
                 if (!(node as ResourceNode).lockId) {
+                    store.get<{ on: Function, off: Function }>('isLoading')!.on()
                     const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
+                    store.get<{ on: Function, off: Function }>('isLoading')!.off()
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const schemaNode = await api.node.getNodeParams(node.nodeInfo)

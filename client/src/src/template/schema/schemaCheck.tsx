@@ -12,6 +12,7 @@ import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate } from '@/utils/utils'
 import { Button } from '@/components/ui/button'
+import store from '@/store/store'
 
 interface SchemaCheckProps {
     node: IResourceNode
@@ -43,8 +44,11 @@ export default function SchemaCheck({ node, context }: SchemaCheckProps) {
 
     const loadContext = async () => {
         if (!(node as ResourceNode).lockId) {
+            store.get<{ on: Function, off: Function }>('isLoading')!.on()
+            console.log('触发3')
             const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
             (node as ResourceNode).lockId = linkResponse.lock_id
+            store.get<{ on: Function, off: Function }>('isLoading')!.off()
         }
 
         if ((node as ResourceNode).mountParams === null) {

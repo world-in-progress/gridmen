@@ -12,6 +12,7 @@ import { MapViewContext } from '@/views/mapView/mapView'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { addMapMarker, clearMarkerByNodeKey, convertPointCoordinate } from '@/utils/utils'
 import { Button } from '@/components/ui/button'
+import store from '@/store/store'
 
 interface SchemaEditProps {
     node: IResourceNode
@@ -41,8 +42,11 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
 
     const loadContext = async () => {
         if (!(node as ResourceNode).lockId) {
+            store.get<{ on: Function, off: Function }>('isLoading')!.on()
+            console.log('触发5')
             const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
             (node as ResourceNode).lockId = linkResponse.lock_id
+            store.get<{ on: Function, off: Function }>('isLoading')!.off()
         }
 
         if ((node as ResourceNode).mountParams === null) {
@@ -53,7 +57,6 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
             alignmentOriginOn4326.current = await convertPointCoordinate(parsed.alignment_origin, parsed.epsg, 4326)
             addMapMarker(map, alignmentOriginOn4326.current!, node.nodeInfo, { color: 'red' })
         } else {
-            console.log((node as ResourceNode).mountParams)
             pageContext.current = (node as ResourceNode).mountParams
             alignmentOriginOn4326.current = await convertPointCoordinate(pageContext.current!.alignment_origin, pageContext.current!.epsg, 4326)
             addMapMarker(map, alignmentOriginOn4326.current!, node.nodeInfo, { color: 'red' })
@@ -66,7 +69,6 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
                 marker: () => clearMarkerByNodeKey(node.nodeInfo),
             },
         }
-
         triggerRepaint()
     }
 

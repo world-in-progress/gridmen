@@ -209,8 +209,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const loadContext = async () => {
 
         if (!(node as ResourceNode).lockId) {
+            // store.get<{ on: Function, off: Function }>('isLoading')!.on()
             const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
             (node as ResourceNode).lockId = linkResponse.lock_id
+            // store.get<{ on: Function, off: Function }>('isLoading')!.off()
         }
 
         if ((node as ResourceNode).context !== undefined) {

@@ -11,6 +11,7 @@ import { ResourceNode, ResourceTree } from "../scene/scene"
 import { Delete, Edit3, Info, FilePlusCorner } from "lucide-react"
 import { useLayerStore, useToolPanelStore } from '@/store/storeSet'
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
+import store from '@/store/store'
 
 enum PatchMenuItem {
     CREATE_PATCH = 'Create Patch',
@@ -79,8 +80,10 @@ export default class PatchTemplate implements ITemplate {
                 break
             case PatchMenuItem.CHECK_PATCH: {
                 if (!(node as ResourceNode).lockId) {
+                    // store.get<{ on: Function, off: Function }>('isLoading')!.on()
                     const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
+                    // store.get<{ on: Function, off: Function }>('isLoading')!.off()
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
@@ -93,8 +96,10 @@ export default class PatchTemplate implements ITemplate {
                 break
             case PatchMenuItem.EDIT_PATCH: {
                 if (!(node as ResourceNode).lockId) {
+                    // store.get<{ on: Function, off: Function }>('isLoading')!.on()
                     const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
                     (node as ResourceNode).lockId = linkResponse.lock_id
+                    // store.get<{ on: Function, off: Function }>('isLoading')!.off()
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);

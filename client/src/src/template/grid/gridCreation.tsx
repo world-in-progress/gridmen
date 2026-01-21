@@ -33,10 +33,29 @@ interface GridCreationProps {
 
 type VectorOps = "set" | "add" | "subtract" | "max"
 
+interface PatchMapInfo {
+    nodeInfo: string
+    bounds: [number, number, number, number]
+}
+
+interface SelectedVectorItem {
+    nodeInfo: string
+    vectorInfo: Record<string, any>
+
+    demEnabled: boolean
+    demType: VectorOps
+    demValue: string
+
+    lumEnabled: boolean
+    lumValue: string
+}
+
 interface PageContext {
     name: string
     demFilePath: string
     lumFilePath: string
+    patchMap: Map<string, PatchMapInfo[]>
+    selectedVectors: SelectedVectorItem[]
 }
 
 const gridTips = [
@@ -53,6 +72,8 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         name: "",
         demFilePath: "",
         lumFilePath: "",
+        patchMap: new Map<string, PatchMapInfo[]>(),
+        selectedVectors: [],
     })
 
     const [isDragOver, setIsDragOver] = useState(false)
