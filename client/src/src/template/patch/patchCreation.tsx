@@ -31,9 +31,9 @@ interface PageContext {
     originBounds: [number, number, number, number] | null
     convertedBounds: [number, number, number, number] | null
     adjustedBounds: [number, number, number, number] | null
-    drawCoordinates: RectangleCoordinates | null
     inputBounds: [number, number, number, number] | null
     hasBounds: boolean
+    AlignmentOriginOn4326: [number, number] | null
 }
 
 interface RectangleCoordinates {
@@ -113,9 +113,9 @@ export default function PatchCreation({
         originBounds: null,
         convertedBounds: null,
         adjustedBounds: null,
-        drawCoordinates: null,
         inputBounds: null,
         hasBounds: false,
+        AlignmentOriginOn4326: null,
     })
 
     const [isDrawingBounds, setIsDrawingBounds] = useState(false)
@@ -130,7 +130,6 @@ export default function PatchCreation({
     })
 
     const tempSchemaKeyRef = useRef<string | null>(null)
-    const AlignmentOriginOn4326 = useRef<[number, number] | null>(null)
 
     let bgColor = 'bg-red-50'
     let textColor = 'text-red-700'
@@ -159,8 +158,21 @@ export default function PatchCreation({
     const loadContext = async () => {
         if ((node as ResourceNode).context !== undefined) {
             pageContext.current = { ...(node as ResourceNode).context }
+            pageContext.current.AlignmentOriginOn4326 = await convertPointCoordinate(pageContext.current.schema!.alignment_origin, pageContext.current.schema!.epsg, 4326)
+            console.log(pageContext.current)
         } else {
             pageContext.current.name = node.name.split('.')[0]
+        }
+
+        (node as ResourceNode).context = {
+            ...((node as ResourceNode).context ?? {}),
+            __cleanup: {
+                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
+                patchCreation: () => {
+                    clearMarkerByNodeKey(pageContext.current.schema!.schemaNodeKey)
+                    clearMapPatchBounds(map, node.key)
+                },
+            },
         }
 
         triggerRepaint()
@@ -168,7 +180,14 @@ export default function PatchCreation({
 
     const unloadContext = () => {
         (node as ResourceNode).context = {
-            ...pageContext.current
+            ...pageContext.current,
+            __cleanup: {
+                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
+                patchCreation: () => {
+                    clearMarkerByNodeKey(pageContext.current.schema!.schemaNodeKey)
+                    clearMapPatchBounds(map, node.key)
+                },
+            },
         }
 
         return
@@ -225,8 +244,8 @@ export default function PatchCreation({
             }
 
             clearMarkerByNodeKey(tempSchemaKeyRef.current!)
-            AlignmentOriginOn4326.current = await convertPointCoordinate(schema.alignment_origin, schema.epsg, 4326)
-            addMapMarker(map, AlignmentOriginOn4326.current!, schema.schemaNodeKey)
+            pageContext.current.AlignmentOriginOn4326 = await convertPointCoordinate(schema.alignment_origin, schema.epsg, 4326)
+            addMapMarker(map, pageContext.current.AlignmentOriginOn4326!, schema.schemaNodeKey)
             tempSchemaKeyRef.current = schema.schemaNodeKey
 
             pageContext.current.schema = schema
@@ -443,12 +462,12 @@ export default function PatchCreation({
                                 onDrop={handleSchemaNodeDrop}
                                 className='border-2 border-dashed border-gray-300 rounded-lg p-4 text-center transition-all duration-200 hover:border-blue-400 hover:bg-blue-50/50 group'
                             >
-                                {pageContext.current.schema?.name ? (
+                                {pageContext.current.schema ? (
                                     <div className='space-y-2'>
                                         <div className='inline-flex items-center gap-2 px-6 py-1.5 bg-red-50 border-2 border-red-300 rounded-md shadow-md transition-all duration-200 group-hover:shadow-md group-hover:border-red-500'>
                                             <MapPin className='w-4 h-4 text-red-400 hover:text-red-600 cursor-pointer' fill='none' stroke='currentColor' viewBox='0 0 24 24' onClick={() => {
                                                 map.flyTo({
-                                                    center: AlignmentOriginOn4326.current ?? [0, 0],
+                                                    center: pageContext.current.AlignmentOriginOn4326 ?? [0, 0],
                                                     zoom: 15,
                                                     duration: 1000,
                                                 })
@@ -484,7 +503,7 @@ export default function PatchCreation({
                                 id='epsg'
                                 placeholder={'Get EPSG Code From Schema'}
                                 className='text-black w-full border-gray-300 '
-                                value={pageContext.current.schema?.epsg ? pageContext.current.schema.epsg.toString() : ''}
+                                value={pageContext.current.schema?.epsg ?? ''}
                                 readOnly={true}
                             />
                         </div>

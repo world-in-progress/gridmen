@@ -40,9 +40,10 @@ export class ResourceNode implements IResourceNode {
         }
         delete (this.context as any).__cleanup
 
-        console.log(`ResourceNode.close: unlinking node ${this.key} with lockId ${this.lockId}`)
-        await unlinkNode(this.nodeInfo, this.lockId!)
-        this.lockId = null
+        if (!this.isTemp) {
+            await unlinkNode(this.nodeInfo, this.lockId!)
+            this.lockId = null
+        }
     }
 
     get nodeInfo(): string {

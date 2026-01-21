@@ -228,7 +228,6 @@ export const addMapPatchBounds = (
         lineWidth?: number,
     }
 ) => {
-    console.log('addMapPatchBounds called with id:', id, 'and bounds:', bounds)
     if (!map || !bounds || bounds.length < 4 || !id) return
 
     const sourceId = `bounds-source-${id}`
@@ -421,9 +420,6 @@ export const adjustPatchBounds = async (
 
     const tempAlignSW = [tempCalculatedBounds[0] + offsetX, tempCalculatedBounds[1] + offsetY]
     const tempAlignNE = [tempAlignSW[0] + rectWidth, tempAlignSW[1] + rectHeight]
-
-    console.log('tempAlignSW', tempAlignSW)
-    console.log('tempAlignNE', tempAlignNE)
 
     // const alignSW = await convertPointCoordinate([tempAlignSW[0], tempAlignSW[1]], 3857, toEPSG)      // toEPSG
     // const alignNE = await convertPointCoordinate([tempAlignNE[0], tempAlignNE[1]], 3857, toEPSG)      // toEPSG

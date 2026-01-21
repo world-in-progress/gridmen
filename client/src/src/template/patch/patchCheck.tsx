@@ -51,8 +51,6 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
     }, [])
 
     const loadContext = async () => {
-        console.log((node as ResourceNode).mountParams)
-
         if (!(node as ResourceNode).lockId) {
             const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'r');
             (node as ResourceNode).lockId = linkResponse.lock_id
@@ -67,11 +65,9 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
             (node as ResourceNode).mountParams = patchInfo
             pageContext.current = patchInfo
             boundsOn4326.current = await convertBoundsCoordinates(pageContext.current.bounds, pageContext.current.epsg, 4326)
-            console.log('11111111111111111111')
         } else {
             pageContext.current = (node as ResourceNode).mountParams
             boundsOn4326.current = await convertBoundsCoordinates(pageContext.current!.bounds, pageContext.current!.epsg, 4326)
-            console.log('222222222222222222222')
         }
 
         const waitForMapLoad = () => {
@@ -103,7 +99,6 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
         }
 
         const clg = await waitForClg()
-        // clg.removeLayer('TopologyLayer')
 
         const topologyLayerId = `TopologyLayer:${(node as ResourceNode).nodeInfo}`
 
@@ -154,8 +149,7 @@ export default function PatchCheck({ node, context }: PatchCheckProps) {
     const unloadContext = () => {
         // NOTE: Do not remove topology layer here.
         // Layer lifetime is managed by ResourceNode.close() via __cleanup,
-        // so switching between views (Check/Edit) won't accidentally unload the grid.
-        console.log('unloadContext called')
+        // so switching between views (Check/Edit) won't accidentally unload the grid
 
         // console.log(pageContext.current.editingState)
         // pageContext.current.editingState.select = selectTab
