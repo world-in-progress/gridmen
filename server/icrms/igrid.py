@@ -1,20 +1,7 @@
-"""
-Interface for Grid resource operations.
+import c_two as cc
 
-This defines the contract that Grid resources must implement.
-"""
-
-from typing import Protocol
-
-
-class IGrid(Protocol):
-    """
-    Interface for Grid resources.
-    
-    Defines the methods that a Grid resource must implement.
-    """
-    __tag__ = 'gridmen/IGrid/1.0.0'
-    
+@cc.icrm(namespace='gridmen', version='1.0.0')
+class IGrid:
     def get_meta(self):
         """
         Get metadata for the grid.

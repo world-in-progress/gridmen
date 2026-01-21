@@ -3,7 +3,6 @@ import mmap
 import struct
 from pathlib import Path
 
-
 # --- Data Structures for IO (HydroElement/HydroSides) ---
 
 class HydroElement:
