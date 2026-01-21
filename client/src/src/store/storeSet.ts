@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import { Layer, LayerGroupStore, LayerStore, SelectedNodeStore, SettingsProps, TempNewNodeProps, ToolPanelStore } from "./storeTypes"
 import { ResourceNode } from '@/template/scene/scene'
 
@@ -7,17 +8,31 @@ export const DEFAULT_LEAD_IP = 'http://127.0.0.1:8001'
 export const DEFAULT_MAP_INITIAL_LONGITUDE = 114.051537
 export const DEFAULT_MAP_INITIAL_LATITUDE = 22.446937
 
-export const useSettingStore = create<SettingsProps>((set) => ({
-    publicIP: DEFAULT_LEAD_IP,
-    highSpeedMode: false,
-    mapInitialLongitude: DEFAULT_MAP_INITIAL_LONGITUDE,
-    mapInitialLatitude: DEFAULT_MAP_INITIAL_LATITUDE,
-    setLeadIP: (leadIP: string) => set({ publicIP: leadIP }),
-    setHighSpeedMode: (highSpeedMode: boolean) => set({ highSpeedMode }),
-    setMapInitialLongitude: (lng: number) => set({ mapInitialLongitude: lng }),
-    setMapInitialLatitude: (lat: number) => set({ mapInitialLatitude: lat }),
-    setMapInitialCenter: (lng: number, lat: number) => set({ mapInitialLongitude: lng, mapInitialLatitude: lat }),
-}))
+export const useSettingStore = create<SettingsProps>()(
+    persist(
+        (set) => ({
+            publicIP: DEFAULT_LEAD_IP,
+            highSpeedMode: false,
+            mapInitialLongitude: DEFAULT_MAP_INITIAL_LONGITUDE,
+            mapInitialLatitude: DEFAULT_MAP_INITIAL_LATITUDE,
+            setLeadIP: (leadIP: string) => set({ publicIP: leadIP }),
+            setHighSpeedMode: (highSpeedMode: boolean) => set({ highSpeedMode }),
+            setMapInitialLongitude: (lng: number) => set({ mapInitialLongitude: lng }),
+            setMapInitialLatitude: (lat: number) => set({ mapInitialLatitude: lat }),
+            setMapInitialCenter: (lng: number, lat: number) => set({ mapInitialLongitude: lng, mapInitialLatitude: lat }),
+        }),
+        {
+            name: 'gridmen:settings',
+            storage: createJSONStorage(() => localStorage),
+            partialize: (state) => ({
+                publicIP: state.publicIP,
+                highSpeedMode: state.highSpeedMode,
+                mapInitialLongitude: state.mapInitialLongitude,
+                mapInitialLatitude: state.mapInitialLatitude,
+            }),
+        },
+    ),
+)
 
 export const useSelectedNodeStore = create<SelectedNodeStore>((set) => ({
     selectedNodeKey: null,

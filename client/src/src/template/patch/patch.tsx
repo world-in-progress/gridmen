@@ -110,6 +110,7 @@ export default class PatchTemplate implements ITemplate {
                     if (node.isTemp) {
                         ; (node as ResourceNode).tree.tempNodeExist = false
                         await (node.tree as ResourceTree).removeNode(node)
+                        await (node as ResourceNode).close()
                         toast.success(`Patch ${node.name} deleted successfully`)
                         return
                     }

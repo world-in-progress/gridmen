@@ -258,12 +258,24 @@ export default function SchemaCreation({
             pageContext.current.name = node.name.split('.')[0]
         }
 
+        (node as ResourceNode).context = {
+            ...((node as ResourceNode).context ?? {}),
+            __cleanup: {
+                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
+                marker: () => clearMarkerByNodeKey(node.nodeInfo),
+            },
+        }
+
         triggerRepaint()
     }
 
     const unloadContext = () => {
         (node as ResourceNode).context = {
-            ...pageContext.current
+            ...pageContext.current,
+            __cleanup: {
+                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
+                marker: () => clearMarkerByNodeKey(node.nodeInfo),
+            },
         }
 
         return

@@ -9,16 +9,15 @@ import DrawRectangle from 'mapbox-gl-draw-rectangle-mode'
 import ToolPanel from './toolPanel'
 import LayerGroup from './layerGroup'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import MapView, { MapViewContext } from './mapView'
-import { VIEW_REGISTRY } from '@/registry/viewRegistry'
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { calculateRectangleCoordinates, debounce } from '@/utils/utils'
-import { IResourceNode } from '@/template/scene/iscene'
-import CustomLayerGroup from './topology/customLayerGroup'
 import store from '@/store/store'
 import { useSettingStore } from '@/store/storeSet'
+import MapView, { MapViewContext } from './mapView'
+import { VIEW_REGISTRY } from '@/registry/viewRegistry'
+import { IResourceNode } from '@/template/scene/iscene'
+import CustomLayerGroup from './topology/customLayerGroup'
+import { calculateRectangleCoordinates, debounce } from '@/utils/utils'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 
-// Map initial center is controlled by zustand settings
 const initialZoom = 11
 const maxZoom = 22
 

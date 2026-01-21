@@ -91,7 +91,6 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
                 return
             }
 
-            // Ensure a clean instance when reopening
             pickMapRef.current?.remove()
             pickMapRef.current = null
             pickMarkerRef.current = null
@@ -103,6 +102,9 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
                 zoom: 11,
                 attributionControl: false,
             })
+
+            // Make cursor a crosshair while picking.
+            map.getCanvas().style.cursor = 'crosshair'
 
             const marker = new mapboxgl.Marker({ color: '#F06B00' })
                 .setLngLat([mapInitialLongitude, mapInitialLatitude])
@@ -124,9 +126,9 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
                 map.resize()
             })
 
-            // Cleanup for this open session
             return () => {
                 map.off('click', handleClick)
+                map.getCanvas().style.cursor = ''
                 map.remove()
                 pickMapRef.current = null
                 pickMarkerRef.current = null
@@ -220,7 +222,7 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
                                 <div className="text-sm font-semibold">Pick Map Center</div>
                                 <div className="text-xs text-gray-400">Click on the mini map to set Longitude/Latitude.</div>
                                 <div className="w-full h-[360px] rounded-md overflow-hidden border border-gray-300 shadow-md">
-                                    <div className='w-full h-[400px]' ref={mapWrapperRef} />
+                                    <div className="w-full h-[400px] cursor-crosshair" ref={mapWrapperRef} />
                                 </div>
                                 <div className="text-xs text-gray-400">Current: {mapInitialLongitude.toFixed(6)}, {mapInitialLatitude.toFixed(6)}</div>
                             </div>
@@ -259,7 +261,7 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
                     <button className="text-gray-400 hover:text-white pb-2">Workspace</button>
                 </div>
             </div>
-            <div className="px-4">
+            <div className="px-6">
                 <div className="max-w-4xl">{getSettingContent()}</div>
             </div>
         </div>

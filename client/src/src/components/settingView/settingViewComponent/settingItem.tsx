@@ -8,7 +8,7 @@ interface SettingItemProps {
 
 export default function SettingItem({ title, description, children }: SettingItemProps) {
     return (
-        <div className="py-4 border-b border-gray-700 last:border-b-0">
+        <div className=" border-b border-gray-700 last:border-b-0">
             <div className="flex items-start justify-between">
                 <div className="flex-1 mr-4">
                     <h3 className="text-sm font-medium text-white mb-1">{title}</h3>

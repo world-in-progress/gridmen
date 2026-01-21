@@ -110,6 +110,7 @@ export default class SchemaTemplate implements ITemplate {
                     if (node.isTemp) {
                         (node as ResourceNode).tree.tempNodeExist = false
                         await (node.tree as ResourceTree).removeNode(node)
+                        await (node as ResourceNode).close()
                         toast.success(`Schema ${node.name} deleted successfully`)
                         return
                     }
