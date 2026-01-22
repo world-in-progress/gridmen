@@ -596,11 +596,11 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
         console.log('gridData', gridData)
 
-        // await api.node.mountNode({
-        //     nodeInfo: node.nodeInfo,
-        //     templateName: 'grid',
-        //     mountParamsString: JSON.stringify(gridData),
-        // })
+        await api.node.mountNode({
+            nodeInfo: node.nodeInfo,
+            templateName: 'grid',
+            mountParamsString: JSON.stringify(gridData),
+        })
 
         handlePatchReset()
         handleVectorReset()
