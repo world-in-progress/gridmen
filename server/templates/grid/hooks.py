@@ -24,7 +24,6 @@ def MOUNT(node_key: str, params: dict | None = None):
     Both can be present simultaneously.
     Otherwise, it treats it as mounting an existing grid resource.
     """
-    vector_params = params['vector']
     assembly_params = params.get('assembly', {})
     rel_path = node_key.strip('.').replace('.', os.sep)
     # Correctly align with where resources should be mounted.
@@ -42,7 +41,7 @@ def MOUNT(node_key: str, params: dict | None = None):
     
     # Handle vector if present
     if 'vector' in params:
-        _handle_vector_modification(vector_params, assembly_params, resource_dir)
+        _handle_vector_modification(params, resource_dir)
 
 
 # ===== Grid Mount Handlers =====
@@ -72,7 +71,7 @@ def _handle_assembly(assembly_params: dict, node_key: str, resource_dir: Path):
         logger.error(f"Error during assembly for {node_key}: {e}")
         raise
 
-def _handle_vector_modification(vector_params: dict, assembly_params: dict, resource_dir: Path):
+def _handle_vector_modification(params: dict, resource_dir: Path):
     """处理矢量数据修改逻辑"""
     # Load existing NE and NS files
     ne_path = resource_dir / 'ne.txt'
@@ -95,7 +94,7 @@ def _handle_vector_modification(vector_params: dict, assembly_params: dict, reso
         }
         
         # Apply vector modifications
-        modified_model_data = apply_vector_modification(vector_params, assembly_params, model_data)
+        modified_model_data = apply_vector_modification(params, model_data)
 
         # Extract modified data
         modified_ne_data = modified_model_data['ne']
