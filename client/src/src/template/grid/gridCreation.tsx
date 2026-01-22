@@ -61,10 +61,10 @@ interface SelectedVectorItem {
 
     demEnabled: boolean
     demType: VectorOps
-    demValue: string
+    demValue: number | null
 
     lumEnabled: boolean
-    lumValue: string
+    lumValue: number | null
 }
 
 interface PageContext {
@@ -475,10 +475,10 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
             demEnabled: false,
             demType: "set",
-            demValue: "",
+            demValue: null,
 
             lumEnabled: false,
-            lumValue: "",
+            lumValue: null,
         })
 
         triggerRepaint()
@@ -923,7 +923,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                         onCheckedChange={(checked) => {
                                                                             item.demEnabled = Boolean(checked)
                                                                             if (item.demEnabled && !item.demType) item.demType = "set"
-                                                                            if (!item.demEnabled) item.demValue = ""
+                                                                            if (!item.demEnabled) item.demValue = null
                                                                             triggerRepaint()
                                                                         }}
                                                                     />
@@ -968,10 +968,16 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                             </DropdownMenuContent>
                                                                         </DropdownMenu>
                                                                         <Input
-                                                                            value={item.demValue}
+                                                                            value={item.demValue ?? ""}
                                                                             onClick={(e) => e.stopPropagation()}
                                                                             onChange={(e) => {
-                                                                                item.demValue = e.target.value
+                                                                                const raw = e.target.value
+                                                                                if (raw.trim() === "") {
+                                                                                    item.demValue = null
+                                                                                } else {
+                                                                                    const n = Number(raw)
+                                                                                    item.demValue = Number.isFinite(n) ? n : null
+                                                                                }
                                                                                 triggerRepaint()
                                                                             }}
                                                                             disabled={!showDemValue}
@@ -990,7 +996,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                         checked={item.lumEnabled}
                                                                         onCheckedChange={(checked) => {
                                                                             item.lumEnabled = Boolean(checked)
-                                                                            if (!item.lumEnabled) item.lumValue = ""
+                                                                            if (!item.lumEnabled) item.lumValue = null
                                                                             triggerRepaint()
                                                                         }}
                                                                     />
@@ -1011,10 +1017,16 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                         </button>
 
                                                                         <Input
-                                                                            value={item.lumValue}
+                                                                            value={item.lumValue ?? ""}
                                                                             onClick={(e) => e.stopPropagation()}
                                                                             onChange={(e) => {
-                                                                                item.lumValue = e.target.value
+                                                                                const raw = e.target.value
+                                                                                if (raw.trim() === "") {
+                                                                                    item.lumValue = null
+                                                                                } else {
+                                                                                    const n = Number(raw)
+                                                                                    item.lumValue = Number.isFinite(n) ? n : null
+                                                                                }
                                                                                 triggerRepaint()
                                                                             }}
                                                                             disabled={!item.lumEnabled}
