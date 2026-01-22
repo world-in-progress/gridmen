@@ -63,33 +63,28 @@ const patchTips = [
 ]
 
 const validatePatchForm = (
-    data: {
-        name: string
-        bounds: [number, number, number, number]
-    }
+    name: string,
+    bounds: [number, number, number, number]
 ): ValidationResult => {
     const errors = {
         name: false,
-        description: false,
         bounds: false
     }
 
     let generalError: string | null = null
 
-    // Validate name
-    if (!data.name.trim()) {
+    if (!name.trim()) {
         errors.name = true
         generalError = 'Please enter patch name'
         return { isValid: false, errors, generalError }
     }
 
-    // Validate bounds
-    if (!data.bounds) {
+    if (!bounds) {
         errors.bounds = true
         generalError = 'Please draw patch bounds'
         return { isValid: false, errors, generalError }
     } else {
-        if (data.bounds[0] >= data.bounds[2] || data.bounds[1] >= data.bounds[3]) {
+        if (bounds[0] >= bounds[2] || bounds[1] >= bounds[3]) {
             errors.bounds = true
             generalError = 'Please draw patch bounds correctly'
             return { isValid: false, errors, generalError }
@@ -98,11 +93,7 @@ const validatePatchForm = (
     return { isValid: true, errors, generalError }
 }
 
-export default function PatchCreation({
-    node,
-    context
-}: PatchCreationProps) {
-
+export default function PatchCreation({ node, context }: PatchCreationProps) {
     const mapContext = context as MapViewContext
     const map = mapContext.map!
     const drawInstance = mapContext.drawInstance!
@@ -159,7 +150,6 @@ export default function PatchCreation({
         if ((node as ResourceNode).context !== undefined) {
             pageContext.current = { ...(node as ResourceNode).context }
             pageContext.current.AlignmentOriginOn4326 = await convertPointCoordinate(pageContext.current.schema!.alignment_origin, pageContext.current.schema!.epsg, 4326)
-            console.log(pageContext.current)
         } else {
             pageContext.current.name = node.name.split('.')[0]
         }
@@ -341,10 +331,7 @@ export default function PatchCreation({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        const validation = validatePatchForm({
-            name: pageContext.current.name!,
-            bounds: pageContext.current.adjustedBounds!
-        })
+        const validation = validatePatchForm(pageContext.current.name!, pageContext.current.adjustedBounds!)
 
         if (!validation.isValid) {
             setFormErrors(validation.errors)

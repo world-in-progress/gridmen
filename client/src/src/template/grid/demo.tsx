@@ -406,6 +406,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         return normalized.split("/").pop() || filePath
     }
 
+    //
     const openRasterFileDialog = async () => {
         if (!window.electronAPI) {
             toast.error("Electron API not available")
@@ -434,6 +435,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         }
     }
 
+    //
     const handlePickDemFile = useCallback(async () => {
         const filePath = await openRasterFileDialog()
         if (!filePath) return
@@ -441,6 +443,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         triggerRepaint()
     }, [])
 
+    //
     const handlePickLumFile = useCallback(async () => {
         const filePath = await openRasterFileDialog()
         if (!filePath) return
@@ -448,11 +451,13 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         triggerRepaint()
     }, [])
 
+    //
     const handleClearDemFile = () => {
         pageContext.current.demFilePath = ""
         triggerRepaint()
     }
 
+    //
     const handleClearLumFile = () => {
         pageContext.current.lumFilePath = ""
         triggerRepaint()
@@ -722,6 +727,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         addVectorFromExplorerDrop(raw)
     }
 
+    //
     const handleVectorItemDragOver = (e: React.DragEvent) => {
         e.preventDefault()
     }
@@ -1007,7 +1013,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                         <div className="space-y-1">
                                             {pageContext.current.selectedPatches.map((patch, index) => {
                                                 const patchKey = patch.nodeInfo
-                                                const patchName = patchKey.split(".").pop() || "Patch"
+                                                const patchName = patch.nodeInfo.split(".").pop() || "Patch"
                                                 const borderClass = pickSchemaBorderClass(patch.schemaNodeKey)
                                                 return (
                                                     <div
