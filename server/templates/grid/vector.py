@@ -1004,7 +1004,7 @@ def _get_crs_from_schema_node_key(schema_node_key: str) -> str:
         return "EPSG:2326"  # Default to 2326
 # ==================== 操作应用类函数 ====================
 
-def apply_vector_modification(vector_params: dict, assembly_params: dict, model_data: dict) -> dict:
+def apply_vector_modification(params: dict, model_data: dict) -> dict:
     """
     应用添加围堰操作到模型数据（基于vector参数）
     
@@ -1018,96 +1018,131 @@ def apply_vector_modification(vector_params: dict, assembly_params: dict, model_
     
     logger.info("开始应用基围（基于vector参数）")
     
-    # 从vector参数中提取DEM和LUM信息
-    dem_params = vector_params.get('dem', {})
-    lum_params = vector_params.get('lum', {})
-    
-    dem_type = dem_params.get('type')
-    dem_value = dem_params.get('value')
-    lum_type = lum_params.get('type')
-    lum_value = lum_params.get('value')
+    vector_list = params.get('vector', [])
+    assembly_params = params.get('assembly', {})
 
-    node_key = vector_params.get('node_key')
-    schema_node_key = assembly_params.get('schema_node_key')
-    feature = _get_feature_from_node(node_key)
-
-    from_crs = _get_crs_from_node_key(node_key)
-    to_crs = _get_crs_from_schema_node_key(schema_node_key)
-    feature_json = transform_feature(feature, from_crs, to_crs)
+    if not isinstance(vector_list, list):
+        logger.warning("vector参数不是一个列表，尝试将其包装为列表")
+        vector_list = [vector_list]
 
     ne_data: NeData = model_data.get('ne', {})
     ns_data: NsData = model_data.get('ns', {})
-    
-    if dem_type is not None and dem_value is not None:
-        if dem_type == 'additive':  # 加法
-            for index in range(len(ne_data.xe_list)):
-                x = ne_data.xe_list[index]
-                y = ne_data.ye_list[index]
-                
-                # 判断当前网格点是否与feature相交
-                if is_point_intersects_with_feature(x, y, feature_json):
-                    ne_data.ze_list[index] += dem_value
-                    # logger.info(f"网格中心点 ({x}, {y}) 应用了加法DEM修改: +{dem_value}")
+
+    for vector_params in vector_list:
+        if not isinstance(vector_params, dict):
+            logger.warning(f"跳过非字典类型的vector参数: {vector_params}")
+            continue
+
+        # 从vector参数中提取DEM和LUM信息
+        dem_params = vector_params.get('dem', {})
+        lum_params = vector_params.get('lum', {})
         
-        elif dem_type == 'absolute':  # 设置指定高程
-            for index in range(len(ne_data.xe_list)):
-                x = ne_data.xe_list[index]
-                y = ne_data.ye_list[index]
-                
-                if is_point_intersects_with_feature(x, y, feature_json):
-                    ne_data.ze_list[index] = dem_value
-                    # logger.info(f"网格中心点 ({x}, {y}) 应用了绝对值DEM修改: {dem_value}")
+        dem_type = dem_params.get('type')
+        dem_value = dem_params.get('value')
+        lum_type = lum_params.get('type')
+        lum_value = lum_params.get('value')
+
+        node_key = vector_params.get('node_key')
+        schema_node_key = assembly_params.get('schema_node_key')
+        feature = _get_feature_from_node(node_key)
+
+        from_crs = _get_crs_from_node_key(node_key)
+        to_crs = _get_crs_from_schema_node_key(schema_node_key)
+        feature_json = transform_feature(feature, from_crs, to_crs)
+
+
         
-        elif dem_type == 'subtractive':  # 减法
-            for index in range(len(ne_data.xe_list)):
-                x = ne_data.xe_list[index]
-                y = ne_data.ye_list[index]
-                
-                if is_point_intersects_with_feature(x, y, feature_json):
-                    ne_data.ze_list[index] -= dem_value
-                    # logger.info(f"网格中心点 ({x}, {y}) 应用了减法DEM修改: -{dem_value}")
-        
-        else:  # 默认情况 - 加法模式
-            for index in range(len(ne_data.xe_list)):
-                x = ne_data.xe_list[index]
-                y = ne_data.ye_list[index]
-                
-                # 判断当前网格点是否与feature相交
-                if is_point_intersects_with_feature(x, y, feature_json):
-                    ne_data.ze_list[index] += dem_value if dem_value is not None else 0
-                    # logger.info(f"网格中心点 ({x}, {y}) 应用了默认DEM修改: +{dem_value or 0}")
-    
-    # 根据LUM参数修改土地利用类型
-    if lum_type is not None and lum_value is not None:
-        for index in range(len(ne_data.xe_list)):
-            x = ne_data.xe_list[index]
-            y = ne_data.ye_list[index]
+        if dem_type is not None and dem_value is not None:
+            if dem_type == 'add':  # 加法
+                for index in range(len(ne_data.xe_list)):
+                    x = ne_data.xe_list[index]
+                    y = ne_data.ye_list[index]
+                    
+                    # 判断当前网格点是否与feature相交
+                    if is_point_intersects_with_feature(x, y, feature_json):
+                        ne_data.ze_list[index] += dem_value
+                        # logger.info(f"网格中心点 ({x}, {y}) 应用了加法DEM修改: +{dem_value}")
             
-            # 判断当前网格点是否与feature相交
-            if is_point_intersects_with_feature(x, y, feature_json):
-                ne_data.under_suf_list[index] = lum_value
-                # logger.info(f"网格中心点 ({x}, {y}) 应用了LUM修改: {lum_value}")
-    
-    # 对ns数据也做相应处理
-    if dem_type is not None and dem_value is not None:
-        for index in range(len(ns_data.x_side_list)):
-            x = ns_data.x_side_list[index]
-            y = ns_data.y_side_list[index]
+            elif dem_type == 'set':  # 设置指定高程
+                for index in range(len(ne_data.xe_list)):
+                    x = ne_data.xe_list[index]
+                    y = ne_data.ye_list[index]
+                    
+                    if is_point_intersects_with_feature(x, y, feature_json):
+                        ne_data.ze_list[index] = dem_value
+                        # logger.info(f"网格中心点 ({x}, {y}) 应用了绝对值DEM修改: {dem_value}")
+            
+            elif dem_type == 'subtract':  # 减法
+                for index in range(len(ne_data.xe_list)):
+                    x = ne_data.xe_list[index]
+                    y = ne_data.ye_list[index]
+                    
+                    if is_point_intersects_with_feature(x, y, feature_json):
+                        ne_data.ze_list[index] -= dem_value
+                        # logger.info(f"网格中心点 ({x}, {y}) 应用了减法DEM修改: -{dem_value}")
 
-            # 判断当前网格点是否与feature相交
-            if is_point_intersects_with_feature(x, y, feature_json):
-                ns_data.z_side_list[index] += dem_value if dem_value is not None else 0
-                # logger.info(f"边中心点 ({x}, {y}) 应用了DEM修改: +{dem_value or 0}")
+            
+            else:  # 默认情况 - 加法模式
+                for index in range(len(ne_data.xe_list)):
+                    x = ne_data.xe_list[index]
+                    y = ne_data.ye_list[index]
+                    
+                    # 判断当前网格点是否与feature相交
+                    if is_point_intersects_with_feature(x, y, feature_json):
+                        ne_data.ze_list[index] += dem_value if dem_value is not None else 0
+                        # logger.info(f"网格中心点 ({x}, {y}) 应用了默认DEM修改: +{dem_value or 0}")
 
-    if lum_type is not None and lum_value is not None:
-        for index in range(len(ns_data.x_side_list)):
-            x = ns_data.x_side_list[index]
-            y = ns_data.y_side_list[index]
+        if dem_type is not None and dem_type == 'max':  # 设置为最大高程值
+                # 首先找到vector范围内的最大DEM值
+                max_dem_value = float('-inf')
+                for index in range(len(ne_data.xe_list)):
+                    x = ne_data.xe_list[index]
+                    y = ne_data.ye_list[index]
+                    
+                    if is_point_intersects_with_feature(x, y, feature_json):
+                        if ne_data.ze_list[index] > max_dem_value:
+                            max_dem_value = ne_data.ze_list[index]
+                
+                # 如果找到了有效的最大值，则将vector范围内的所有值设置为该最大值
+                if max_dem_value != float('-inf'):
+                    for index in range(len(ne_data.xe_list)):
+                        x = ne_data.xe_list[index]
+                        y = ne_data.ye_list[index]
+                        
+                        if is_point_intersects_with_feature(x, y, feature_json):
+                            ne_data.ze_list[index] = max_dem_value
+        
+        # 根据LUM参数修改土地利用类型
+        if lum_type == 'set' and lum_value is not None:
+            for index in range(len(ne_data.xe_list)):
+                x = ne_data.xe_list[index]
+                y = ne_data.ye_list[index]
+                
+                # 判断当前网格点是否与feature相交
+                if is_point_intersects_with_feature(x, y, feature_json):
+                    ne_data.under_suf_list[index] = lum_value
+                    # logger.info(f"网格中心点 ({x}, {y}) 应用了LUM修改: {lum_value}")
+        
+        # 对ns数据也做相应处理
+        if dem_type is not None and dem_value is not None:
+            for index in range(len(ns_data.x_side_list)):
+                x = ns_data.x_side_list[index]
+                y = ns_data.y_side_list[index]
 
-            # 判断当前网格点是否与feature相交
-            if is_point_intersects_with_feature(x, y, feature_json):
-                ns_data.s_type_list[index] = lum_value
-                # logger.info(f"边中心点 ({x}, {y}) 应用了LUM修改: {lum_value}")
+                # 判断当前网格点是否与feature相交
+                if is_point_intersects_with_feature(x, y, feature_json):
+                    ns_data.z_side_list[index] += dem_value if dem_value is not None else 0
+                    # logger.info(f"边中心点 ({x}, {y}) 应用了DEM修改: +{dem_value or 0}")
+
+        if lum_type is not None and lum_value is not None:
+            for index in range(len(ns_data.x_side_list)):
+                x = ns_data.x_side_list[index]
+                y = ns_data.y_side_list[index]
+
+                # 判断当前网格点是否与feature相交
+                if is_point_intersects_with_feature(x, y, feature_json):
+                    ns_data.s_type_list[index] = lum_value
+                    # logger.info(f"边中心点 ({x}, {y}) 应用了LUM修改: {lum_value}")
 
     model_data['ne'] = ne_data
     model_data['ns'] = ns_data
