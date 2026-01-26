@@ -342,27 +342,26 @@ export default function VectorEdit({ node, context }: VectorEditProps) {
             feature_json: featureJson as any,
         }
 
-        console.log('draw featureJson:', featureJson)
-
         setSelectedToolSafe('select')
         safeChangeMode('simple_select')
-        drawInstance.deleteAll()
-        pageContext.current.drawVector = null
-        pageContext.current.hasVector = false
-        triggerRepaint()
+
+        // drawInstance.deleteAll()
+        // pageContext.current.drawVector = null
+        // pageContext.current.hasVector = false
+        // triggerRepaint()
 
         try {
             await api.vector.updateVector(node.nodeInfo, lockId, updateData)
 
-            node.isTemp = false
-                ; (node as ResourceNode).tree.tempNodeExist = false
-                ; (node.tree as ResourceTree).selectedNode = null
-                ; (node.tree as ResourceTree).notifyDomUpdate()
+            // node.isTemp = false
+            //     ; (node as ResourceNode).tree.tempNodeExist = false
+            //     ; (node.tree as ResourceTree).selectedNode = null
+            //     ; (node.tree as ResourceTree).notifyDomUpdate()
 
-            const { isEditMode } = useLayerGroupStore.getState()
-            useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
+            // const { isEditMode } = useLayerGroupStore.getState()
+            // useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
 
-            await (node.tree as ResourceTree).refresh()
+            // await (node.tree as ResourceTree).refresh()
 
             toast.success("Vector updated successfully")
         } catch (error) {

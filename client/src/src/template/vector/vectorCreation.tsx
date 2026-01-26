@@ -93,6 +93,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         }
     })
 
+    const [hasConfirmVector, setHasConfirmVector] = useState(false)
     const [typeSelectDialogOpen, setTypeSelectDialogOpen] = useState(true)
     const [pendingType, setPendingType] = useState<VectorData["type"]>("point")
     const [createVectorTab, setCreateVectorTab] = useState<CreateVectorTab>("draw")
@@ -323,12 +324,13 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
     }
 
     const handleReselectVectorType = () => {
+        setTypeSelectDialogOpen(true)
         drawInstance.deleteAll()
         pageContext.current.hasVector = false
         pageContext.current.vectorData = {
             type: "point",
-            name: "",
-            epsg: "",
+            name: pageContext.current.vectorData.name,
+            epsg: pageContext.current.vectorData.epsg,
             color: "sky-500"
         }
         setSelectedTool("draw")
@@ -385,6 +387,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             }
         }
 
+        setHasConfirmVector(true)
         triggerRepaint()
     }
 
@@ -409,6 +412,20 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         setSelectedToolSafe("select")
         safeChangeMode("simple_select")
     }, [safeChangeMode, setSelectedToolSafe])
+
+    const handleTypeDialogOpenChange = (open: boolean) => {
+        setTypeSelectDialogOpen(open)
+        if (!open && !hasConfirmVector) {
+            try {
+                drawInstance?.deleteAll()
+            } catch (e) {
+                console.warn('Failed to clear draw instance on dialog close:', e)
+            }
+            pageContext.current.hasVector = false
+            pageContext.current.drawVector = null
+            triggerRepaint()
+        }
+    }
 
     const handleDeleteSelected = useCallback(() => {
         if (selectedToolRef.current !== "select") return
@@ -459,7 +476,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
     return (
         <div className="w-full h-full flex flex-col">
-            <Dialog open={typeSelectDialogOpen} onOpenChange={setTypeSelectDialogOpen}>
+            <Dialog open={typeSelectDialogOpen} onOpenChange={handleTypeDialogOpenChange}>
                 <DialogContent
                     className="bg-white text-slate-900 border border-slate-200"
                     onInteractOutside={(e) => e.preventDefault()}
@@ -576,224 +593,339 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            <div className='flex-none w-full border-b border-gray-700 flex flex-col'>
+                <div className="w-full flex justify-center items-center gap-4 p-4">
+                    <Avatar className="h-10 w-10 border-2 border-white">
+                        <AvatarFallback className="bg-[#007ACC]">
+                            <SplinePointer className="h-6 w-6 text-white" />
+                        </AvatarFallback>
+                    </Avatar >
+                    <h1 className="font-bold text-[25px] relative flex items-center text-white">
+                        Create New Vector
+                        <span className="bg-[#D63F26] rounded px-0.5 mb-2 text-[12px] inline-flex items-center mx-1">
+                            WorkSpace
+                        </span>
+                    </h1>
+                </div >
 
-            {
-                typeSelectDialogOpen ? null : (
-                    <>
-                        <div className='flex-none w-full border-b border-gray-700 flex flex-col'>
-                            <div className="w-full flex justify-center items-center gap-4 p-4">
-                                <Avatar className="h-10 w-10 border-2 border-white">
-                                    <AvatarFallback className="bg-[#007ACC]">
-                                        <SplinePointer className="h-6 w-6 text-white" />
-                                    </AvatarFallback>
-                                </Avatar>
-                                <h1 className="font-bold text-[25px] relative flex items-center text-white">
-                                    Create New Vector
-                                    <span className="bg-[#D63F26] rounded px-0.5 mb-2 text-[12px] inline-flex items-center mx-1">
-                                        WorkSpace
-                                    </span>
-                                </h1>
+                <div className="w-full p-4 pb-2 space-y-2 -mt-2 text-white">
+                    <div className="text-sm px-4">
+                        <ul className="list-disc space-y-1">
+                            {vectorTips.map((tip, index) => (
+                                <li key={index}>{Object.values(tip)[0]}</li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            </div >
+            {hasConfirmVector ? (
+                <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
+                    <div className="border-b border-gray-700">
+                        <div className="w-full p-4 space-y-4 border-t border-gray-700">
+                            <div>
+                                <h3 className="text-white font-semibold mb-2">Drawing Mode</h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={handleClickDraw}
+                                        className={`${selectedTool === "draw"
+                                            ? "bg-orange-500 hover:bg-orange-600"
+                                            : "bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600"}
+                                                text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer`}
+                                    >
+                                        <Pencil className="h-4 w-4" />
+                                        <span>Draw</span>
+                                        <span className="text-xs opacity-80">[ Ctrl+D ]</span>
+                                    </button>
+                                    <button
+                                        onClick={handleClickSelect}
+                                        className={`${selectedTool === "select"
+                                            ? "bg-orange-500 hover:bg-orange-600"
+                                            : "bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600"}
+                                                text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer`}
+                                    >
+                                        <MousePointer className="h-4 w-4" />
+                                        <span>Select</span>
+                                        <span className="text-xs opacity-80">[ Ctrl+S ]</span>
+                                    </button>
+                                </div>
                             </div>
 
-                            <div className="w-full p-4 pb-2 space-y-2 -mt-2 text-white">
-                                <div className="text-sm px-4">
-                                    <ul className="list-disc space-y-1">
-                                        {vectorTips.map((tip, index) => (
-                                            <li key={index}>{Object.values(tip)[0]}</li>
-                                        ))}
-                                    </ul>
+                            <div>
+                                <h3 className="text-white font-semibold mb-2">Operations</h3>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer">
+                                        <Undo2 className="h-4 w-4" />
+                                        <span>Undo</span>
+                                        <span className="text-xs opacity-80">[ Ctrl+Z ]</span>
+                                    </button>
+                                    <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer">
+                                        <Redo2 className="h-4 w-4" />
+                                        <span>Redo</span>
+                                        <span className="text-xs opacity-80">[ Ctrl+Y ]</span>
+                                    </button>
+                                    <button
+                                        onClick={handleDeleteSelected}
+                                        disabled={selectedTool !== "select"}
+                                        className={`${selectedTool === "select"
+                                            ? "bg-red-500 hover:bg-red-600 cursor-pointer"
+                                            : "bg-slate-700/50 border border-slate-600 opacity-50 cursor-not-allowed"}
+                                                text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all`}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                        <span>Delete</span>
+                                        <span className="text-xs opacity-80">[ Del ]</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
-                            <div className="border-b border-gray-700">
-                                <div className="w-full p-4 space-y-4 border-t border-gray-700">
-                                    <div>
-                                        <h3 className="text-white font-semibold mb-2">Drawing Mode</h3>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <button
-                                                onClick={handleClickDraw}
-                                                className={`${selectedTool === "draw"
-                                                    ? "bg-orange-500 hover:bg-orange-600"
-                                                    : "bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600"}
-                                                text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer`}
-                                            >
-                                                <Pencil className="h-4 w-4" />
-                                                <span>Draw</span>
-                                                <span className="text-xs opacity-80">[ Ctrl+D ]</span>
-                                            </button>
-                                            <button
-                                                onClick={handleClickSelect}
-                                                className={`${selectedTool === "select"
-                                                    ? "bg-orange-500 hover:bg-orange-600"
-                                                    : "bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600"}
-                                                text-white px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all cursor-pointer`}
-                                            >
-                                                <MousePointer className="h-4 w-4" />
-                                                <span>Select</span>
-                                                <span className="text-xs opacity-80">[ Ctrl+S ]</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                    </div>
 
-                                    <div>
-                                        <h3 className="text-white font-semibold mb-2">Operations</h3>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer">
-                                                <Undo2 className="h-4 w-4" />
-                                                <span>Undo</span>
-                                                <span className="text-xs opacity-80">[ Ctrl+Z ]</span>
-                                            </button>
-                                            <button className="bg-slate-700/50 hover:bg-slate-600/50 border border-slate-600 text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer">
-                                                <Redo2 className="h-4 w-4" />
-                                                <span>Redo</span>
-                                                <span className="text-xs opacity-80">[ Ctrl+Y ]</span>
-                                            </button>
-                                            <button
-                                                onClick={handleDeleteSelected}
-                                                disabled={selectedTool !== "select"}
-                                                className={`${selectedTool === "select"
-                                                    ? "bg-red-500 hover:bg-red-600 cursor-pointer"
-                                                    : "bg-slate-700/50 border border-slate-600 opacity-50 cursor-not-allowed"}
-                                                text-white px-2 py-1 rounded-lg font-medium flex flex-col items-center justify-center gap-0.5 transition-all`}
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                                <span>Delete</span>
-                                                <span className="text-xs opacity-80">[ Del ]</span>
-                                            </button>
-                                        </div>
-                                    </div>
+                    <div className="p-4 space-y-2">
+                        <div className="space-y-1">
+                            <h3 className="text-white font-semibold text-lg flex items-center gap-2">
+                                <Palette className="w-5 h-5" />
+                                Vector Basic Information
+                            </h3>
+                            <p className="text-slate-400 text-sm">Configure the properties for your new vector</p>
+                        </div>
+                        <div className="border-slate-200 border bg-white p-4 rounded-lg shadow-sm">
+                            <div className="space-y-2">
+                                <div className="space-y-2">
+                                    <Label htmlFor="vectorName" className="text-sm font-medium text-slate-900">
+                                        Vector Name
+                                        <span className="text-red-500 ml-1">*</span>
+                                    </Label>
+                                    <Input
+                                        id="vectorName"
+                                        value={pageContext.current.vectorData.name}
+                                        readOnly={true}
+                                        className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
+                                    />
                                 </div>
-                            </div>
 
-                            <div className="p-4 space-y-2">
-                                <div className="space-y-1">
-                                    <h3 className="text-white font-semibold text-lg flex items-center gap-2">
-                                        <Palette className="w-5 h-5" />
-                                        Vector Basic Information
-                                    </h3>
-                                    <p className="text-slate-400 text-sm">Configure the properties for your new vector</p>
+                                <div className="space-y-2">
+                                    <Label htmlFor="vectorEpsg" className="text-sm font-medium text-slate-900 flex items-center gap-2">
+                                        <Globe className="w-4 h-4" />
+                                        EPSG Code
+                                        <span className="text-red-500 ml-1">*</span>
+                                    </Label>
+                                    <Input
+                                        id="vectorEpsg"
+                                        value={pageContext.current.vectorData.epsg}
+                                        onChange={(e) => {
+                                            pageContext.current.vectorData.epsg = e.target.value
+                                            triggerRepaint()
+                                        }}
+                                        placeholder="e.g., EPSG:4326"
+                                        className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
+                                    />
                                 </div>
-                                <div className="border-slate-200 border bg-white p-4 rounded-lg shadow-sm">
-                                    <div className="space-y-2">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="vectorName" className="text-sm font-medium text-slate-900">
-                                                Vector Name
-                                                <span className="text-red-500 ml-1">*</span>
-                                            </Label>
-                                            <Input
-                                                id="vectorName"
-                                                value={pageContext.current.vectorData.name}
-                                                readOnly={true}
-                                                className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
-                                            />
-                                        </div>
 
-                                        <div className="space-y-2">
-                                            <Label htmlFor="vectorEpsg" className="text-sm font-medium text-slate-900 flex items-center gap-2">
-                                                <Globe className="w-4 h-4" />
-                                                EPSG Code
-                                                <span className="text-red-500 ml-1">*</span>
-                                            </Label>
-                                            <Input
-                                                id="vectorEpsg"
-                                                value={pageContext.current.vectorData.epsg}
-                                                onChange={(e) => {
-                                                    pageContext.current.vectorData.epsg = e.target.value
-                                                    triggerRepaint()
-                                                }}
-                                                placeholder="e.g., EPSG:4326"
-                                                className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
-                                            />
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label htmlFor="vectorColor" className="text-sm font-medium text-slate-900">
-                                                Vector Color
-                                            </Label>
-                                            <Select
-                                                value={pageContext.current.vectorData.color}
-                                                onValueChange={(value: any) => {
-                                                    pageContext.current.vectorData.color = value
-                                                    triggerRepaint()
-                                                }}
-                                            >
-                                                <SelectTrigger className="w-full h-8 cursor-pointer bg-white border-slate-300 text-slate-900">
-                                                    <SelectValue placeholder="Select color" />
-                                                </SelectTrigger>
-                                                <SelectContent className="bg-white border-slate-200">
-                                                    {vectorColorMap.map((item) => (
-                                                        <SelectItem
-                                                            key={item.value}
-                                                            value={item.value}
-                                                            className="cursor-pointer text-slate-900 hover:bg-slate-100"
-                                                        >
-                                                            <div className="flex items-center gap-2">
-                                                                <div
-                                                                    className="w-4 h-4 rounded-full border border-slate-300"
-                                                                    style={{ backgroundColor: item.color }}
-                                                                />
-                                                                <span>{item.name}</span>
-                                                            </div>
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-
-                                        <div className="space-y-2 pt-4">
-                                            <Label className="text-sm font-medium text-slate-900">Preview</Label>
-                                            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm text-slate-500">Type</span>
+                                <div className="space-y-2">
+                                    <Label htmlFor="vectorColor" className="text-sm font-medium text-slate-900">
+                                        Vector Color
+                                    </Label>
+                                    <Select
+                                        value={pageContext.current.vectorData.color}
+                                        onValueChange={(value: any) => {
+                                            pageContext.current.vectorData.color = value
+                                            triggerRepaint()
+                                        }}
+                                    >
+                                        <SelectTrigger className="w-full h-8 cursor-pointer bg-white border-slate-300 text-slate-900">
+                                            <SelectValue placeholder="Select color" />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-white border-slate-200">
+                                            {vectorColorMap.map((item) => (
+                                                <SelectItem
+                                                    key={item.value}
+                                                    value={item.value}
+                                                    className="cursor-pointer text-slate-900 hover:bg-slate-100"
+                                                >
                                                     <div className="flex items-center gap-2">
-                                                        {getVectorTypeIcon(pageContext.current.vectorData.type!)}
-                                                        <Badge variant="secondary" className="text-xs font-semibold">
-                                                            {pageContext.current.vectorData.type}
-                                                        </Badge>
+                                                        <div
+                                                            className="w-4 h-4 rounded-full border border-slate-300"
+                                                            style={{ backgroundColor: item.color }}
+                                                        />
+                                                        <span>{item.name}</span>
                                                     </div>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm text-slate-500">Name</span>
-                                                    <span className="text-slate-900 font-medium">{pageContext.current.vectorData.name || "Not set"}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm text-slate-500">EPSG</span>
-                                                    <span className="text-slate-900 font-medium">{pageContext.current.vectorData.epsg || "Not set"}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-sm text-slate-500">Color</span>
-                                                    <div
-                                                        className="w-20 h-6 rounded-full border-2 border-slate-300 shadow-sm"
-                                                        style={{
-                                                            backgroundColor: vectorColorMap.find((item) => item.value === pageContext.current.vectorData.color)
-                                                                ?.color,
-                                                        }}
-                                                    />
-                                                </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2 pt-4">
+                                    <Label className="text-sm font-medium text-slate-900">Preview</Label>
+                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">Type</span>
+                                            <div className="flex items-center gap-2">
+                                                {getVectorTypeIcon(pageContext.current.vectorData.type!)}
+                                                <Badge variant="secondary" className="text-xs font-semibold">
+                                                    {pageContext.current.vectorData.type}
+                                                </Badge>
                                             </div>
                                         </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">Name</span>
+                                            <span className="text-slate-900 font-medium">{pageContext.current.vectorData.name || "Not set"}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">EPSG</span>
+                                            <span className="text-slate-900 font-medium">{pageContext.current.vectorData.epsg || "Not set"}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">Color</span>
+                                            <div
+                                                className="w-20 h-6 rounded-full border-2 border-slate-300 shadow-sm"
+                                                style={{
+                                                    backgroundColor: vectorColorMap.find((item) => item.value === pageContext.current.vectorData.color)
+                                                        ?.color,
+                                                }}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="text-sm w-full flex flex-row items-center justify-center space-x-4">
-                                    <Button
-                                        className="w-[1/2] bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
-                                        onClick={handleReselectVectorType}
-                                    >
-                                        Reselect Vector Type
-                                    </Button>
-                                    <Button
-                                        className="w-[1/2] bg-green-500 hover:bg-green-600 text-white cursor-pointer"
-                                        disabled={!pageContext.current.vectorData.name.trim() || !pageContext.current.vectorData.epsg.trim()}
-                                        onClick={handleCreateVector}
-                                    >
-                                        Create New Vector
-                                    </Button>
                                 </div>
                             </div>
                         </div>
-                    </>
-                )
+                        <div className="text-sm w-full flex flex-row items-center justify-center space-x-4">
+                            <Button
+                                className="w-[1/2] bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
+                                onClick={handleReselectVectorType}
+                            >
+                                Reselect Vector Type
+                            </Button>
+                            <Button
+                                className="w-[1/2] bg-green-500 hover:bg-green-600 text-white cursor-pointer"
+                                disabled={!pageContext.current.vectorData.name.trim() || !pageContext.current.vectorData.epsg.trim()}
+                                onClick={handleCreateVector}
+                            >
+                                Create New Vector
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
+                    <div className="py-2 px-4 flex w-full space-y-2">
+                        <Button
+                            className="w-full bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
+                            onClick={handleReselectVectorType}
+                        >
+                            Select Vector Type
+                        </Button>
+                        <div className="space-y-1">
+                            <h3 className="text-white font-semibold text-lg flex items-center gap-2">
+                                <Palette className="w-5 h-5" />
+                                Vector Basic Information
+                            </h3>
+                            <p className="text-slate-400 text-sm">Configure the properties for your new vector</p>
+                        </div>
+                        <div className="border-slate-200 border bg-white p-4 rounded-lg shadow-sm">
+                            <div className="space-y-2">
+                                <div className="space-y-2">
+                                    <Label htmlFor="vectorName" className="text-sm font-medium text-slate-900">
+                                        Vector Name
+                                        <span className="text-red-500 ml-1">*</span>
+                                    </Label>
+                                    <Input
+                                        id="vectorName"
+                                        value={pageContext.current.vectorData.name}
+                                        readOnly={true}
+                                        className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="vectorEpsg" className="text-sm font-medium text-slate-900 flex items-center gap-2">
+                                        <Globe className="w-4 h-4" />
+                                        EPSG Code
+                                        <span className="text-red-500 ml-1">*</span>
+                                    </Label>
+                                    <Input
+                                        id="vectorEpsg"
+                                        value={pageContext.current.vectorData.epsg}
+                                        onChange={(e) => {
+                                            pageContext.current.vectorData.epsg = e.target.value
+                                            triggerRepaint()
+                                        }}
+                                        placeholder="e.g., EPSG:4326"
+                                        className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="vectorColor" className="text-sm font-medium text-slate-900">
+                                        Vector Color
+                                    </Label>
+                                    <Select
+                                        value={pageContext.current.vectorData.color}
+                                        onValueChange={(value: any) => {
+                                            pageContext.current.vectorData.color = value
+                                            triggerRepaint()
+                                        }}
+                                    >
+                                        <SelectTrigger className="w-full h-8 cursor-pointer bg-white border-slate-300 text-slate-900">
+                                            <SelectValue placeholder="Select color" />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-white border-slate-200">
+                                            {vectorColorMap.map((item) => (
+                                                <SelectItem
+                                                    key={item.value}
+                                                    value={item.value}
+                                                    className="cursor-pointer text-slate-900 hover:bg-slate-100"
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <div
+                                                            className="w-4 h-4 rounded-full border border-slate-300"
+                                                            style={{ backgroundColor: item.color }}
+                                                        />
+                                                        <span>{item.name}</span>
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2 pt-4">
+                                    <Label className="text-sm font-medium text-slate-900">Preview</Label>
+                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">Type</span>
+                                            <div className="flex items-center gap-2">
+                                                {getVectorTypeIcon(pageContext.current.vectorData.type!)}
+                                                <Badge variant="secondary" className="text-xs font-semibold">
+                                                    {pageContext.current.vectorData.type}
+                                                </Badge>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">Name</span>
+                                            <span className="text-slate-900 font-medium">{pageContext.current.vectorData.name || "Not set"}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">EPSG</span>
+                                            <span className="text-slate-900 font-medium">{pageContext.current.vectorData.epsg || "Not set"}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm text-slate-500">Color</span>
+                                            <div
+                                                className="w-20 h-6 rounded-full border-2 border-slate-300 shadow-sm"
+                                                style={{
+                                                    backgroundColor: vectorColorMap.find((item) => item.value === pageContext.current.vectorData.color)
+                                                        ?.color,
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )
             }
         </div >
     )

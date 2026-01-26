@@ -6,6 +6,7 @@ import { IResourceNode } from "../scene/iscene"
 import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Delete, FilePlusCorner, FolderPlus } from "lucide-react"
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
+import { useSelectedNodeStore } from '@/store/storeSet'
 
 enum DefaultMenuItem {
     NEW_RESOURCE = 'New Resource',
@@ -78,10 +79,8 @@ export default class DefaultTemplate implements ITemplate {
     async handleMenuOpen(node: IResourceNode, menuItem: any): Promise<void> {
         switch (menuItem) {
             case DefaultMenuItem.NEW_RESOURCE:
-                console.log('NEW_RESOURCE')
                 break
             case DefaultMenuItem.NEW_FOLDER:
-                console.log('NEW_FOLDER')
                 break
             case DefaultMenuItem.DELETE_FOLDER:
                 await api.node.unmountNode(node.nodeInfo)
