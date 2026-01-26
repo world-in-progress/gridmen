@@ -7,7 +7,7 @@ from pathlib import Path
 from pynoodle import noodle
 
 from .assembly import assembly
-from crms.grid import HydroElements, HydroSides
+from crms.grid import HydroElements, HydroSides, BlockGenerator
 from .vector import write_ns, write_ne, apply_vector_modification, get_ne, get_ns
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,11 @@ def _handle_assembly(assembly_params: dict, node_key: str, resource_dir: Path):
         ns = HydroSides(str(resource_dir / 'edge_topo.bin'))
         ne.export_ne(str(resource_dir / 'ne.txt'))
         ns.export_ns(str(resource_dir / 'ns.txt'))
+
+        print(f"Total elements loaded for block generation: {len(ne.es)}")
+        blocks_output_dir = resource_dir / 'blocks'
+        generator = BlockGenerator(output_dir=str(blocks_output_dir), base_name=node_key)
+        generator.process(ne.es)
 
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta_info, f, indent=4)
