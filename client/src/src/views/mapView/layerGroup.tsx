@@ -143,6 +143,10 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
                     return `${action} Schema`
                 case 'patch':
                     return `${action} Patch`
+                case 'vector':
+                    return `${action} Vector`
+                case 'grid':
+                    return `${action} Grid`
                 default:
                     return null
             }
@@ -223,7 +227,11 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
         e.stopPropagation()
 
         const layerDragData = e.dataTransfer.types.includes('application/layer-id')
-        const externalDragData = e.dataTransfer.types.includes('text/plain')
+        const externalDragData = (
+            e.dataTransfer.types.includes('text/plain') ||
+            e.dataTransfer.types.includes('application/gridmen-node') ||
+            e.dataTransfer.types.includes('application/gridmen-node-key')
+        )
 
         if (layerDragData) {
             e.dataTransfer.dropEffect = 'move'
@@ -319,6 +327,9 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             })
         )
         clearLayerNodes()
+
+        const { isEditMode } = useLayerGroupStore.getState()
+        useToolPanelStore.getState().setActiveTab(isEditMode ? 'edit' : 'check')
     }
 
     const renderLayer = (layer: Layer, depth = 0) => {
@@ -431,6 +442,9 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
         )
     }
 
+    const resourceGroup = getResourceNodeGroup(layers)
+    const resourceLayerCount = resourceGroup?.children ? collectLayerNodes(resourceGroup.children).length : 0
+
     return (
         <div className="w-full h-full bg-[#1e1e1e] border-r border-gray-800 flex flex-col">
             {/* Header */}
@@ -478,7 +492,7 @@ export default function LayerGroup({ getResourceNodeByKey }: LayerGroupProps) {
             {/* Footer Info */}
             <div className="px-3 py-2 border-t border-[#2A2C33] text-xs text-gray-500">
                 <div className="flex justify-between">
-                    <span>Total Layers: {layers.length}</span>
+                    <span>Total Layers: {resourceLayerCount}</span>
                     <span>CRS: EPSG:4326</span>
                 </div>
             </div>

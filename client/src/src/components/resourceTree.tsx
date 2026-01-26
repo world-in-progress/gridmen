@@ -289,7 +289,6 @@ const NodeRenderer = ({
 
     const handleClickNode = useCallback((e: React.MouseEvent) => {
         if (!isFolder && !node.isTemp) return
-        // Clear any existing timeout to prevent single click when double clicking
         if (clickTimeoutRef.current) {
             clearTimeout(clickTimeoutRef.current)
             clickTimeoutRef.current = null
@@ -334,8 +333,25 @@ const NodeRenderer = ({
     // }, [node])
 
     const handleNodeMenu = useCallback((node: IResourceNode, menuItem: any) => {
+        if (menuItem === 'New Resource' || menuItem === 'New Folder') {
+            setSelectedNodeKey(node.key)
+                ; (node.tree as ResourceTree).selectedNode = node
+
+            if (menuItem === 'New Resource') {
+                setShowNewFolderInput && setShowNewFolderInput(false)
+                setShowNewResourceInfo && setShowNewResourceInfo(true)
+                return
+            }
+
+            if (menuItem === 'New Folder') {
+                setShowNewResourceInfo && setShowNewResourceInfo(false)
+                setShowNewFolderInput && setShowNewFolderInput(true)
+                return
+            }
+        }
+
         return (node.tree as ResourceTree).getNodeMenuHandler()(node, menuItem)
-    }, [])
+    }, [setSelectedNodeKey, setShowNewFolderInput, setShowNewResourceInfo])
 
     const renderNodeMenu = useCallback(() => {
         return node.template!.renderMenu(node, handleNodeMenu)
