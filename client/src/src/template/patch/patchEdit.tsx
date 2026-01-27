@@ -189,6 +189,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const [topologyLayer, setTopologyLayer] = useState<TopologyLayer | null>(null)
     const [checkSwitchOn, setCheckSwitchOn] = useState(false)
+    const [showDeletedGrid, setShowDeletedGrid] = useState(true)
     const [selectAllDialogOpen, setSelectAllDialogOpen] = useState(false)
     const [deleteSelectDialogOpen, setDeleteSelectDialogOpen] = useState(false)
     const [pickingTab, setPickingTab] = useState<boolean>(true)
@@ -726,6 +727,16 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
     }
 
+    const toggleShowDeletedGridSwitch = () => {
+        const newShowDeletedState = !showDeletedGrid
+
+        if (topologyLayer) {
+            topologyLayer.showDeletedCells = newShowDeletedState
+        }
+
+        setShowDeletedGrid(newShowDeletedState)
+    }
+
     const handleSaveTopologyState = () => {
         const core: PatchCore = pageContext.current.patchCore!
         core.save(() => {
@@ -793,16 +804,18 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                 </Button>
                             </div>
                             <div
-                                className='bg-red-500 hover:bg-red-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
-                                onClick={toggleCheckSwitch}
+                                className='bg-orange-500 hover:bg-orange-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
+                                onClick={toggleShowDeletedGridSwitch}
                             >
-                                <span>Show Delete Grid</span>
+                                <span className='shrink-0'>Show Deleted Grid</span>
                                 <Separator orientation='vertical' className='h-4 mx-2' />
-                                <Switch
-                                    className='data-[state=checked]:bg-lime-300 data-[state=unchecked]:bg-gray-300 cursor-pointer'
-                                    checked={checkSwitchOn}
-                                    onCheckedChange={toggleCheckSwitch}
-                                />
+                                <div className='flex-1 flex justify-center'>
+                                    <Switch
+                                        className='data-[state=checked]:bg-sky-300 data-[state=unchecked]:bg-gray-300 cursor-pointer'
+                                        checked={showDeletedGrid}
+                                        onCheckedChange={toggleShowDeletedGridSwitch}
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
