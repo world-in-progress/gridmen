@@ -768,27 +768,43 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     </div>
                     <div className='text-sm w-full flex flex-row items-center justify-between space-x-2'>
                         <CapacityBar gridCore={pageContext.current.patchCore!} />
-                        <div
-                            className='bg-sky-500 hover:bg-sky-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
-                            onClick={toggleCheckSwitch}
-                        >
-                            <span>Check</span>
-                            <Separator orientation='vertical' className='h-4 mx-2' />
-                            <Switch
-                                className='data-[state=checked]:bg-amber-300 data-[state=unchecked]:bg-gray-300 cursor-pointer'
-                                checked={checkSwitchOn}
-                                onCheckedChange={toggleCheckSwitch}
-                            />
-                        </div>
+                        <div className='space-y-2'>
+                            <div className='flex flex-row items-center justify-between gap-2'>
+                                <div
+                                    className='bg-sky-500 hover:bg-sky-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
+                                    onClick={toggleCheckSwitch}
+                                >
+                                    <span>Check</span>
+                                    <Separator orientation='vertical' className='h-4 mx-2' />
+                                    <Switch
+                                        className='data-[state=checked]:bg-amber-300 data-[state=unchecked]:bg-gray-300 cursor-pointer'
+                                        checked={checkSwitchOn}
+                                        onCheckedChange={toggleCheckSwitch}
+                                    />
+                                </div>
 
-                        <Button
-                            className='bg-green-500 hover:bg-green-600 h-8 text-white cursor-pointer rounded-sm flex'
-                            onClick={handleSaveTopologyState}
-                        >
-                            <span>Save</span>
-                            <Separator orientation='vertical' className='h-4' />
-                            <Save className='w-4 h-4' />
-                        </Button>
+                                <Button
+                                    className='bg-green-500 hover:bg-green-600 h-8 text-white cursor-pointer rounded-sm flex'
+                                    onClick={handleSaveTopologyState}
+                                >
+                                    <span>Save</span>
+                                    <Separator orientation='vertical' className='h-4' />
+                                    <Save className='w-4 h-4' />
+                                </Button>
+                            </div>
+                            <div
+                                className='bg-red-500 hover:bg-red-600 h-8 p-2 text-white cursor-pointer rounded-sm flex items-center px-4'
+                                onClick={toggleCheckSwitch}
+                            >
+                                <span>Show Delete Grid</span>
+                                <Separator orientation='vertical' className='h-4 mx-2' />
+                                <Switch
+                                    className='data-[state=checked]:bg-lime-300 data-[state=unchecked]:bg-gray-300 cursor-pointer'
+                                    checked={checkSwitchOn}
+                                    onCheckedChange={toggleCheckSwitch}
+                                />
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
