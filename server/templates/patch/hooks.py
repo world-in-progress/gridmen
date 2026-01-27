@@ -1,5 +1,8 @@
 import os
 import json
+import stat
+import time
+import shutil
 import tarfile
 from pathlib import Path
 from pynoodle import noodle
@@ -44,12 +47,25 @@ def UNMOUNT(node_key: str) -> None:
     rel_path = node_key.strip('.').replace('.', os.sep)
     resource_space = Path.cwd() / 'resource' / rel_path
     if resource_space.exists():
-        resource_space.unlink()
-        
+        try:
+            if resource_space.is_dir():
+                # Use onexc for Python 3.12+, fallback to onerror for older versions
+                if hasattr(shutil, 'rmtree') and 'onexc' in shutil.rmtree.__code__.co_varnames:
+                    shutil.rmtree(resource_space, onexc=_on_rm_error)
+                else:
+                    shutil.rmtree(resource_space, onerror=_on_rm_error)
+            else:
+                resource_space.unlink()
+        except Exception as e:
+            raise Exception(f"Error unmounting node {node_key}: {e}")
+
     # Remove the directory if empty
-    parent_dir = resource_space.parent
-    if parent_dir.exists() and not any(parent_dir.iterdir()):
-        parent_dir.rmdir()
+    try:
+        parent_dir = resource_space.parent
+        if parent_dir.exists() and not any(parent_dir.iterdir()):
+            parent_dir.rmdir()
+    except Exception as e:
+        print(f"Warning: Failed to remove empty parent directory {parent_dir}: {e}")
 
 def PRIVATIZATION(node_key: str, mount_params: dict | None) -> dict | None:
     try:
@@ -98,3 +114,14 @@ def UNPACK(target_node_key: str, tar_path: str, template_name: str) -> None:
             tarf.extractall(path=dest_path)
     except Exception as e:
         raise Exception(f"Error unpacking node {target_node_key}: {e}")
+
+def _on_rm_error(func, path, exc_info):
+    os.chmod(path, stat.S_IWRITE)
+    try:
+        func(path)
+    except OSError as e:
+        time.sleep(0.1)
+        try:
+            func(path)
+        except Exception as e:
+            print(f"Warning: Force deletion of {path} failed: {e}")
