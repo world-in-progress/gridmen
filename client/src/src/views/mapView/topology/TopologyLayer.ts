@@ -805,6 +805,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
         gl.bindVertexArray(this._storageVAO)
 
+        gl.uniform1i(gl.getUniformLocation(this._cellLineShader, 'showDeleted'), this._showDeletedCells ? 1 : 0)
         gl.uniform2fv(gl.getUniformLocation(this._cellLineShader, 'centerHigh'), [this.layerGroup.mercatorCenterX[0], this.layerGroup.mercatorCenterY[0]])
         gl.uniform2fv(gl.getUniformLocation(this._cellLineShader, 'centerLow'), [this.layerGroup.mercatorCenterX[1], this.layerGroup.mercatorCenterY[1]])
         gl.uniformMatrix4fv(gl.getUniformLocation(this._cellLineShader, 'uMatrix'), false, this.layerGroup.relativeEyeMatrix)

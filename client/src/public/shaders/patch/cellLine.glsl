@@ -20,6 +20,7 @@ layout(location = 10) in uint deleted;
 uniform mat4 uMatrix;
 uniform vec2 centerLow;
 uniform vec2 centerHigh;
+uniform int showDeleted;
 uniform vec4 relativeCenter;
 
 const float PI = 3.141592653;
@@ -90,7 +91,11 @@ void main() {
     vec2 xyLow = layerMapLow[gl_VertexID];
     
     vec2 translated = translateRelativeToEye(xy, xyLow);
-    gl_Position = uMatrix * vec4(translated.xy, 0.0, 1.0);
+    if (showDeleted == 0 && deleted == 1u) {
+        gl_Position = vec4(nan(), nan(), nan(), nan());
+    } else {
+        gl_Position = uMatrix * vec4(translated.xy, 0.0, 1.0);
+    }
 }
 
 #endif
