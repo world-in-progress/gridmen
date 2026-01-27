@@ -271,7 +271,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
 
     return (
         <div className="flex h-full items-center justify-center">
-            <div className='relative w-full h-full' ref={mapWrapperRef} />
+            <div className='relative w-full h-full hide-mapbox-branding' ref={mapWrapperRef} />
         </div>
     )
 })
@@ -303,15 +303,15 @@ export default function MapViewComponent({ templateName = 'default', selectedNod
             direction="horizontal"
             className="h-full w-full text-white "
         >
-            <ResizablePanel defaultSize={14}>
+            <ResizablePanel defaultSize={13}>
                 <LayerGroup getResourceNodeByKey={getResourceNodeByKey} />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={62}>
+            <ResizablePanel defaultSize={60}>
                 <MapContainer onMapLoad={handleMapLoad} onDrawReady={handleDrawReady} />
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={24}>
+            <ResizablePanel defaultSize={27}>
                 <ToolPanel
                     viewModels={viewModels}
                     mapContainer={mapInstance}

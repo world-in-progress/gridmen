@@ -1,20 +1,20 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import * as api from '../api/apis'
+import { PatchData } from './types'
 import { SchemaData } from '../schema/types'
 import { Input } from '@/components/ui/input'
-import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Button } from '@/components/ui/button'
 import { IResourceNode } from '../scene/iscene'
-import { useLayerGroupStore } from '@/store/storeSet'
-import { useToolPanelStore } from '@/store/storeSet'
 import { IViewContext } from '@/views/IViewContext'
+import { useToolPanelStore } from '@/store/storeSet'
 import { Separator } from '@/components/ui/separator'
-import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
+import { useLayerGroupStore } from '@/store/storeSet'
 import { MapViewContext } from '@/views/mapView/mapView'
+import { ResourceNode, ResourceTree } from '../scene/scene'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapAllMarkers, clearMapPatchBounds, clearMarkerByNodeKey, convertBoundsCoordinates, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
-import { PatchData } from './types'
+import { ArrowRightLeft, MapPin, Save, SquaresIntersect, Upload, X } from 'lucide-react'
+import { addMapMarker, addMapPatchBounds, adjustPatchBounds, clearMapPatchBounds, clearMarkerByNodeKey, convertBoundsCoordinates, convertPointCoordinate, startDrawRectangle, stopDrawRectangle } from '@/utils/utils'
 
 interface PatchCreationProps {
     node: IResourceNode
@@ -149,7 +149,9 @@ export default function PatchCreation({ node, context }: PatchCreationProps) {
     const loadContext = async () => {
         if ((node as ResourceNode).context !== undefined) {
             pageContext.current = { ...(node as ResourceNode).context }
-            pageContext.current.AlignmentOriginOn4326 = await convertPointCoordinate(pageContext.current.schema!.alignment_origin, pageContext.current.schema!.epsg, 4326)
+            if (pageContext.current.schema) {
+                pageContext.current.AlignmentOriginOn4326 = await convertPointCoordinate(pageContext.current.schema!.alignment_origin, pageContext.current.schema!.epsg, 4326)
+            }
         } else {
             pageContext.current.name = node.name.split('.')[0]
         }
@@ -275,6 +277,7 @@ export default function PatchCreation({ node, context }: PatchCreationProps) {
         triggerRepaint()
     }
 
+    // TODO: 添加patch创建的调整边界和对齐点连线
     /////////////////////////////////////////////////////
     const clearDrawPatchBounds = () => {
         console.log('clearDrawPatchBounds')
@@ -291,7 +294,7 @@ export default function PatchCreation({ node, context }: PatchCreationProps) {
         }
         const value = parseFloat(e.target.value) || 0
         pageContext.current.inputBounds[index] = value
-        pageContext.current.hasBounds = false // reset adjusted bounds flag because input bounds have changed
+        pageContext.current.hasBounds = false
         triggerRepaint()
     }
 
@@ -354,6 +357,8 @@ export default function PatchCreation({ node, context }: PatchCreationProps) {
                 mountParamsString: JSON.stringify(patchData)
             })
 
+            console.log(JSON.stringify(patchData))
+
             clearMarkerByNodeKey(pageContext.current.schema!.schemaNodeKey)
             clearMapPatchBounds(map, node.key)
 
@@ -375,7 +380,7 @@ export default function PatchCreation({ node, context }: PatchCreationProps) {
     }
 
     const deleteDragSchema = () => {
-        clearMarkerByNodeKey(tempSchemaKeyRef.current!)
+        clearMarkerByNodeKey(pageContext.current.schema!.schemaNodeKey)
         tempSchemaKeyRef.current = null
         pageContext.current.schema = null
 

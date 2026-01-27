@@ -43,7 +43,6 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
     const loadContext = async () => {
         if (!(node as ResourceNode).lockId) {
             store.get<{ on: Function, off: Function }>('isLoading')!.on()
-            console.log('触发5')
             const linkResponse = await linkNode('gridmen/ISchema/1.0.0', node.nodeInfo, 'r');
             (node as ResourceNode).lockId = linkResponse.lock_id
             store.get<{ on: Function, off: Function }>('isLoading')!.off()

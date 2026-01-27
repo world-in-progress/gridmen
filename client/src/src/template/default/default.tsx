@@ -85,6 +85,8 @@ export default class DefaultTemplate implements ITemplate {
             case DefaultMenuItem.DELETE_FOLDER:
                 await api.node.unmountNode(node.nodeInfo)
                 toast.success(`Folder ${node.name} deleted successfully`)
+                    ; (node.tree as ResourceTree).selectedNode = null
+                useSelectedNodeStore.getState().setSelectedNodeKey('.')
                 await (node.tree as ResourceTree).refresh()
                 break
         }

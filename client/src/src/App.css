@@ -155,6 +155,18 @@
   /* Same as chat panel width */
 }
 
+/* Force-hide Mapbox logo/attribution (may violate Mapbox terms of service). */
+.hide-mapbox-branding .mapboxgl-ctrl-logo,
+.hide-mapbox-branding .mapboxgl-ctrl-attrib,
+.hide-mapbox-branding .mapboxgl-ctrl-attrib-button,
+.hide-mapbox-branding .mapboxgl-ctrl-attrib.mapboxgl-compact {
+  display: none !important;
+}
+
+.hide-mapbox-branding .mapboxgl-ctrl-attrib a.mapbox-improve-map {
+  display: none !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
