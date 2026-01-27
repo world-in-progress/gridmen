@@ -57,6 +57,9 @@ interface PageContext {
         epsg: string
         color: string
     }
+    demPath: string
+    sessionId: string
+    createdFeatureIds: Set<string>
 }
 
 interface VectorData {
@@ -90,10 +93,12 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             name: "",
             epsg: "4326",
             color: "sky-500",
-        }
+        },
+        demPath: "",
+        sessionId: node.nodeInfo,
+        createdFeatureIds: new Set(),
     })
 
-    const [hasConfirmVector, setHasConfirmVector] = useState(false)
     const [typeSelectDialogOpen, setTypeSelectDialogOpen] = useState(true)
     const [pendingType, setPendingType] = useState<VectorData["type"]>("point")
     const [createVectorTab, setCreateVectorTab] = useState<CreateVectorTab>("draw")
@@ -142,6 +147,9 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                             for (const feature of all.features as any[]) {
                                 if (!feature?.id) continue
                                 drawInstance.setFeatureProperty(feature.id, "user_color", loadColor)
+
+                                drawInstance.setFeatureProperty(feature.id, "session_id", pageContext.current.sessionId)
+                                pageContext.current.createdFeatureIds.add(feature.id)
                             }
                         } catch (error) {
                             console.error("Failed to add vector:", error);
@@ -208,6 +216,19 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
         triggerRepaint()
     }, [drawInstance])
 
+    const deleteCurrentSessionFeatures = useCallback(() => {
+        if (!drawInstance) return
+        try {
+            const featureIds = Array.from(pageContext.current.createdFeatureIds)
+            if (featureIds.length > 0) {
+                drawInstance.delete(featureIds)
+                pageContext.current.createdFeatureIds.clear()
+            }
+        } catch (e) {
+            console.warn('Failed to delete current session features:', e)
+        }
+    }, [drawInstance])
+
     const getVectorTypeIcon = (type: string) => {
         switch (type) {
             case "point":
@@ -231,6 +252,9 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 for (const f of e.features) {
                     if (!f?.id) continue
                     drawInstance.setFeatureProperty(f.id, "user_color", hex)
+                    drawInstance.setFeatureProperty(f.id, "session_id", pageContext.current.sessionId)
+
+                    pageContext.current.createdFeatureIds.add(f.id)
                 }
             }
             syncDrawVectorFromDraw()
@@ -247,12 +271,24 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 for (const f of e.features) {
                     if (!f?.id) continue
                     drawInstance.setFeatureProperty(f.id, "user_color", hex)
+
+                    if (!drawInstance.get(f.id)?.properties?.session_id) {
+                        drawInstance.setFeatureProperty(f.id, "session_id", pageContext.current.sessionId)
+                        pageContext.current.createdFeatureIds.add(f.id)
+                    }
                 }
             }
             syncDrawVectorFromDraw()
         }
 
-        const onDelete = () => {
+        const onDelete = (e: any) => {
+            if (e?.features && Array.isArray(e.features)) {
+                for (const f of e.features) {
+                    if (f?.id) {
+                        pageContext.current.createdFeatureIds.delete(f.id)
+                    }
+                }
+            }
             syncDrawVectorFromDraw()
         }
 
@@ -282,7 +318,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
         setSelectedToolSafe('select')
         safeChangeMode('simple_select')
-        drawInstance.deleteAll()
+        deleteCurrentSessionFeatures()
         pageContext.current.drawVector = null
         pageContext.current.hasVector = false
         triggerRepaint()
@@ -324,8 +360,10 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
     }
 
     const handleReselectVectorType = () => {
+        setCreateVectorTab('draw')
+        setUploadFilePath('')
         setTypeSelectDialogOpen(true)
-        drawInstance.deleteAll()
+        deleteCurrentSessionFeatures()
         pageContext.current.hasVector = false
         pageContext.current.vectorData = {
             type: "point",
@@ -334,6 +372,8 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
             color: "sky-500"
         }
         setSelectedTool("draw")
+        pageContext.current.sessionId = node.nodeInfo
+        pageContext.current.createdFeatureIds.clear()
         triggerRepaint()
     }
 
@@ -386,8 +426,8 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 return
             }
         }
+        pageContext.current.hasVector = true
 
-        setHasConfirmVector(true)
         triggerRepaint()
     }
 
@@ -415,12 +455,8 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
 
     const handleTypeDialogOpenChange = (open: boolean) => {
         setTypeSelectDialogOpen(open)
-        if (!open && !hasConfirmVector) {
-            try {
-                drawInstance?.deleteAll()
-            } catch (e) {
-                console.warn('Failed to clear draw instance on dialog close:', e)
-            }
+        if (!open && !pageContext.current.hasVector) {
+            deleteCurrentSessionFeatures()
             pageContext.current.hasVector = false
             pageContext.current.drawVector = null
             triggerRepaint()
@@ -587,7 +623,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                         </TabsContent>
                     </Tabs>
                     <DialogFooter>
-                        <Button className="bg-blue-500 hover:bg-blue-600 text-white cursor-pointer" onClick={handleConfirmType}>
+                        <Button type="button" className="bg-blue-500 hover:bg-blue-600 text-white cursor-pointer" onClick={handleConfirmType}>
                             Confirm
                         </Button>
                     </DialogFooter>
@@ -618,7 +654,7 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                     </div>
                 </div>
             </div >
-            {hasConfirmVector ? (
+            {pageContext.current.hasVector ? (
                 <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
                     <div className="border-b border-gray-700">
                         <div className="w-full p-4 space-y-4 border-t border-gray-700">
@@ -790,14 +826,14 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                             </div>
                         </div>
                         <div className="text-sm w-full flex flex-row items-center justify-center space-x-4">
-                            <Button
+                            {/* <Button
                                 className="w-[1/2] bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
-                                onClick={handleReselectVectorType}
+                                onClick={() => setReselectConfirmOpen(true)}
                             >
                                 Reselect Vector Type
-                            </Button>
+                            </Button> */}
                             <Button
-                                className="w-[1/2] bg-green-500 hover:bg-green-600 text-white cursor-pointer"
+                                className="w-full bg-green-500 hover:bg-green-600 text-white cursor-pointer"
                                 disabled={!pageContext.current.vectorData.name.trim() || !pageContext.current.vectorData.epsg.trim()}
                                 onClick={handleCreateVector}
                             >
@@ -808,13 +844,14 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                 </div>
             ) : (
                 <div className="flex-1 overflow-y-auto min-h-0 scrollbar-hide">
-                    <div className="py-2 px-4 flex w-full space-y-2">
+                    <div className="py-2 px-4 w-full space-y-2">
                         <Button
                             className="w-full bg-sky-500 hover:bg-sky-600 text-white cursor-pointer"
                             onClick={handleReselectVectorType}
                         >
                             Select Vector Type
                         </Button>
+
                         <div className="space-y-1">
                             <h3 className="text-white font-semibold text-lg flex items-center gap-2">
                                 <Palette className="w-5 h-5" />
@@ -822,111 +859,29 @@ export default function VectorCreation({ node, context }: VectorCreationProps) {
                             </h3>
                             <p className="text-slate-400 text-sm">Configure the properties for your new vector</p>
                         </div>
-                        <div className="border-slate-200 border bg-white p-4 rounded-lg shadow-sm">
-                            <div className="space-y-2">
-                                <div className="space-y-2">
-                                    <Label htmlFor="vectorName" className="text-sm font-medium text-slate-900">
-                                        Vector Name
-                                        <span className="text-red-500 ml-1">*</span>
-                                    </Label>
-                                    <Input
-                                        id="vectorName"
-                                        value={pageContext.current.vectorData.name}
-                                        readOnly={true}
-                                        className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label htmlFor="vectorEpsg" className="text-sm font-medium text-slate-900 flex items-center gap-2">
-                                        <Globe className="w-4 h-4" />
-                                        EPSG Code
-                                        <span className="text-red-500 ml-1">*</span>
-                                    </Label>
-                                    <Input
-                                        id="vectorEpsg"
-                                        value={pageContext.current.vectorData.epsg}
-                                        onChange={(e) => {
-                                            pageContext.current.vectorData.epsg = e.target.value
-                                            triggerRepaint()
-                                        }}
-                                        placeholder="e.g., EPSG:4326"
-                                        className="w-full bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label htmlFor="vectorColor" className="text-sm font-medium text-slate-900">
-                                        Vector Color
-                                    </Label>
-                                    <Select
-                                        value={pageContext.current.vectorData.color}
-                                        onValueChange={(value: any) => {
-                                            pageContext.current.vectorData.color = value
-                                            triggerRepaint()
-                                        }}
-                                    >
-                                        <SelectTrigger className="w-full h-8 cursor-pointer bg-white border-slate-300 text-slate-900">
-                                            <SelectValue placeholder="Select color" />
-                                        </SelectTrigger>
-                                        <SelectContent className="bg-white border-slate-200">
-                                            {vectorColorMap.map((item) => (
-                                                <SelectItem
-                                                    key={item.value}
-                                                    value={item.value}
-                                                    className="cursor-pointer text-slate-900 hover:bg-slate-100"
-                                                >
-                                                    <div className="flex items-center gap-2">
-                                                        <div
-                                                            className="w-4 h-4 rounded-full border border-slate-300"
-                                                            style={{ backgroundColor: item.color }}
-                                                        />
-                                                        <span>{item.name}</span>
-                                                    </div>
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                <div className="space-y-2 pt-4">
-                                    <Label className="text-sm font-medium text-slate-900">Preview</Label>
-                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm text-slate-500">Type</span>
-                                            <div className="flex items-center gap-2">
-                                                {getVectorTypeIcon(pageContext.current.vectorData.type!)}
-                                                <Badge variant="secondary" className="text-xs font-semibold">
-                                                    {pageContext.current.vectorData.type}
-                                                </Badge>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm text-slate-500">Name</span>
-                                            <span className="text-slate-900 font-medium">{pageContext.current.vectorData.name || "Not set"}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm text-slate-500">EPSG</span>
-                                            <span className="text-slate-900 font-medium">{pageContext.current.vectorData.epsg || "Not set"}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm text-slate-500">Color</span>
-                                            <div
-                                                className="w-20 h-6 rounded-full border-2 border-slate-300 shadow-sm"
-                                                style={{
-                                                    backgroundColor: vectorColorMap.find((item) => item.value === pageContext.current.vectorData.color)
-                                                        ?.color,
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
-            )
-            }
+            )}
+
+            {/* <AlertDialog open={reselectConfirmOpen} onOpenChange={setReselectConfirmOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Reselect vector type?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will clear the current drawing and reset some vector settings. Continue?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleConfirmReselectVectorType}
+                            className="bg-sky-600 hover:bg-sky-500 cursor-pointer"
+                        >
+                            Confirm
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog> */}
         </div >
     )
 }

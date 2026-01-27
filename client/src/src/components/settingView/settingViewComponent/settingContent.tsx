@@ -222,7 +222,7 @@ export default function SettingContent({ activeCategory }: SettingContentProps) 
                                 <div className="text-sm font-semibold">Pick Map Center</div>
                                 <div className="text-xs text-gray-400">Click on the mini map to set Longitude/Latitude.</div>
                                 <div className="w-full h-[360px] rounded-md overflow-hidden border border-gray-300 shadow-md">
-                                    <div className="w-full h-[400px] cursor-crosshair" ref={mapWrapperRef} />
+                                    <div className="w-full h-[400px] cursor-crosshair hide-mapbox-branding" ref={mapWrapperRef} />
                                 </div>
                                 <div className="text-xs text-gray-400">Current: {mapInitialLongitude.toFixed(6)}, {mapInitialLatitude.toFixed(6)}</div>
                             </div>

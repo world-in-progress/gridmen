@@ -9,7 +9,7 @@ import { IResourceNode } from "../scene/iscene"
 import { IViewContext } from "@/views/IViewContext"
 import { ResourceNode, ResourceTree } from "../scene/scene"
 import { Delete, Edit3, Info, FilePlusCorner } from "lucide-react"
-import { useLayerStore, useToolPanelStore } from '@/store/storeSet'
+import { useLayerStore, useToolPanelStore, useSelectedNodeStore } from '@/store/storeSet'
 import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 import store from '@/store/store'
 
@@ -80,10 +80,10 @@ export default class PatchTemplate implements ITemplate {
                 break
             case PatchMenuItem.CHECK_PATCH: {
                 if (!(node as ResourceNode).lockId) {
-                    // store.get<{ on: Function, off: Function }>('isLoading')!.on()
+                    store.get<{ on: Function, off: Function }>('isLoading')!.on()
                     const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'r');
                     (node as ResourceNode).lockId = linkResponse.lock_id
-                    // store.get<{ on: Function, off: Function }>('isLoading')!.off()
+                    store.get<{ on: Function, off: Function }>('isLoading')!.off()
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
@@ -96,10 +96,10 @@ export default class PatchTemplate implements ITemplate {
                 break
             case PatchMenuItem.EDIT_PATCH: {
                 if (!(node as ResourceNode).lockId) {
-                    // store.get<{ on: Function, off: Function }>('isLoading')!.on()
+                    store.get<{ on: Function, off: Function }>('isLoading')!.on()
                     const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
                     (node as ResourceNode).lockId = linkResponse.lock_id
-                    // store.get<{ on: Function, off: Function }>('isLoading')!.off()
+                    store.get<{ on: Function, off: Function }>('isLoading')!.off()
                 }
                 if ((node as ResourceNode).mountParams === undefined) {
                     const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
@@ -115,6 +115,7 @@ export default class PatchTemplate implements ITemplate {
                     if (node.isTemp) {
                         ; (node as ResourceNode).tree.tempNodeExist = false
                         await (node.tree as ResourceTree).removeNode(node)
+                        useSelectedNodeStore.getState().setSelectedNodeKey('.')
                         await (node as ResourceNode).close()
                         toast.success(`Patch ${node.name} deleted successfully`)
                         return
@@ -122,6 +123,7 @@ export default class PatchTemplate implements ITemplate {
 
                     await api.node.unmountNode(node.nodeInfo)
                     toast.success(`Patch ${node.name} deleted successfully`)
+                    useSelectedNodeStore.getState().setSelectedNodeKey('.')
                     await (node.tree as ResourceTree).refresh()
                 }
                 break
