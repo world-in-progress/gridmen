@@ -40,6 +40,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
 
     isTransparent = false
     lastPickedId: number = -1
+    private _showDeletedCells = true
 
     _startCallback: Function = () => { }
     _endCallback: Function = () => { }
@@ -127,6 +128,11 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         // Bind event handlers for checking switch
         CHECK_ON_EVENT = (() => this.executeClearSelection()).bind(this)
         CHECK_OFF_EVENT = (() => this.executeClearSelection()).bind(this)
+    }
+
+    set showDeletedCells(show: boolean) {
+        this._showDeletedCells = show
+        this.map.triggerRepaint()
     }
 
     get maxCellNum(): number {
@@ -750,8 +756,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         // Tick render
         if (!this.isTransparent) {
             // Mesh Pass
-            if (this.hitBuffer.isHitting)
-                this.drawCellMeshes()
+            this.drawCellMeshes()
             // Line Pass
             this.drawCellLines()
         }
@@ -776,6 +781,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         gl.activeTexture(gl.TEXTURE0)
         gl.bindTexture(gl.TEXTURE_2D, this._paletteTexture)
         gl.uniform1i(gl.getUniformLocation(this._cellMeshShader, 'hit'), this.hitFlag[0])
+        gl.uniform1i(gl.getUniformLocation(this._cellMeshShader, 'showDeleted'), this._showDeletedCells ? 1 : 0)
         gl.uniform2fv(gl.getUniformLocation(this._cellMeshShader, 'centerHigh'), [this.layerGroup.mercatorCenterX[0], this.layerGroup.mercatorCenterY[0]])
         gl.uniform2fv(gl.getUniformLocation(this._cellMeshShader, 'centerLow'), [this.layerGroup.mercatorCenterX[1], this.layerGroup.mercatorCenterY[1]])
         gl.uniform1f(gl.getUniformLocation(this._cellMeshShader, 'mode'), 0.0)
