@@ -179,8 +179,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         if ((node as ResourceNode).context !== undefined) {
-            console.log('Restore patch check context from node context')
-            console.log((node as ResourceNode).context)
             pageContext.current = { ...(node as ResourceNode).context.patch }
         }
 
@@ -469,7 +467,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 return
             }
 
-            handleClearUploadedFeature()
+            if (pageContext.current.selectedVectorFeatureIds) {
+                const featureIds = Array.from(pageContext.current.selectedVectorFeatureIds!)
+                drawInstance.delete(featureIds)
+            }
+
+            pageContext.current.selectedVectorFeatureIds = new Set<string>()
 
             pageContext.current.featuePickResource = {
                 kind: 'vector',
@@ -483,8 +486,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const vectorData = await api.vector.getVector(dragNodeInfo, dragNodeLockId || '')
             pageContext.current.vectorData = vectorData.data;
 
-
-            (vectorData.data.feature_json as GeoJSON.FeatureCollection).features.forEach(feature => pageContext.current.selectedVectorFeatureIds?.add(feature.id as string))
+            (pageContext.current.vectorData.feature_json as GeoJSON.FeatureCollection).features.forEach(feature => pageContext.current.selectedVectorFeatureIds.add(feature.id as string))
 
             try {
                 if (drawInstance) {
@@ -495,11 +497,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             }
             store.get<{ on: Function; off: Function }>('isLoading')!.off()
 
-            triggerRepaint()
         } catch (error) {
             console.error('Invalid drag payload:', error)
             toast.error('Invalid drag data')
         }
+
+        triggerRepaint()
     }
 
     const handleClearUploadedFeature = () => {
@@ -507,15 +510,14 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
         try {
             const featureIds = Array.from(pageContext.current.selectedVectorFeatureIds!)
-            console.log('Clearing uploaded feature IDs:', featureIds)
             drawInstance.delete(featureIds)
-            pageContext.current.selectedVectorFeatureIds!.clear()
+            pageContext.current.selectedVectorFeatureIds = new Set<string>()
         } catch (e) {
             console.warn('Failed to clear draw preview:', e)
         }
 
-        pageContext.current.vectorLockId = null
-        pageContext.current.vectorData = null
+        // pageContext.current.vectorLockId = null
+        // pageContext.current.vectorData = null
 
         triggerRepaint()
     }
