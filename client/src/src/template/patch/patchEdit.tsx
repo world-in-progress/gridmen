@@ -45,7 +45,7 @@ import { boundingBox2D } from '@/core/util/boundingBox2D'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
 import CustomLayerGroup from '@/views/mapView/topology/customLayerGroup'
-import { convertBoundsCoordinates, waitForCustomLayerGroup, waitForMapLoad } from '@/utils/utils'
+import { convertBoundsCoordinates, waitForCustomLayerGroup, waitForDrawInstanceLoad, waitForMapLoad } from '@/utils/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ensureTopologyLayerInitialized, getOrCreateTopologyLayer } from '@/views/mapView/topology/topologyLayerManager'
 
@@ -66,6 +66,7 @@ interface PageContext {
     vectorLockId: string | null
     vectorData: Record<string, any> | null
     selectedVectorFeatureIds: Set<string>
+    featuePickResource: FeaturePickResource | null
 }
 
 interface GridCheckingInfo {
@@ -142,13 +143,14 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         vectorLockId: null,
         vectorData: null,
         selectedVectorFeatureIds: new Set<string>(),
+        featuePickResource: null,
     })
 
     const gridInfo = useRef<GridCheckingInfo | null>(null)
 
     const highSpeedMode = useSettingStore(state => state.highSpeedMode)
 
-    const [topologyLayer, setTopologyLayer] = useState<TopologyLayer | null>(null)
+    // const [topologyLayer, setTopologyLayer] = useState<TopologyLayer | null>(null)
     const [checkSwitchOn, setCheckSwitchOn] = useState(false)
     const [showDeletedGrid, setShowDeletedGrid] = useState(true)
     const [selectAllDialogOpen, setSelectAllDialogOpen] = useState(false)
@@ -156,7 +158,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const [pickingTab, setPickingTab] = useState<boolean>(true)
     const [selectTab, setSelectTab] = useState<'brush' | 'box'>('brush')
     const [activeTopologyOperation, setActiveTopologyOperation] = useState<TopologyOperationType>(null)
-    const [featurePickResource, setFeaturePickResource] = useState<FeaturePickResource | null>(null)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
@@ -177,15 +178,19 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             store.get<{ on: Function, off: Function }>('isLoading')!.off()
         }
 
-        if ((node as ResourceNode).mountParams === null) {
+        if ((node as ResourceNode).context !== undefined) {
+            console.log('Restore patch check context from node context')
+            console.log((node as ResourceNode).context)
+            pageContext.current = { ...(node as ResourceNode).context.patch }
+        }
+
+        if ((node as ResourceNode).mountParams === undefined) {
             const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
             (node as ResourceNode).mountParams = patchInfo
             pageContext.current.patch = patchInfo
         } else {
             pageContext.current.patch = (node as ResourceNode).mountParams
         }
-
-        await waitForMapLoad(map)
 
         const clg = await waitForCustomLayerGroup()
 
@@ -207,9 +212,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         gridLayer.patchCore = patchCore
         pageContext.current.patchCore = patchCore
 
-        setTopologyLayer(pageContext.current.topologyLayer)
-        // setPickingTab(pageContext.current.editingState.pick)
-        // setSelectTab(pageContext.current.editingState.select)
         setCheckSwitchOn(pageContext.current.isChecking)
 
         if (pageContext.current.topologyLayer && pageContext.current.isChecking) {
@@ -265,11 +267,13 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 },
             },
         }
+
+        return
     }
 
     useEffect(() => {
         if (!map) return
-        if (!topologyLayer) return
+        if (!pageContext.current.topologyLayer) return
 
         const canvas = map.getCanvas()
 
@@ -288,7 +292,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localMouseDownPos.current = [x, y]
 
             if (checkSwitchOn) {
-                gridInfo.current = topologyLayer.executeCheckCell([x, y])
+                gridInfo.current = pageContext.current.topologyLayer!.executeCheckCell([x, y])
                 triggerRepaint()
             }
         }
@@ -302,7 +306,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             localMouseMovePos.current = [x, y]
 
             if (selectTab === 'brush') {
-                topologyLayer.executePickCells(
+                pageContext.current.topologyLayer!.executePickCells(
                     selectTab,
                     pickingTab,
                     [localMouseMovePos.current[0], localMouseMovePos.current[1]]
@@ -313,7 +317,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     map!.getCanvas().style.cursor = 'crosshair'
                 }
 
-                topologyLayer.executeDrawBox(
+                pageContext.current.topologyLayer!.executeDrawBox(
                     [localMouseDownPos.current[0], localMouseDownPos.current[1]],
                     [localMouseMovePos.current[0], localMouseMovePos.current[1]]
                 )
@@ -327,7 +331,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             if (map) {
                 map.dragPan.enable()
                 map.scrollZoom.enable()
-                topologyLayer.executeClearDrawBox()
+                pageContext.current.topologyLayer!.executeClearDrawBox()
                 if (map.getCanvas()) {
                     map.getCanvas().style.cursor = ''
                 }
@@ -341,7 +345,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             const localMouseUpPos = [x, y]
 
-            topologyLayer.executePickCells(
+            pageContext.current.topologyLayer!.executePickCells(
                 selectTab,
                 pickingTab,
                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
@@ -354,7 +358,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             if (map) {
                 map.dragPan.enable()
                 map.scrollZoom.enable()
-                topologyLayer.executeClearDrawBox()
+                pageContext.current.topologyLayer!.executeClearDrawBox()
                 if (map.getCanvas()) {
                     map.getCanvas().style.cursor = ''
                 }
@@ -366,7 +370,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             const mouseUpPos = [x, y]
 
-            topologyLayer.executePickCells(
+            pageContext.current.topologyLayer!.executePickCells(
                 selectTab,
                 pickingTab,
                 [localMouseDownPos.current[0], localMouseDownPos.current[1]],
@@ -385,39 +389,39 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             canvas.removeEventListener('mouseup', onMouseUp)
             canvas.removeEventListener('mouseout', onMouseOut)
         }
-    }, [map, topologyLayer, selectTab, pickingTab, checkSwitchOn])
+    }, [map, selectTab, pickingTab, checkSwitchOn])
 
     const handleConfirmSelectAll = useCallback(() => {
         setSelectAllDialogOpen(false)
-        topologyLayer!.executePickAllCells()
-    }, [topologyLayer])
+        pageContext.current.topologyLayer!.executePickAllCells()
+    }, [])
 
     const handleConfirmDeleteSelect = useCallback(() => {
         setDeleteSelectDialogOpen(false)
-        topologyLayer!.executeClearSelection()
-    }, [topologyLayer])
+        pageContext.current.topologyLayer!.executeClearSelection()
+    }, [])
 
     const handleConfirmTopologyAction = useCallback(() => {
         switch (activeTopologyOperation) {
             case 'subdivide':
                 store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                topologyLayer!.executeSubdivideCells()
+                pageContext.current.topologyLayer!.executeSubdivideCells()
                 break
             case 'merge':
                 store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                topologyLayer!.executeMergeCells()
+                pageContext.current.topologyLayer!.executeMergeCells()
                 break
             case 'delete':
-                topologyLayer!.executeDeleteCells()
+                pageContext.current.topologyLayer!.executeDeleteCells()
                 break
             case 'recover':
-                topologyLayer!.executeRecoverCells()
+                pageContext.current.topologyLayer!.executeRecoverCells()
                 break
             default:
                 console.warn('No active topology operation to confirm.')
         }
         setActiveTopologyOperation(null)
-    }, [activeTopologyOperation, topologyLayer])
+    }, [activeTopologyOperation])
 
     const handleSelectAllClick = () => {
         if (highSpeedMode) {
@@ -467,12 +471,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
             handleClearUploadedFeature()
 
-            setFeaturePickResource({
+            pageContext.current.featuePickResource = {
                 kind: 'vector',
                 nodeKey: dragNodeKey,
                 nodeInfo: dragNodeInfo,
                 name: payload.sourceTreeTitle || 'Vector'
-            })
+            }
 
             store.get<{ on: Function; off: Function }>('isLoading')!.on()
 
@@ -499,10 +503,11 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }
 
     const handleClearUploadedFeature = () => {
-        setFeaturePickResource(null)
+        pageContext.current.featuePickResource = null
 
         try {
             const featureIds = Array.from(pageContext.current.selectedVectorFeatureIds!)
+            console.log('Clearing uploaded feature IDs:', featureIds)
             drawInstance.delete(featureIds)
             pageContext.current.selectedVectorFeatureIds!.clear()
         } catch (e) {
@@ -516,12 +521,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     }
 
     const handleSelectFeaturePick = useCallback(async () => {
-        if (!topologyLayer) {
+        if (!pageContext.current.topologyLayer) {
             toast.error('Topology layer not ready')
             return
         }
 
-        if (!featurePickResource) {
+        if (!pageContext.current.featuePickResource) {
             toast.error('Please drag a vector node or upload a feature file')
             return
         }
@@ -529,32 +534,32 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         try {
             store.get<{ on: Function; off: Function }>('isLoading')!.on()
 
-            if (featurePickResource.kind === 'vector') {
-                topologyLayer.executePickCellsByVectorNode(featurePickResource.nodeInfo, pageContext.current.vectorLockId, pickingTab)
+            if (pageContext.current.featuePickResource.kind === 'vector') {
+                pageContext.current.topologyLayer!.executePickCellsByVectorNode(pageContext.current.featuePickResource.nodeInfo, pageContext.current.vectorLockId, pickingTab)
                 return
             }
         } catch (error) {
             console.error('Error executing feature pick:', error)
             toast.error('Failed to execute feature pick')
         }
-    }, [featurePickResource, topologyLayer, pickingTab])
+    }, [pickingTab])
 
     const onTopologyOperationClick = (operationType: string) => {
         if (highSpeedMode && operationType !== null) {
             switch (operationType) {
                 case 'subdivide':
                     store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                    topologyLayer!.executeSubdivideCells()
+                    pageContext.current.topologyLayer!.executeSubdivideCells()
                     break
                 case 'merge':
                     store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                    topologyLayer!.executeMergeCells()
+                    pageContext.current.topologyLayer!.executeMergeCells()
                     break
                 case 'delete':
-                    topologyLayer!.executeDeleteCells()
+                    pageContext.current.topologyLayer!.executeDeleteCells()
                     break
                 case 'recover':
-                    topologyLayer!.executeRecoverCells()
+                    pageContext.current.topologyLayer!.executeRecoverCells()
                     break
                 default:
                     console.warn('Unknown topology operation type:', operationType)
@@ -606,7 +611,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     event.preventDefault()
                     if (highSpeedMode) {
                         store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                        topologyLayer!.executeSubdivideCells()
+                        pageContext.current.topologyLayer!.executeSubdivideCells()
                     } else {
                         setActiveTopologyOperation('subdivide')
                     }
@@ -615,7 +620,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     event.preventDefault()
                     if (highSpeedMode) {
                         store.get<{ on: Function; off: Function }>('isLoading')!.on()
-                        topologyLayer!.executeMergeCells()
+                        pageContext.current.topologyLayer!.executeMergeCells()
                     } else {
                         setActiveTopologyOperation('merge')
                     }
@@ -623,7 +628,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (event.key === 'D' || event.key === 'd') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        topologyLayer!.executeDeleteCells()
+                        pageContext.current.topologyLayer!.executeDeleteCells()
                     } else {
                         setActiveTopologyOperation('delete')
                     }
@@ -631,7 +636,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (event.key === 'R' || event.key === 'r') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        topologyLayer!.executeRecoverCells()
+                        pageContext.current.topologyLayer!.executeRecoverCells()
                     } else {
                         setActiveTopologyOperation('recover')
                     }
@@ -649,7 +654,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         handleConfirmDeleteSelect,
         handleConfirmSelectAll,
         selectTab,
-        topologyLayer,
         checkSwitchOn,
         highSpeedMode
     ])
@@ -660,8 +664,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             setCheckSwitchOn(newCheckState)
             pageContext.current!.isChecking = newCheckState
 
-            if (topologyLayer) {
-                topologyLayer.setCheckMode(newCheckState)
+            if (pageContext.current!.topologyLayer) {
+                pageContext.current!.topologyLayer.setCheckMode(newCheckState)
             }
         }
     }
@@ -669,8 +673,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const toggleShowDeletedGridSwitch = () => {
         const newShowDeletedState = !showDeletedGrid
 
-        if (topologyLayer) {
-            topologyLayer.showDeletedCells = newShowDeletedState
+        if (pageContext.current!.topologyLayer) {
+            pageContext.current!.topologyLayer.showDeletedCells = newShowDeletedState
         }
 
         setShowDeletedGrid(newShowDeletedState)
@@ -781,8 +785,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                 {pageContext.current?.patch?.grid_info && (
                                     pageContext.current?.patch?.grid_info.map(
                                         (level: number[], index: number) => {
-                                            const color = topologyLayer!.paletteColorList ?
-                                                [topologyLayer!.paletteColorList[(index + 1) * 3], topologyLayer!.paletteColorList[(index + 1) * 3 + 1], topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
+                                            const color = pageContext.current!.topologyLayer!.paletteColorList ?
+                                                [pageContext.current!.topologyLayer!.paletteColorList[(index + 1) * 3], pageContext.current!.topologyLayer!.paletteColorList[(index + 1) * 3 + 1], pageContext.current!.topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
                                             const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined
 
                                             return (
@@ -1143,11 +1147,11 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                                 onDrop={handleVectorNodeDrop}
                                                 className='border-2 w-full p-2 border-dashed border-gray-300 rounded-lg text-center transition-all duration-200 hover:border-blue-400 hover:bg-gray-700/50 group'
                                             >
-                                                {featurePickResource ? (
+                                                {pageContext.current.featuePickResource ? (
                                                     <div className='space-y-2'>
                                                         <div className='flex items-center justify-between bg-white rounded-md p-2 border border-blue-300'>
                                                             <span className='text-sm font-medium text-gray-900'>
-                                                                {featurePickResource.name}
+                                                                {pageContext.current.featuePickResource.name}
                                                             </span>
                                                             <button
                                                                 onClick={handleClearUploadedFeature}
@@ -1169,14 +1173,14 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                             <div className='flex gap-2'>
                                                 <Button
                                                     onClick={handleSelectFeaturePick}
-                                                    disabled={!featurePickResource}
+                                                    disabled={!pageContext.current.featuePickResource}
                                                     className='flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                                                 >
                                                     Apply
                                                 </Button>
                                                 <Button
                                                     onClick={handleClearUploadedFeature}
-                                                    disabled={!featurePickResource}
+                                                    disabled={!pageContext.current.featuePickResource}
                                                     className='flex-1 bg-red-500 hover:bg-red-600 text-white cursor-pointer'
                                                 >
                                                     Clear
