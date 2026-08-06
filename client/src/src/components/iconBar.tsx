@@ -34,7 +34,6 @@ export default function IconBar({ currentActiveId, clickHandlers, isLoggedIn = f
                     onClick={() => {
                         if (!isLoggedIn && (item.id === 'map-view' || item.id === 'table-view')) return
                         clickHandlers[item.id] && clickHandlers[item.id](item.id)
-                        triggerRepaint()
                     }}
                     disabled={!isLoggedIn && (item.id === 'map-view' || item.id === 'table-view')}
                     className={

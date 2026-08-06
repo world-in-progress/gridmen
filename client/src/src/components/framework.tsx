@@ -12,24 +12,16 @@ import { useSelectedNodeStore, useSettingStore, useToolPanelStore } from "@/stor
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom"
 import Hello from "./helloPage/hello"
-
-export default function Framework() {
-
-    return (
-        <Router>
-            <FrameworkShell />
-        </Router>
-    )
-}
+import { useRedirect } from "@/hooks/useRedirect"
+import { RedirectTarget } from "@/registry/iconRegistry"
 
 function FrameworkShell() {
-
     const location = useLocation()
     const navigate = useNavigate()
 
     const [triggerFocus, setTriggerFocus] = useState(0)
-    const [activeIconID, setActiveIconID] = useState<'map-view' | 'table-view' | 'settings'>('map-view')
-    const [isLoggedIn, setIsLoggedIn] = useState(true)
+    const [activeIconID, setActiveIconID] = useState<RedirectTarget>('map-view')
+    const [isLoggedIn, setIsLoggedIn] = useState(true)  // temporarily set to true for development
 
     const [privateTree, setPrivateTree] = useState<ResourceTree | null>(null)
     const [publicTree, setPublicTree] = useState<ResourceTree | null>(null)
@@ -40,40 +32,22 @@ function FrameworkShell() {
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)
 
+    const { redirectTo } = useRedirect({ isLoggedIn, setActiveIconID })
+
     const handleIconClick = useCallback((iconID: string) => {
         switch (iconID) {
             case 'map-view':
-                setActiveIconID('map-view')
-                if (!isLoggedIn) {
-                    navigate('/login')
-                    return
-                }
-                navigate('/framework')
-                return
             case 'table-view':
-                setActiveIconID('table-view')
-                if (!isLoggedIn) {
-                    navigate('/login')
-                    return
-                }
-                navigate('/framework')
-                return
             case 'settings':
-                setActiveIconID('settings')
-                if (!isLoggedIn) {
-                    navigate('/login')
-                    return
-                }
-                navigate('/framework')
+                redirectTo(iconID)
                 return
             case 'user':
                 navigate('/login')
                 return
             default:
-                // keep existing behavior for other icons (e.g. languages)
                 return
         }
-    }, [isLoggedIn, navigate])
+    }, [redirectTo, navigate])
 
     const iconClickHandlers: IconBarClickHandlers = useMemo(() => {
         const handlers: IconBarClickHandlers = {}
@@ -87,7 +61,6 @@ function FrameworkShell() {
         const path = location.pathname
         if (path.startsWith('/framework')) return activeIconID
         if (path.startsWith('/login')) return 'user'
-        // /hello (and others): no active icon
         return null
     }, [activeIconID, location.pathname])
 
@@ -101,7 +74,6 @@ function FrameworkShell() {
     }
 
     const handleNodeMenuOpen = useCallback((node: IResourceNode, menuItem: any) => {
-
         if (privateTree === null && publicTree === null) return
 
         const treeOfNode = node.tree as ResourceTree
@@ -233,10 +205,10 @@ function FrameworkShell() {
                 _privateTree.subscribe(triggerRepaint)
                 setPrivateTree(_privateTree)
 
-                /// PUBLIC ///
-                const _publicTree = await ResourceTree.create(publicIP!)
-                _publicTree.subscribe(triggerRepaint)
-                setPublicTree(_publicTree)
+                /// PUBLIC：now didn't have this tree ///
+                // const _publicTree = await ResourceTree.create(publicIP!)
+                // _publicTree.subscribe(triggerRepaint)
+                // setPublicTree(_publicTree)
 
             } catch (error) {
                 console.error('Failed to initialize tree:', error)
@@ -258,9 +230,8 @@ function FrameworkShell() {
     }, [privateTree, publicTree])
 
     const openSettings = useCallback(() => {
-        setActiveIconID('settings')
-        navigate('/framework')
-    }, [navigate])
+        redirectTo('settings')
+    }, [redirectTo])
 
     const renderActiveView = () => {
         const currentTemplateName = getCurrentTemplateName()
@@ -335,5 +306,14 @@ function FrameworkShell() {
                 />
             </Routes>
         </div>
+    )
+}
+
+
+export default function Framework() {
+    return (
+        <Router>
+            <FrameworkShell />
+        </Router>
     )
 }

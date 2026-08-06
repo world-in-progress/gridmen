@@ -890,14 +890,18 @@ export default function ResourceTreeComponent({
                 </div>
                 {/* WorkSpace */}
                 <div className="flex-1 min-h-0 flex flex-col">
+                    {/* Private */}
                     <TreeRenderer
                         resourceTree={privateTree}
                         title={"WorkSpace"}
                         triggerFocus={triggerFocus}
                         onExplorerNodeSelect={handleExplorerNodeSelect}
                     />
-                    {/* <Separator className='bg-[#585858] w-full shrink-0' />
-                    <TreeRenderer
+
+                    {/* <Separator className='bg-[#585858] w-full shrink-0' /> */}
+
+                    {/* Public */}
+                    {/* <TreeRenderer
                         resourceTree={publicTree}
                         title={"Public"}
                         triggerFocus={triggerFocus}
