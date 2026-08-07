@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react"
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import LoginPage from "./loginPage/loginPage"
-import ResourceTreeComponent from "./resourceTree"
+import ResourceTreeComponent from "./resourceTree/resourceTree"
 import SettingView from "./settingView/settingView"
 import { ICON_REGISTRY } from "@/registry/iconRegistry"
 import { IResourceNode } from "@/template/scene/iscene"
@@ -23,6 +23,7 @@ function FrameworkShell() {
     const [activeIconID, setActiveIconID] = useState<RedirectTarget>('map-view')
     const [isLoggedIn, setIsLoggedIn] = useState(true)  // temporarily set to true for development
 
+    const treeInitRef = useRef(false)
     const [privateTree, setPrivateTree] = useState<ResourceTree | null>(null)
     const [publicTree, setPublicTree] = useState<ResourceTree | null>(null)
     const [focusNode, setFocusNode] = useState<IResourceNode | null>(null)
@@ -196,12 +197,15 @@ function FrameworkShell() {
         // Only initialize resource trees when actually entering /framework and logged in.
         if (!isLoggedIn) return
         if (!location.pathname.startsWith('/framework')) return
-        if (privateTree || publicTree) return
+        if (treeInitRef.current) return
 
+        let cancelled = false
         const initTree = async () => {
+            treeInitRef.current = true // set synchronously to prevent re-entry (incl. StrictMode double-invoke)
             try {
                 /// PRIVATE ///
                 const _privateTree = await ResourceTree.create()
+                if (cancelled) return // discard the result if the effect was cleaned up meanwhile
                 _privateTree.subscribe(triggerRepaint)
                 setPrivateTree(_privateTree)
 
@@ -209,13 +213,15 @@ function FrameworkShell() {
                 // const _publicTree = await ResourceTree.create(publicIP!)
                 // _publicTree.subscribe(triggerRepaint)
                 // setPublicTree(_publicTree)
-
             } catch (error) {
+                treeInitRef.current = false // allow retry on failure
                 console.error('Failed to initialize tree:', error)
             }
         }
         initTree()
-    }, [isLoggedIn, location.pathname, privateTree, publicTree, publicIP])
+
+        return () => { cancelled = true }
+    }, [isLoggedIn, location.pathname, publicIP])
 
     const getCurrentTemplateName = (): string => {
         const selectedNode = privateTree?.selectedNode || publicTree?.selectedNode

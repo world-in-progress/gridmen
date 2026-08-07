@@ -29,7 +29,6 @@ export default function SchemaEdit({ node, context }: SchemaEditProps) {
     const map = mapContext.map!
 
     const alignmentOriginOn4326 = useRef<[number, number] | null>(null)
-
     const pageContext = useRef<SchemaData | null>(null)
 
     const [, triggerRepaint] = useReducer(x => x + 1, 0)

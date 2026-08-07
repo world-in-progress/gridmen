@@ -6,7 +6,6 @@ import {
     Folder,
     MapPin,
     Square,
-    FilePlusCorner,
     FolderOpen,
     FolderPlus,
     RefreshCcw,
@@ -15,10 +14,11 @@ import {
     SquaresUnite,
     SplinePointer,
     MoreHorizontal,
+    FilePlusCorner,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/utils/utils'
-import { Button } from './ui/button'
+import { Button } from '../ui/button'
 import * as api from '@/template/api/apis'
 import { Input } from '@/components/ui/input'
 import { Separator } from "@/components/ui/separator"
@@ -839,37 +839,20 @@ export default function ResourceTreeComponent({
         onNodeRemove(node)
     }, [onNodeRemove, setSelectedNodeKey])
 
-    useEffect(() => {
-        if (privateTree) {
-            privateTree.bindHandlers({
-                onNodeMenuOpen: onNodeMenuOpen,
-                onNodeRemove: handleNodeRemoveWithTempReset,
-                onNodeClick: onNodeClick,
-                onNodeDoubleClick: onNodeDoubleClick
-            })
+    const bindAndSubscribe = useCallback((tree: ResourceTree | null) => {
+        if (!tree) return () => { }
+        tree.bindHandlers({
+            onNodeMenuOpen: onNodeMenuOpen,
+            onNodeRemove: handleNodeRemoveWithTempReset,
+            onNodeClick: onNodeClick,
+            onNodeDoubleClick: onNodeDoubleClick
+        })
+        return tree.subscribe(triggerRepaint)
+    }, [onNodeMenuOpen, handleNodeRemoveWithTempReset, onNodeClick, onNodeDoubleClick])
 
-            const unsubscribe = privateTree.subscribe(triggerRepaint)
-            return () => {
-                unsubscribe()
-            }
-        }
-    }, [privateTree, onNodeMenuOpen, handleNodeRemoveWithTempReset, onNodeClick, onNodeDoubleClick])
-
-    useEffect(() => {
-        if (publicTree) {
-            publicTree.bindHandlers({
-                onNodeMenuOpen: onNodeMenuOpen,
-                onNodeRemove: handleNodeRemoveWithTempReset,
-                onNodeClick: onNodeClick,
-                onNodeDoubleClick: onNodeDoubleClick
-            })
-
-            const unsubscribe = publicTree.subscribe(triggerRepaint)
-            return () => {
-                unsubscribe()
-            }
-        }
-    }, [publicTree, onNodeMenuOpen, handleNodeRemoveWithTempReset, onNodeClick, onNodeDoubleClick])
+    // Bind and subscribe to both trees, and clean up on unmount or when trees change
+    useEffect(() => bindAndSubscribe(privateTree), [privateTree, bindAndSubscribe])
+    useEffect(() => bindAndSubscribe(publicTree), [publicTree, bindAndSubscribe])
 
     useEffect(() => {
         if (focusNode) {

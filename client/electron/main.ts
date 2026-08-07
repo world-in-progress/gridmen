@@ -25,7 +25,7 @@ function createWindow(): void {
 	const mainWindow = new BrowserWindow({
 		width: 1200,
 		height: 800,
-		fullscreen: true, // fullscreen as default
+		fullscreen: false, // fullscreen as default
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.js'),

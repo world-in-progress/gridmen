@@ -21,7 +21,6 @@ export class ResourceNode implements IResourceNode {
     get name(): string { return this.key.split('.').pop() || '' }
     get template_name(): string { return this.template?.templateName || '' }
 
-
     // private _pageContext: DefaultPageContext | undefined | null = null
 
     constructor(tree: ResourceTree, node_key: string, parent: IResourceNode | null, template: ITemplate | null) {
@@ -34,13 +33,13 @@ export class ResourceNode implements IResourceNode {
     }
 
     async close(): Promise<void> {
-        const cleanup = (this.context as any)?.__cleanup as Record<string, (() => void)>
+        const cleanup = (this.context as any)?.__cleanup as Record<string, (() => void)> ?? {}
         for (const dispose of Object.values(cleanup)) {
             dispose?.()
         }
         delete (this.context as any).__cleanup
 
-        if (!this.isTemp) {
+        if (!this.isTemp && this.lockId) {
             await unlinkNode(this.nodeInfo, this.lockId!)
             this.lockId = null
         }
@@ -253,7 +252,7 @@ export class ResourceTree implements IResourceTree {
     }
 
     stopEditingNode(node: IResourceNode): void {
-
+        // Haven't implemented any specific logic for stopping editing a node yet.
     }
 
     async removeNode(node: IResourceNode): Promise<void> {
@@ -263,8 +262,9 @@ export class ResourceTree implements IResourceTree {
         this.scene.delete(node.id)
         await this.alignNodeInfo(parent, true)
 
-        if (this.editingNodeIds.has(node.id))
+        if (this.editingNodeIds.has(node.id)) {
             await this.stopEditingNode(node)
+        }
 
         this.handleNodeRemove(node) // notify all trees that the node has been removed
         this.notifyDomUpdate()
