@@ -3,141 +3,109 @@ import json
 import shutil
 import tarfile
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from pynoodle import noodle
 
 from .assembly import assembly
-from crms.grid import HydroElements, HydroSides
-from .vector import (
-    apply_vector_modification,
-    build_model_data_from_topology,
-    get_ne,
-    get_ns,
-    write_ne,
-    write_ns,
-)
-from ._timing import timed, timing_logger
+from .vector import apply_interventions, load_base_grid, load_interventions, write_ne, write_ns
+from ._timing import collect_timings, timed
 
 logger = logging.getLogger(__name__)
+
+# Base grid binaries are written once by assembly and never modified afterwards,
+# so grids built on the same base grid share them through hard links.
+BASE_GRID_FILES = ('cell_topo.bin', 'edge_topo.bin')
 
 # --- Lifecycle Hooks ---
 
 
-@dataclass
-class MountAssemblyResult:
-    ne_topology: HydroElements
-    ns_topology: HydroSides
-    model_data: dict
+def _resource_dir(node_key: str) -> Path:
+    # Resources are mounted at <project_root>/resource/<rel_path>
+    return Path.cwd() / 'resource' / node_key.strip('.').replace('.', os.sep)
+
 
 def MOUNT(node_key: str, params: dict | None = None):
     """
     Mounts a Grid resource.
-    
-    If 'assembly' params are provided, it performs the grid assembly (compilation).
 
-        If 'vector' params are provided, it handles vector data processing.
-    Both can be present simultaneously.
-    Otherwise, it treats it as mounting an existing grid resource.
+    A grid is a base grid (geometry, topology and base attributes in cell_topo.bin /
+    edge_topo.bin) plus its ordered vector interventions ('vector'). The base grid is
+    either assembled from patches ('assembly') or reused from an existing grid
+    ('base_grid'). ne.txt / ns.txt are computed from the base grid and the
+    interventions, and build_report.json records counts and stage timings.
+    Without params, an empty grid resource is created.
     """
-    assembly_params = params.get('assembly', {})
-    rel_path = node_key.strip('.').replace('.', os.sep)
-    # Correctly align with where resources should be mounted.
-    # Assuming standard pynoodle structure: <project_root>/resource/<rel_path>
-    resource_dir = Path.cwd() / 'resource' / rel_path
+    resource_dir = _resource_dir(node_key)
     resource_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if not params:
         _create_default_meta_if_not_exists(resource_dir)
         return
 
-    with timed("MOUNT", node_key=node_key,
-               has_assembly='assembly' in params,
-               has_vector=bool(params.get('vector'))):
-        assembly_result = None
+    assembly_params = params.get('assembly')
+    base_grid = params.get('base_grid')
+    if (assembly_params is None) == (base_grid is None):
+        raise ValueError("A grid needs exactly one base: 'assembly' (patches) or 'base_grid' (an existing grid).")
+    interventions = load_interventions(params.get('vector') or [])
 
-        # Handle assembly if present
-        if 'assembly' in params:
-            with timed("MOUNT.assembly", node_key=node_key):
-                assembly_result = _handle_assembly(assembly_params, node_key, resource_dir)
+    with collect_timings() as timings:
+        with timed("MOUNT", node_key=node_key):
+            with timed("grid.base"):
+                if assembly_params is not None:
+                    _assemble(assembly_params, node_key, resource_dir)
+                else:
+                    _link_base_grid(base_grid, node_key, resource_dir)
+            meta = json.loads((resource_dir / 'grid.meta.json').read_text(encoding='utf-8'))
+            with timed("grid.load_base"):
+                grid = load_base_grid(resource_dir)
+            with timed("grid.interventions", n=len(interventions)):
+                intervention_stats = apply_interventions(grid, interventions, f"EPSG:{meta['epsg']}")
+            with timed("grid.write_ne"):
+                write_ne(resource_dir / 'ne.txt', grid)
+            with timed("grid.write_ns"):
+                write_ns(resource_dir / 'ns.txt', grid)
 
-        # Handle vector if present
-        if 'vector' in params and params['vector']:
-            with timed("MOUNT.vector", node_key=node_key,
-                       n_entries=len(params['vector']) if isinstance(params['vector'], list) else 1):
-                model_data = None if assembly_result is None else assembly_result.model_data
-                _handle_vector_modification(params, resource_dir, model_data=model_data)
-        elif assembly_result is not None:
-            with timed("mount.persist_ne_ns_once", path=str(resource_dir)):
-                write_ne(resource_dir / 'ne.txt', assembly_result.model_data['ne'])
-                write_ns(resource_dir / 'ns.txt', assembly_result.model_data['ns'])
+    report = {
+        'node_key': node_key,
+        'base': {'assembly': assembly_params} if assembly_params is not None else {'base_grid': base_grid},
+        'cells': len(grid.cell_index),
+        'edges': len(grid.edges),
+        'interventions': intervention_stats,
+        'stages': timings['stages'],
+        **timings['values'],
+    }
+    (resource_dir / 'build_report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
 
 
 # ===== Grid Mount Handlers =====
-def _handle_assembly(assembly_params: dict, node_key: str, resource_dir: Path):
-    """处理网格装配逻辑"""
+def _assemble(assembly_params: dict, node_key: str, resource_dir: Path):
+    """Assemble the base grid from patches and sample DEM/LULC onto it."""
     schema_node_key = assembly_params.get('schema_node_key')
     patch_node_keys = assembly_params.get('patch_node_keys')
-    grading_threshold = 1
-    dem_path = assembly_params.get('dem_path')
-    lum_path = assembly_params.get('lum_path')
-    meta_path = resource_dir / 'grid.meta.json'
-
     if not schema_node_key or not patch_node_keys:
         raise ValueError("Assembly requires 'schema_node_key' and 'patch_node_keys'.")
 
     print(f"Starting assembly for grid: {node_key}")
-    try:
-        with timed("assembly.compile", node_key=node_key):
-            meta_info = assembly(resource_dir, schema_node_key, patch_node_keys, grading_threshold, dem_path, lum_path)
-        with timed("assembly.load_topology"):
-            ne = HydroElements(str(resource_dir / 'cell_topo.bin'))
-            ns = HydroSides(str(resource_dir / 'edge_topo.bin'))
-        with timed("mount.build_model_data_from_topology"):
-            model_data = build_model_data_from_topology(ne, ns)
+    grading_threshold = 1
+    with timed("assembly.compile", node_key=node_key):
+        meta_info = assembly(
+            resource_dir, schema_node_key, patch_node_keys, grading_threshold,
+            assembly_params.get('dem_path'), assembly_params.get('lum_path'),
+        )
+    (resource_dir / 'grid.meta.json').write_text(json.dumps(meta_info, indent=4), encoding='utf-8')
 
-        with open(meta_path, 'w', encoding='utf-8') as f:
-            json.dump(meta_info, f, indent=4)
-        return MountAssemblyResult(ne_topology=ne, ns_topology=ns, model_data=model_data)
-    except Exception as e:
-        logger.error(f"Error during assembly for {node_key}: {e}")
-        raise
 
-def _handle_vector_modification(params: dict, resource_dir: Path, model_data: dict | None = None):
-    """处理矢量数据修改逻辑"""
-    ne_path = resource_dir / 'ne.txt'
-    ns_path = resource_dir / 'ns.txt'
-    model_source = 'in_memory' if model_data is not None else 'file'
-
-    try:
-        if model_data is None:
-            if not (ne_path.exists() and ns_path.exists()):
-                logger.warning(f"NE or NS files not found at {resource_dir}. Skipping vector modification.")
-                return
-
-            with timed("vector.read_ne", path=str(ne_path)):
-                ne_data = get_ne(ne_path)
-            with timed("vector.read_ns", path=str(ns_path)):
-                ns_data = get_ns(ns_path)
-            model_data = {
-                'ne': ne_data,
-                'ns': ns_data
-            }
-
-        timing_logger.debug("mount.vector_input source=%s", model_source)
-
-        with timed("vector.apply_modifications"):
-            modified_model_data = apply_vector_modification(params, model_data)
-
-        with timed("mount.persist_ne_ns_once", path=str(resource_dir)):
-            write_ne(ne_path, modified_model_data['ne'])
-            write_ns(ns_path, modified_model_data['ns'])
-
-        logger.info(f"Successfully applied vector modifications and updated NE and NS files.")
-        return modified_model_data
-    except Exception as e:
-        logger.error(f"Error during vector modification: {e}")
-        raise
+def _link_base_grid(base_grid: str, node_key: str, resource_dir: Path):
+    """Reuse the base grid of an existing grid: no assembly and no DEM/LULC sampling."""
+    if base_grid == node_key:
+        raise ValueError("A grid cannot use itself as its base grid.")
+    base_dir = _resource_dir(base_grid)
+    missing = [name for name in (*BASE_GRID_FILES, 'grid.meta.json') if not (base_dir / name).is_file()]
+    if missing:
+        raise ValueError(f"Base grid {base_grid} has no {', '.join(missing)} in {base_dir}")
+    for name in BASE_GRID_FILES:
+        os.link(base_dir / name, resource_dir / name)
+    shutil.copy2(base_dir / 'grid.meta.json', resource_dir / 'grid.meta.json')
 
 def _create_default_meta_if_not_exists(resource_dir: Path):
     """如果不存在则创建默认元数据文件"""
@@ -164,9 +132,8 @@ def UNMOUNT(node_key: str):
     """
     Unmounts a Grid resource by removing its directory.
     """
-    rel_path = node_key.strip('.').replace('.', os.sep)
-    resource_dir = Path.cwd() / 'resource' / rel_path
-    
+    resource_dir = _resource_dir(node_key)
+
     if resource_dir.exists():
         try:
             shutil.rmtree(resource_dir)
@@ -178,9 +145,8 @@ def PRIVATIZATION(node_key: str, mount_params: dict | None = None) -> dict:
     """
     Generates launch parameters for the Grid resource.
     """
-    rel_path = node_key.strip('.').replace('.', os.sep)
-    resource_dir = Path.cwd() / 'resource' / rel_path
-    
+    resource_dir = _resource_dir(node_key)
+
     # Ensure parent structure exists, though MOUNT handles specific dir creation
     resource_dir.parent.mkdir(parents=True, exist_ok=True)
     
