@@ -72,14 +72,15 @@ interface PageContext {
     name: string
     demFilePath: string | null
     lumFilePath: string | null
+    baseGridNodeInfo: string | null
     patchMap: Map<string, PatchMapInfo[]>
     selectedVectors: SelectedVectorItem[]
 }
 
 const gridTips = [
-    { tip1: "Drag patches from the EXPLORER to the upload area." },
-    { tip2: "Reset button will clear all uploaded patches." },
-    { tip3: "Click merge button to complete grid creation." },
+    { tip1: "Drag patches from the EXPLORER to assemble a new base grid." },
+    { tip2: "Or drag an existing grid to reuse its base grid without assembly." },
+    { tip3: "Vectors in the list are applied in order; later ones override earlier ones." },
 ]
 
 const schemaBorderColorClasses = [
@@ -124,11 +125,13 @@ export default function GridCreation({ node, context }: GridCreationProps) {
         name: "",
         demFilePath: "",
         lumFilePath: "",
+        baseGridNodeInfo: null,
         patchMap: new Map<string, PatchMapInfo[]>(),
         selectedVectors: [],
     })
 
     const [isPatchDragOver, setIsPatchDragOver] = useState(false)
+    const [isBaseGridDragOver, setIsBaseGridDragOver] = useState(false)
     const [isVectorDragOver, setIsVectorDragOver] = useState(false)
     const [assemblyDialogOpen, setAssemblyDialogOpen] = useState(false)
 
@@ -288,6 +291,23 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             lineWidth: 3,
         })
 
+        triggerRepaint()
+    }
+
+    const handleBaseGridDrop = (e: React.DragEvent) => {
+        e.preventDefault()
+        setIsBaseGridDragOver(false)
+
+        const raw = e.dataTransfer.getData("application/gridmen-node") || e.dataTransfer.getData("text/plain")
+        const payload = JSON.parse(raw) as { nodeKey: string, nodeInfo: string, templateName: string }
+
+        if (!payload?.nodeKey || payload.templateName !== "grid" || payload.nodeInfo === node.nodeInfo) {
+            toast.error("Please drag an existing grid resource")
+            return
+        }
+
+        handlePatchReset()
+        pageContext.current.baseGridNodeInfo = payload.nodeInfo
         triggerRepaint()
     }
 
@@ -563,6 +583,17 @@ export default function GridCreation({ node, context }: GridCreationProps) {
     }
 
     const handleAssemblyClick = () => {
+        const invalid = pageContext.current.selectedVectors.find((v) =>
+            (v.demEnabled && v.demType !== "max" && v.demValue === null) || (v.lumEnabled && v.lumValue === null),
+        )
+        if (invalid) {
+            toast.error(`Please enter the value for ${invalid.nodeInfo.split(".").pop()}`)
+            return
+        }
+        if (pageContext.current.baseGridNodeInfo) {
+            setAssemblyDialogOpen(true)
+            return
+        }
         if (pageContext.current.patchMap.size > 1) {
             toast.error("Please delete patches with different schemas before creating the grid")
             return
@@ -595,15 +626,18 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             return item
         })
 
-        const gridData = {
-            assembly: {
-                schema_node_key: schemaNodeKey,
-                patch_node_keys: patchNodeInfos,
-                dem_path: pageContext.current.demFilePath,
-                lum_path: pageContext.current.lumFilePath,
-            },
-            vector: vectorData,
-        }
+        const baseGridNodeInfo = pageContext.current.baseGridNodeInfo
+        const gridData = baseGridNodeInfo
+            ? { base_grid: baseGridNodeInfo, vector: vectorData }
+            : {
+                assembly: {
+                    schema_node_key: schemaNodeKey,
+                    patch_node_keys: patchNodeInfos,
+                    dem_path: pageContext.current.demFilePath,
+                    lum_path: pageContext.current.lumFilePath,
+                },
+                vector: vectorData,
+            }
 
         try {
             store.get<{ on: Function, off: Function }>('isLoading')!.on()
@@ -615,6 +649,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
             handlePatchReset()
             handleVectorReset()
+            pageContext.current.baseGridNodeInfo = null
 
             node.isTemp = false
                 ; (node as ResourceNode).tree.tempNodeExist = false
@@ -626,7 +661,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
 
             await (node.tree as ResourceTree).refresh()
-            toast.success('Patch Created successfully')
+            toast.success('Grid created successfully')
         } catch (error) {
             toast.error('Failed to create grid: ' + (error as Error).message)
             return
@@ -686,6 +721,46 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                             />
                         </div>
                     </div>
+                    {/* ----------- */}
+                    {/* Base Grid */}
+                    {/* ----------- */}
+                    <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+                        <h2 className="text-lg text-black font-semibold mb-2">Base Grid</h2>
+                        {pageContext.current.baseGridNodeInfo ? (
+                            <div className="rounded-lg p-3 flex items-center justify-between gap-2 border-2 border-amber-500">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <SquaresUnite className="h-6 w-6 text-amber-500 shrink-0" />
+                                    <p className="text-slate-900 text-md font-medium truncate">{pageContext.current.baseGridNodeInfo.split(".").pop()}</p>
+                                    <span className="text-xs text-slate-500 truncate">{pageContext.current.baseGridNodeInfo}</span>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0 text-red-500 hover:text-red-600 cursor-pointer"
+                                    onClick={() => {
+                                        pageContext.current.baseGridNodeInfo = null
+                                        triggerRepaint()
+                                    }}
+                                >
+                                    <X className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        ) : (
+                            <div
+                                className={cn(
+                                    "border-2 border-dashed rounded-lg p-3 transition-all duration-200 flex flex-col items-center text-slate-400",
+                                    isBaseGridDragOver ? "border-amber-500 bg-amber-50" : "border-slate-300 bg-slate-50 hover:bg-slate-100",
+                                )}
+                                onDragOver={(e) => { e.preventDefault(); setIsBaseGridDragOver(true) }}
+                                onDragLeave={(e) => { e.preventDefault(); setIsBaseGridDragOver(false) }}
+                                onDrop={handleBaseGridDrop}
+                            >
+                                <p className="text-sm font-medium">Optional: drag an existing grid here</p>
+                                <p className="text-xs text-center">Reuses its geometry and sampled DEM/LULC; no patches or rasters needed</p>
+                            </div>
+                        )}
+                    </div>
+                    {!pageContext.current.baseGridNodeInfo && (<>
                     <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
                         <h2 className="text-lg text-black font-semibold">Raster Resource Upload</h2>
                         <div className="space-y-1 flex flex-col">
@@ -727,15 +802,15 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                 </div>
                             </div>
                             <Separator className="bg-slate-200 w-full" />
-                            {/* LUM */}
+                            {/* LULC */}
                             <div className="flex flex-col p-2 space-y-0.5">
-                                <div className="text-black font-semibold">LUM File</div>
+                                <div className="text-black font-semibold">LULC File</div>
                                 <div className="flex items-center gap-2">
                                     <div className="min-w-0">
                                         <Input
                                             value={pageContext.current.lumFilePath || ""}
                                             readOnly={true}
-                                            placeholder="Select LUM file"
+                                            placeholder="Select LULC file"
                                             className="h-8 w-full min-w-0 rounded-sm text-base text-black border-slate-300"
                                         />
                                     </div>
@@ -861,6 +936,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                             </div>
                         </div>
                     </div>
+                    </>)}
 
                     {/* ----------- */}
                     {/* Vector Drop Zone */}
@@ -883,7 +959,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                     <div className="h-[30vh] flex flex-col justify-center items-center text-slate-400">
                                         <Upload className="w-8 h-8 mb-2" />
                                         <p className="text-sm font-medium mb-1">Drag vectors here</p>
-                                        <p className="text-xs text-center">Drop patches from the EXPLORER</p>
+                                        <p className="text-xs text-center">Drop vectors from the EXPLORER</p>
                                     </div>
                                 ) : (
                                     <div className="h-[30vh] overflow-y-auto scrollbar-hide pr-1">
@@ -1017,7 +1093,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                 </div>
                                                             </div>
 
-                                                            {/* LUM */}
+                                                            {/* LULC */}
                                                             <div className="flex items-center bg-slate-50 rounded-sm p-2 border border-slate-200">
                                                                 <div className="flex items-center gap-2 min-w-0 w-full">
                                                                     <Checkbox
@@ -1030,7 +1106,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                         }}
                                                                     />
                                                                     <div className="flex items-center gap-1 min-w-0 w-full">
-                                                                        <span className="text-sm text-slate-800 leading-none">LUM</span>
+                                                                        <span className="text-sm text-slate-800 leading-none">LULC</span>
                                                                         <button
                                                                             type="button"
                                                                             onClick={(e) => e.stopPropagation()}
@@ -1105,10 +1181,10 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                             type="button"
                             onClick={handleAssemblyClick}
                             className="bg-green-500 hover:bg-green-600 text-white cursor-pointer"
-                            disabled={getAllPatches(pageContext.current.patchMap).length === 0}
+                            disabled={!pageContext.current.baseGridNodeInfo && getAllPatches(pageContext.current.patchMap).length === 0}
                         >
                             <SquaresUnite className="w-4 h-4 " />
-                            Assembly
+                            {pageContext.current.baseGridNodeInfo ? "Create" : "Assembly"}
                         </Button>
                     </div>
                 </div>
@@ -1116,11 +1192,18 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             <AlertDialog open={assemblyDialogOpen} onOpenChange={setAssemblyDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Confirm Merge Patches</AlertDialogTitle>
+                        <AlertDialogTitle>{pageContext.current.baseGridNodeInfo ? "Confirm Create Grid" : "Confirm Merge Patches"}</AlertDialogTitle>
                         <AlertDialogDescription asChild>
+                            {pageContext.current.baseGridNodeInfo ? (
+                                <div>
+                                    You will create grid <span className="font-bold">[{pageContext.current.name}]</span> on the base grid of{" "}
+                                    <span className="font-bold">[{pageContext.current.baseGridNodeInfo}]</span> with{" "}
+                                    {pageContext.current.selectedVectors.length} vectors.
+                                </div>
+                            ) : (
                             <div>
                                 <div className="mb-4">
-                                    You will merge {getAllPatches(pageContext.current.patchMap).length} patches to create gird{" "}
+                                    You will merge {getAllPatches(pageContext.current.patchMap).length} patches to create grid{" "}
                                     <span className="font-bold">[{pageContext.current.name}]</span>
                                 </div>
                                 <div className="max-h-[200px] overflow-y-auto scrollbar-hide bg-gray-100 p-3 rounded-lg">
@@ -1133,6 +1216,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                     </ul>
                                 </div>
                             </div>
+                            )}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
