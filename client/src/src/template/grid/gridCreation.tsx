@@ -586,10 +586,12 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
     const handleAssemblyClick = () => {
         const invalid = pageContext.current.selectedVectors.find((v) =>
-            (v.demEnabled && v.demType !== "max" && v.demType !== "crest" && v.demValue === null) || (v.lumEnabled && v.lumValue === null),
+            (v.demEnabled && v.demType !== "max" && v.demValue === null &&
+                (v.demType !== "crest" || (demRawInputs.current.get(v.nodeInfo)?.trim() ?? "") !== "")) ||
+            (v.lumEnabled && v.lumValue === null),
         )
         if (invalid) {
-            toast.error(`Please enter the value for ${invalid.nodeInfo.split(".").pop()}`)
+            toast.error(`Please enter a valid value for ${invalid.nodeInfo.split(".").pop()}`)
             return
         }
         if (pageContext.current.baseGridNodeInfo) {
@@ -614,7 +616,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             if (v.demEnabled) {
                 item.dem = {
                     type: v.demType,
-                    value: v.demType === "max" || v.demType === "crest" ? null : v.demValue,
+                    value: v.demType === "max" ? null : v.demValue,
                 }
             }
 
@@ -973,7 +975,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                 )
                                                 const showDemValue =
                                                     item.demEnabled &&
-                                                    (item.demType === "set" || item.demType === "add" || item.demType === "subtract")
+                                                    item.demType !== "max"
 
                                                 const demOpMeta =
                                                     demOpsList.find((opt) => opt.value === item.demType) ??
@@ -1092,7 +1094,9 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                                 triggerRepaint()
                                                                             }}
                                                                             disabled={!showDemValue}
-                                                                            placeholder={showDemValue ? "Enter value" : "-"}
+                                                                            aria-label={item.demType === "crest" ? "Optional crest minimum" : "DEM value"}
+                                                                            title={item.demType === "crest" ? "Design minimum; leave blank to use the measured crest" : undefined}
+                                                                            placeholder={showDemValue ? (item.demType === "crest" ? "Minimum (optional)" : "Enter value") : "-"}
                                                                             className="w-full h-6 rounded-sm text-base text-black border-slate-300 focus:border-purple-400"
                                                                         />
                                                                     </div>

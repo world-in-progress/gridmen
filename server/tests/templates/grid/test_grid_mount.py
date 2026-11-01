@@ -239,6 +239,46 @@ def _run_crest(tmp_path, item, dem_path, *, finest=4):
     return grid, stats
 
 
+@pytest.mark.parametrize('dem, expected_cells, expected_crossed', [
+    ({'type': 'crest'}, [-1.125, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': None}, [-1.125, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': -2}, [-1.125, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': 0}, [0, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': 3.07}, [3.07, 7.25], [3.07, 7.25, 7.25]),
+    ({'type': 'crest', 'value': 10}, [10, 10], [10, 10, 10]),
+])
+def test_crest_optional_floor_and_bitwise_no_floor_results(tmp_path, dem, expected_cells, expected_crossed):
+    _write_base_grid(tmp_path / 'grid')
+    path = _crest_dem(tmp_path)
+    with vector.rasterio.open(path, 'r+') as dst:
+        data = np.full((192, 192), -1.125, dtype=np.float32)
+        data[:, int((4 + 32) / 0.5):] = 7.25
+        dst.write(data, 1)
+    item = _crest_intervention(tmp_path, [[0, 1], [8, 1]])
+    item['dem'] = dem
+    grid, stats = _run_crest(tmp_path, item, path)
+
+    # Explicit baseline bytes also pin the original omitted/null value behavior.
+    assert grid.cell_z.tobytes() == np.array(expected_cells, dtype=np.float64).tobytes()
+    expected_edges = [expected_crossed[0], expected_crossed[1], 1.25, 1, expected_crossed[2], 2.25, 2]
+    assert grid.edge_z.tobytes() == np.array(expected_edges, dtype=np.float64).tobytes()
+    assert stats[0]['dem'] == {'type': 'crest', 'value': dem.get('value')}
+
+    # An existing edge above both the design minimum and measured crest is retained.
+    grid.edge_z[1] = 12
+    vector.apply_interventions(grid, vector.load_interventions([item]), f'EPSG:{CRS}',
+                               dem_path=path, finest_cell_size=4)
+    assert grid.edge_z[1] == 12
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf'), True, False, '3.07', '', [], {}])
+def test_crest_rejects_invalid_floor_at_load(tmp_path, value):
+    item = _crest_intervention(tmp_path)
+    item['dem']['value'] = value
+    with pytest.raises(ValueError, match="DEM operation 'crest' needs a finite number"):
+        vector.load_interventions([item])
+
+
 @pytest.mark.parametrize('size, finest, ridge_y', [(4, 4, 2.25), (16, 16, 8.25), (16, 4, 2.25)])
 def test_crest_retains_offset_ridge_at_fine_and_coarse_resolution(tmp_path, size, finest, ridge_y):
     cells = [((x, 0, x + size, size), z, lum, edges) for x, (_, z, lum, edges) in zip(

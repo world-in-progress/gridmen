@@ -11,9 +11,11 @@ Selection rule (which cells and edges an intervention acts on):
   - Point / MultiPoint: cells and edges that contain the point.
 Interventions apply in list order; a later one overrides an earlier one where they overlap.
 set/add/subtract use the supplied value; max flattens the selection to its highest
-current cell elevation. crest is line-only and needs no value: each selected cell
+current cell elevation. crest is line-only: each selected cell
 receives the maximum valid DEM pixel centre in its intersection with the line's
-footprint. The footprint is a round-ended corridor of radius half the finest
+footprint, raised to the optional finite value (a design minimum) if supplied.
+Omitting value or using null leaves the measured crest unchanged.
+The footprint is a round-ended corridor of radius half the finest
 schema cell side (the smaller side for rectangular cells), in grid CRS units.
 Pixel centres on the corridor boundary are included; cell bounds are half-open.
 Only windows within segment footprints and selected cells are read, never the
@@ -21,8 +23,9 @@ whole DEM. The DEM must cover the entire footprint; a selected cell with no vali
 pixel centre fails. DEM CRS/transform and footprint coverage are checked once at
 the intervention boundary, with no reprojection or missing-data fallback.
 For each edge crossed/touched by the line, crest keeps the maximum of its current
-elevation and the crest elevations of its adjacent selected cells. This conservative
-rule also protects split edges between refinement levels. Later interventions
+elevation and the final crest elevations of its adjacent selected cells, including
+the optional design minimum. This conservative rule also protects split edges
+between refinement levels. Later interventions
 still apply in list order and can change those elevations.
 The DEM path is the sampling source recorded in the base grid's grid.meta.json;
 derived grids inherit it along with the schema resolutions and base binaries.
@@ -115,7 +118,7 @@ class Intervention:
     polygons: list[tuple[np.ndarray, list[np.ndarray]]]
     lines: list[np.ndarray]
     points: np.ndarray                         # (k, 2)
-    dem: tuple[str, float | None] | None       # (op, value); max/crest need no value
+    dem: tuple[str, float | None] | None       # (op, value); max ignores value, crest has an optional minimum
     lum: int | None                            # LULC class to set
 
 
@@ -137,9 +140,10 @@ def _load_intervention(item: dict, position: int) -> Intervention:
         op, value = item['dem'].get('type'), item['dem'].get('value')
         if op not in ELEVATION_OPS:
             raise ValueError(f'{where} ({node_key}): unknown DEM operation {op!r}, expected one of {ELEVATION_OPS}')
-        if op in ('max', 'crest'):
+        if op == 'max':
             value = None
-        elif not isinstance(value, (int, float)) or isinstance(value, bool) or not np.isfinite(value):
+        elif not (op == 'crest' and value is None) and (
+                not isinstance(value, (int, float)) or isinstance(value, bool) or not np.isfinite(value)):
             raise ValueError(f'{where} ({node_key}): DEM operation {op!r} needs a finite number')
         dem = (op, None if value is None else float(value))
 
@@ -287,6 +291,8 @@ def _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_siz
                     grid.cell_z[cell_sel] = _crest_values(
                         dem_src, lines, grid.cell_bounds[cell_sel], finest_cell_size / 2, item.node_key,
                     )
+                    if value is not None:
+                        grid.cell_z[cell_sel] = np.maximum(grid.cell_z[cell_sel], value)
                     crests = dict(zip(grid.cell_index[cell_sel], grid.cell_z[cell_sel]))
                     for edge_idx in np.flatnonzero(edge_sel):
                         edge = grid.edges[edge_idx]
@@ -298,7 +304,7 @@ def _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_siz
                 elif op == 'max':
                     # Flatten the selection to the highest selected cell elevation.
                     value = float(grid.cell_z[cell_sel].max()) if cell_sel.any() else None
-                if value is not None:
+                if op != 'crest' and value is not None:
                     for z, sel in ((grid.cell_z, cell_sel), (grid.edge_z, edge_sel)):
                         if op in ('set', 'max'):
                             z[sel] = value
