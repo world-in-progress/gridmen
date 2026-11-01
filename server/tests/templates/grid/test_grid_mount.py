@@ -240,14 +240,14 @@ def _run_crest(tmp_path, item, dem_path, *, finest=4):
 
 
 @pytest.mark.parametrize('dem, expected_cells, expected_crossed', [
-    ({'type': 'crest'}, [-1.125, 7.25], [1.5, 7.25, 7.25]),
-    ({'type': 'crest', 'value': None}, [-1.125, 7.25], [1.5, 7.25, 7.25]),
-    ({'type': 'crest', 'value': -2}, [-1.125, 7.25], [1.5, 7.25, 7.25]),
-    ({'type': 'crest', 'value': 0}, [0, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest'}, [1, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': None}, [1, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': -2}, [1, 7.25], [1.5, 7.25, 7.25]),
+    ({'type': 'crest', 'value': 0}, [1, 7.25], [1.5, 7.25, 7.25]),
     ({'type': 'crest', 'value': 3.07}, [3.07, 7.25], [3.07, 7.25, 7.25]),
     ({'type': 'crest', 'value': 10}, [10, 10], [10, 10, 10]),
 ])
-def test_crest_optional_floor_and_bitwise_no_floor_results(tmp_path, dem, expected_cells, expected_crossed):
+def test_crest_optional_floor_never_lowers_cells_or_crossed_edges(tmp_path, dem, expected_cells, expected_crossed):
     _write_base_grid(tmp_path / 'grid')
     path = _crest_dem(tmp_path)
     with vector.rasterio.open(path, 'r+') as dst:
@@ -258,7 +258,7 @@ def test_crest_optional_floor_and_bitwise_no_floor_results(tmp_path, dem, expect
     item['dem'] = dem
     grid, stats = _run_crest(tmp_path, item, path)
 
-    # Explicit baseline bytes also pin the original omitted/null value behavior.
+    # The left cell retains its mean above the measured crest; the right is raised.
     assert grid.cell_z.tobytes() == np.array(expected_cells, dtype=np.float64).tobytes()
     expected_edges = [expected_crossed[0], expected_crossed[1], 1.25, 1, expected_crossed[2], 2.25, 2]
     assert grid.edge_z.tobytes() == np.array(expected_edges, dtype=np.float64).tobytes()
@@ -269,6 +269,45 @@ def test_crest_optional_floor_and_bitwise_no_floor_results(tmp_path, dem, expect
     vector.apply_interventions(grid, vector.load_interventions([item]), f'EPSG:{CRS}',
                                dem_path=path, finest_cell_size=4)
     assert grid.edge_z[1] == 12
+
+
+@pytest.mark.parametrize('op, value, before, expected_cells, expected_edge', [
+    ('set', 12, True, [12, 12], 12),
+    ('add', 10, True, [11, 12], 12),
+    ('subtract', 5, True, [1, 1], 1),
+    ('set', 0, False, [0, 0], 0),
+    ('add', 1, False, [2, 3], 3),
+    ('subtract', 10, False, [-9, -8], -8),
+    ('max', None, False, [2, 2], 2),
+])
+def test_crest_uses_current_elevation_and_respects_intervention_order(
+        tmp_path, op, value, before, expected_cells, expected_edge):
+    _write_base_grid(tmp_path / 'grid')
+    path = _crest_dem(tmp_path, ridge_y=20.25)  # Footprint crest is 1, below cell 2's base mean.
+    crest = _crest_intervention(tmp_path)
+    other = {'node_key': crest['node_key'], 'dem': {'type': op, 'value': value}}
+    items = [other, crest] if before else [crest, other]
+    grid = vector.load_base_grid(tmp_path / 'grid')
+    vector.apply_interventions(
+        grid, vector.load_interventions(items), f'EPSG:{CRS}',
+        dem_path=path, finest_cell_size=4,
+    )
+    assert grid.cell_z.tolist() == expected_cells
+    assert grid.edge_z[1] == expected_edge
+    assert grid.edge_z[[0, 2, 3, 4, 5, 6]].tolist() == [1.5, 1.25, 1, 2.5, 2.25, 2]
+
+
+def test_crest_preserves_coarse_cell_mean_above_crest_and_floor(tmp_path):
+    cells = [((0, 0, 16, 16), 17, 3, [[], [], [], [0, 1, 2, 3]])]
+    cells += [((16, y, 20, y + 4), 0, 3, [[], [i], [], []]) for i, y in enumerate(range(0, 16, 4))]
+    edges = [(0, (16, y, 16, y + 4), (0, i + 1), 20 if i == 0 else 0, 3)
+             for i, y in enumerate(range(0, 16, 4))]
+    _write_base_grid(tmp_path / 'grid', cells=cells, edges=edges)
+    item = _crest_intervention(tmp_path, [[16, 0.5], [16, 15.5]])
+    item['dem']['value'] = 10
+    grid, _ = _run_crest(tmp_path, item, _crest_dem(tmp_path))
+    assert grid.cell_z.tolist() == [17, 10, 10, 10, 10]
+    assert grid.edge_z.tolist() == [20, 17, 17, 17]
 
 
 @pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf'), True, False, '3.07', '', [], {}])
@@ -341,7 +380,7 @@ def test_crest_diagonal_corridor_uses_distance_not_its_bounding_box(tmp_path):
         dst.write(data, 1)
     item = _crest_intervention(tmp_path, [[0, 0], [4, 4]])
     grid, _ = _run_crest(tmp_path, item, path)
-    assert grid.cell_z.tolist() == [1, 1]
+    assert grid.cell_z.tolist() == [1, 2]
 
 
 def test_crest_uses_each_cell_footprint_and_never_lowers_crossed_edge(tmp_path):
@@ -508,4 +547,4 @@ def test_crest_multiline_round_caps_and_inclusive_corridor_boundary(tmp_path):
         [[0.25, 1.25], [1.25, 1.25]], [[4.25, 1.25], [5.25, 1.25]],
     ]})
     grid, _ = _run_crest(tmp_path, {'node_key': key, 'dem': {'type': 'crest'}}, path)
-    assert grid.cell_z.tolist() == [7, 1]
+    assert grid.cell_z.tolist() == [7, 2]

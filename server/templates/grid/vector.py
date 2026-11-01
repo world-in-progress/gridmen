@@ -11,10 +11,11 @@ Selection rule (which cells and edges an intervention acts on):
   - Point / MultiPoint: cells and edges that contain the point.
 Interventions apply in list order; a later one overrides an earlier one where they overlap.
 set/add/subtract use the supplied value; max flattens the selection to its highest
-current cell elevation. crest is line-only: each selected cell
-receives the maximum valid DEM pixel centre in its intersection with the line's
-footprint, raised to the optional finite value (a design minimum) if supplied.
-Omitting value or using null leaves the measured crest unchanged.
+current cell elevation. crest is line-only and only raises cells: each selected
+cell takes the maximum of its current elevation (after preceding interventions),
+the highest valid DEM pixel centre elevation in its intersection with the line's
+footprint, and the optional finite value (a design minimum) if supplied.
+Omitting value or using null applies no design minimum.
 The footprint is a round-ended corridor of radius half the finest
 schema cell side (the smaller side for rectangular cells), in grid CRS units.
 Pixel centres on the corridor boundary are included; cell bounds are half-open.
@@ -288,8 +289,11 @@ def _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_siz
             if item.dem is not None:
                 op, value = item.dem
                 if op == 'crest':
-                    grid.cell_z[cell_sel] = _crest_values(
-                        dem_src, lines, grid.cell_bounds[cell_sel], finest_cell_size / 2, item.node_key,
+                    grid.cell_z[cell_sel] = np.maximum(
+                        grid.cell_z[cell_sel],
+                        _crest_values(
+                            dem_src, lines, grid.cell_bounds[cell_sel], finest_cell_size / 2, item.node_key,
+                        ),
                     )
                     if value is not None:
                         grid.cell_z[cell_sel] = np.maximum(grid.cell_z[cell_sel], value)

@@ -18,12 +18,13 @@ It combines an Electron shell, a React/Vite renderer, and a Python (FastAPI) bac
 Grid interventions apply in order to solver inputs while preserving base topology
 and sampled attributes. `set`, `add`, and `subtract` use a supplied elevation;
 `max` flattens the selection to its highest current cell elevation. Line resources
-also support `crest`: each selected cell takes the maximum DEM pixel centre
-elevation within the line footprint intersected with that cell. An optional finite
-`value` supplies a design minimum: the final cell elevation is the higher of that
-measured crest and `value` (for example, `{"type": "crest", "value": 3.07}`).
-Omitting `value`, passing `null`, or leaving the UI field blank applies no minimum
-and preserves the original measured-crest behavior. The footprint radius is half
+also support `crest`, which only raises selected cells. Each cell takes the maximum
+of its current elevation (after preceding interventions), the highest DEM pixel
+centre elevation within the line footprint intersected with that cell, and an
+optional finite `value` supplying a design minimum
+(for example, `{"type": "crest", "value": 3.07}`). Omitting `value`, passing `null`,
+or leaving the UI field blank applies no design minimum; the cell still keeps at
+least its current elevation. The footprint radius is half
 the finest schema cell side, including for coarse cells. Crossed edges keep at
 least the highest adjacent selected cell's final elevation and their previous
 elevation. New base grids record the sampling DEM path in `grid.meta.json`,
