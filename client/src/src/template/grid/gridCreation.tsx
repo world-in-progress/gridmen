@@ -32,13 +32,14 @@ interface GridCreationProps {
     context: IViewContext
 }
 
-type VectorOps = "set" | "add" | "subtract" | "max"
+type VectorOps = "set" | "add" | "subtract" | "max" | "crest"
 
 const operationColorMap: Record<VectorOps, string> = {
     set: "bg-blue-200",
     add: "bg-green-200",
     subtract: "bg-red-200",
     max: "bg-orange-200",
+    crest: "bg-orange-200",
 }
 
 const demOpsList: Array<{ value: VectorOps; label: string; className: string }> = [
@@ -46,6 +47,7 @@ const demOpsList: Array<{ value: VectorOps; label: string; className: string }> 
     { value: "add", label: "Add", className: "bg-green-200" },
     { value: "subtract", label: "Subtract", className: "bg-red-200" },
     { value: "max", label: "Max", className: "bg-orange-200" },
+    { value: "crest", label: "Crest", className: "bg-orange-200" },
 ]
 
 interface PatchMapInfo {
@@ -584,7 +586,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
     const handleAssemblyClick = () => {
         const invalid = pageContext.current.selectedVectors.find((v) =>
-            (v.demEnabled && v.demType !== "max" && v.demValue === null) || (v.lumEnabled && v.lumValue === null),
+            (v.demEnabled && v.demType !== "max" && v.demType !== "crest" && v.demValue === null) || (v.lumEnabled && v.lumValue === null),
         )
         if (invalid) {
             toast.error(`Please enter the value for ${invalid.nodeInfo.split(".").pop()}`)
@@ -612,7 +614,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             if (v.demEnabled) {
                 item.dem = {
                     type: v.demType,
-                    value: v.demValue,
+                    value: v.demType === "max" || v.demType === "crest" ? null : v.demValue,
                 }
             }
 
@@ -965,6 +967,10 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                     <div className="h-[30vh] overflow-y-auto scrollbar-hide pr-1">
                                         <div className="space-y-1">
                                             {pageContext.current.selectedVectors.map((item, index) => {
+                                                const features = (item.vectorInfo.feature_json as GeoJSON.FeatureCollection).features
+                                                const lineOnly = features.some((feature) => feature.geometry !== null) && features.every(
+                                                    (feature) => feature.geometry === null || feature.geometry.type === "LineString" || feature.geometry.type === "MultiLineString",
+                                                )
                                                 const showDemValue =
                                                     item.demEnabled &&
                                                     (item.demType === "set" || item.demType === "add" || item.demType === "subtract")
@@ -1053,7 +1059,7 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                                         triggerRepaint()
                                                                                     }}
                                                                                 >
-                                                                                    {demOpsList.map((opt) => (
+                                                                                    {demOpsList.filter((opt) => opt.value !== "crest" || lineOnly).map((opt) => (
                                                                                         <DropdownMenuRadioItem key={opt.value} value={opt.value} className="cursor-pointer">
                                                                                             {opt.label}
                                                                                         </DropdownMenuRadioItem>

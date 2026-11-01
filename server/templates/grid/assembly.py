@@ -1462,6 +1462,7 @@ def assembly(resource_dir: str, schema_node_key: str, patch_node_keys: list[str]
         # Create meta json
         meta_info = {
             'epsg': epsg,
+            'dem_path': str(Path(dem_path).resolve()) if dem_path and Path(dem_path).is_file() else None,
             'bounds': meta_bounds,
             'grid_info': grid_info,
             'level_info': meta_level_info,

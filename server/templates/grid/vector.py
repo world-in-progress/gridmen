@@ -10,20 +10,37 @@ Selection rule (which cells and edges an intervention acts on):
   - LineString / MultiLineString: cells and edges the line passes through or touches.
   - Point / MultiPoint: cells and edges that contain the point.
 Interventions apply in list order; a later one overrides an earlier one where they overlap.
-Cells and edges always receive the same operation.
+set/add/subtract use the supplied value; max flattens the selection to its highest
+current cell elevation. crest is line-only and needs no value: each selected cell
+receives the maximum valid DEM pixel centre in its intersection with the line's
+footprint. The footprint is a round-ended corridor of radius half the finest
+schema cell side (the smaller side for rectangular cells), in grid CRS units.
+Pixel centres on the corridor boundary are included; cell bounds are half-open.
+Only windows within segment footprints and selected cells are read, never the
+whole DEM. The DEM must cover the entire footprint; a selected cell with no valid
+pixel centre fails. DEM CRS/transform and footprint coverage are checked once at
+the intervention boundary, with no reprojection or missing-data fallback.
+For each edge crossed/touched by the line, crest keeps the maximum of its current
+elevation and the crest elevations of its adjacent selected cells. This conservative
+rule also protects split edges between refinement levels. Later interventions
+still apply in list order and can change those elevations.
+The DEM path is the sampling source recorded in the base grid's grid.meta.json;
+derived grids inherit it along with the schema resolutions and base binaries.
 """
 import json
 import os
 import struct
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from pyproj import Transformer
+import rasterio
+from pyproj import CRS, Transformer
 
 from ._timing import timed
 
-ELEVATION_OPS = ('set', 'add', 'subtract', 'max')
+ELEVATION_OPS = ('set', 'add', 'subtract', 'max', 'crest')
 
 # edge_topo.bin record: uint32 length prefix + '!QBddddQQdi'
 EDGE_RECORD = np.dtype([
@@ -98,7 +115,7 @@ class Intervention:
     polygons: list[tuple[np.ndarray, list[np.ndarray]]]
     lines: list[np.ndarray]
     points: np.ndarray                         # (k, 2)
-    dem: tuple[str, float | None] | None       # (op, value); value is None only for 'max'
+    dem: tuple[str, float | None] | None       # (op, value); max/crest need no value
     lum: int | None                            # LULC class to set
 
 
@@ -120,7 +137,7 @@ def _load_intervention(item: dict, position: int) -> Intervention:
         op, value = item['dem'].get('type'), item['dem'].get('value')
         if op not in ELEVATION_OPS:
             raise ValueError(f'{where} ({node_key}): unknown DEM operation {op!r}, expected one of {ELEVATION_OPS}')
-        if op == 'max':
+        if op in ('max', 'crest'):
             value = None
         elif not isinstance(value, (int, float)) or isinstance(value, bool) or not np.isfinite(value):
             raise ValueError(f'{where} ({node_key}): DEM operation {op!r} needs a finite number')
@@ -149,6 +166,8 @@ def _load_intervention(item: dict, position: int) -> Intervention:
     polygons, lines, points = [], [], []
     for geometry in _geometries(feature):
         kind, coords = geometry['type'], geometry['coordinates']
+        if dem is not None and dem[0] == 'crest' and kind not in ('LineString', 'MultiLineString'):
+            raise ValueError(f'{where} ({node_key}): crest only supports line geometries, got {kind!r}')
         if kind == 'Polygon':
             polygons.append(_polygon(coords))
         elif kind == 'MultiPolygon':
@@ -163,6 +182,10 @@ def _load_intervention(item: dict, position: int) -> Intervention:
             points.extend(c[:2] for c in coords)
         else:
             raise ValueError(f'{where}: vector {node_key} has unsupported geometry type {kind!r}')
+
+    if dem is not None and dem[0] == 'crest' and (
+            not lines or any(len(line) < 2 or not np.isfinite(line).all() for line in lines)):
+        raise ValueError(f'{where} ({node_key}): crest needs nonempty finite lines')
 
     return Intervention(
         node_key=node_key,
@@ -201,7 +224,36 @@ def _line(coords) -> np.ndarray:
     return np.asarray(coords, dtype=np.float64)[:, :2]
 
 
-def apply_interventions(grid: BaseGrid, interventions: list[Intervention], grid_crs: str) -> list[dict]:
+def apply_interventions(grid: BaseGrid, interventions: list[Intervention], grid_crs: str,
+                        *, dem_path=None, finest_cell_size=None) -> list[dict]:
+    """Open and validate the base DEM once, only when crest needs it."""
+    with ExitStack() as stack:
+        dem_src = None
+        if any(item.dem is not None and item.dem[0] == 'crest' for item in interventions):
+            if not dem_path:
+                raise ValueError('crest requires base grid DEM provenance (dem_path)')
+            if finest_cell_size is None or not np.isfinite(finest_cell_size) or finest_cell_size <= 0:
+                raise ValueError('crest requires a positive finest schema cell size')
+            dem_src = stack.enter_context(rasterio.open(dem_path))
+            t = dem_src.transform
+            raster_crs = CRS.from_user_input(dem_src.crs) if dem_src.crs is not None else None
+            target_crs = CRS.from_user_input(grid_crs)
+            authority = raster_crs.to_json_dict().get('id', {}) if raster_crs else {}
+            raster_epsg = dem_src.crs.to_epsg() if dem_src.crs is not None else None
+            if raster_epsg is None and authority.get('authority') == 'EPSG':
+                raster_epsg = int(authority['code'])
+            same_crs = raster_crs is not None and (
+                (raster_epsg is not None and raster_epsg == target_crs.to_epsg())
+                or raster_crs.equals(target_crs, ignore_axis_order=True)
+            )
+            if (dem_src.crs is None
+                    or not same_crs
+                    or t.a <= 0 or t.e >= 0 or t.b != 0 or t.d != 0):
+                raise ValueError('crest DEM must have the grid CRS and a north-up, unrotated transform')
+        return _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_size)
+
+
+def _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_size):
     """Apply interventions in order to grid.cell_z/cell_type/edge_z/edge_type. Returns per-intervention counts."""
     cx, cy = grid.cell_centres
     ex, ey = grid.edge_midpoints
@@ -231,7 +283,19 @@ def apply_interventions(grid: BaseGrid, interventions: list[Intervention], grid_
 
             if item.dem is not None:
                 op, value = item.dem
-                if op == 'max':
+                if op == 'crest':
+                    grid.cell_z[cell_sel] = _crest_values(
+                        dem_src, lines, grid.cell_bounds[cell_sel], finest_cell_size / 2, item.node_key,
+                    )
+                    crests = dict(zip(grid.cell_index[cell_sel], grid.cell_z[cell_sel]))
+                    for edge_idx in np.flatnonzero(edge_sel):
+                        edge = grid.edges[edge_idx]
+                        grid.edge_z[edge_idx] = max(
+                            grid.edge_z[edge_idx],
+                            crests.get(edge['cell_a'], -np.inf),
+                            crests.get(edge['cell_b'], -np.inf),
+                        )
+                elif op == 'max':
                     # Flatten the selection to the highest selected cell elevation.
                     value = float(grid.cell_z[cell_sel].max()) if cell_sel.any() else None
                 if value is not None:
@@ -254,6 +318,46 @@ def apply_interventions(grid: BaseGrid, interventions: list[Intervention], grid_
                 'edges': int(edge_sel.sum()),
             })
     return stats
+
+
+def _crest_values(src, lines, cell_bounds, radius, node_key):
+    """Reduce pixel centres in the union of segment capsules, clipped per cell."""
+    segments = np.asarray([(a, b) for line in lines for a, b in zip(line[:-1], line[1:])])
+    lo = segments.min(axis=1) - radius
+    hi = segments.max(axis=1) + radius
+    west, south, east, north = src.bounds
+    if (np.any(lo < [west, south]) or np.any(hi > [east, north])):
+        raise ValueError(f'crest ({node_key}): DEM must cover the entire line footprint')
+
+    values = np.full(len(cell_bounds), -np.inf)
+    t = src.transform
+    for idx, (x0, y0, x1, y1) in enumerate(cell_bounds):
+        candidates = np.flatnonzero((lo[:, 0] < x1) & (hi[:, 0] > x0)
+                                    & (lo[:, 1] < y1) & (hi[:, 1] > y0))
+        for segment_idx in candidates:
+            left, bottom = np.maximum(lo[segment_idx], [x0, y0])
+            right, top = np.minimum(hi[segment_idx], [x1, y1])
+            window = rasterio.windows.from_bounds(left, bottom, right, top, t)
+            col0, row0 = max(0, int(np.floor(window.col_off))), max(0, int(np.floor(window.row_off)))
+            col1 = min(src.width, int(np.ceil(window.col_off + window.width)))
+            row1 = min(src.height, int(np.ceil(window.row_off + window.height)))
+            window = rasterio.windows.Window(col0, row0, col1 - col0, row1 - row0)
+            data = src.read(1, window=window, masked=True)
+            xs = t.c + (np.arange(col0, col1) + 0.5) * t.a
+            ys = t.f + (np.arange(row0, row1) + 0.5) * t.e
+            px, py = np.meshgrid(xs, ys)
+            a, b = segments[segment_idx]
+            dx, dy = b - a
+            length2 = dx * dx + dy * dy
+            fraction = np.clip(((px - a[0]) * dx + (py - a[1]) * dy) / length2, 0, 1) if length2 else 0
+            distance2 = (px - a[0] - fraction * dx) ** 2 + (py - a[1] - fraction * dy) ** 2
+            valid = ((distance2 <= radius * radius) & (px >= x0) & (px < x1)
+                     & (py >= y0) & (py < y1) & ~np.ma.getmaskarray(data) & np.isfinite(data.data))
+            if valid.any():
+                values[idx] = max(values[idx], float(data.data[valid].max()))
+        if not np.isfinite(values[idx]):
+            raise ValueError(f'crest ({node_key}): cell {tuple(cell_bounds[idx])} footprint has no valid DEM pixels (nodata)')
+    return values
 
 
 def _to_grid_crs(item: Intervention, grid_crs: str):

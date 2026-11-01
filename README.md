@@ -13,6 +13,20 @@
 Gridmen is a desktop + web GIS-style grid editing and visualization workspace.
 It combines an Electron shell, a React/Vite renderer, and a Python (FastAPI) backend.
 
+## Vector elevation interventions
+
+Grid interventions apply in order to solver inputs while preserving base topology
+and sampled attributes. `set`, `add`, and `subtract` use a supplied elevation;
+`max` flattens the selection to its highest current cell elevation. Line resources
+also support `crest` (no value): each selected cell takes the maximum DEM pixel
+centre elevation within the line footprint intersected with that cell. The
+footprint radius is half the finest schema cell side, including for coarse cells.
+Crossed edges keep at least the highest adjacent selected cell crest and their
+previous elevation. New base grids record the sampling DEM path in `grid.meta.json`,
+and derived grids inherit that source. `crest` reads local windows, requires full
+footprint coverage, and fails on a cell footprint without valid DEM pixels.
+See [crest design and validation](docs/line-crest.md) for the exact boundaries.
+
 ## Repository Layout
 
 High-level structure (monorepo):

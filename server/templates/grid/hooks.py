@@ -59,7 +59,11 @@ def MOUNT(node_key: str, params: dict | None = None):
             with timed("grid.load_base"):
                 grid = load_base_grid(resource_dir)
             with timed("grid.interventions", n=len(interventions)):
-                intervention_stats = apply_interventions(grid, interventions, f"EPSG:{meta['epsg']}")
+                finest_cell_size = min(min(size) for size in meta['grid_info']) if meta.get('grid_info') else None
+                intervention_stats = apply_interventions(
+                    grid, interventions, f"EPSG:{meta['epsg']}",
+                    dem_path=meta.get('dem_path'), finest_cell_size=finest_cell_size,
+                )
             with timed("grid.write_ne"):
                 write_ne(resource_dir / 'ne.txt', grid)
             with timed("grid.write_ns"):
@@ -96,7 +100,7 @@ def _assemble(assembly_params: dict, node_key: str, resource_dir: Path):
 
 
 def _link_base_grid(base_grid: str, node_key: str, resource_dir: Path):
-    """Reuse the base grid of an existing grid: no assembly and no DEM/LULC sampling."""
+    """Reuse base binaries and provenance; crest alone may read local DEM windows."""
     if base_grid == node_key:
         raise ValueError("A grid cannot use itself as its base grid.")
     base_dir = _resource_dir(base_grid)
