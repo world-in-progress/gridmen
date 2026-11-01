@@ -25,7 +25,6 @@ Crossed edges keep at least the highest adjacent selected cell crest and their
 previous elevation. New base grids record the sampling DEM path in `grid.meta.json`,
 and derived grids inherit that source. `crest` reads local windows, requires full
 footprint coverage, and fails on a cell footprint without valid DEM pixels.
-See [crest design and validation](docs/line-crest.md) for the exact boundaries.
 
 ## Repository Layout
 

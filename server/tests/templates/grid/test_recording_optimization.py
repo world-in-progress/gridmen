@@ -123,13 +123,25 @@ def test_lulc_mode_breaks_ties_before_integer_conversion(raster_file, data, expe
 
 @pytest.mark.parametrize("raster_argument", ["dem_path", "lum_path"])
 def test_assembly_rejects_wrong_crs_before_topology_work(tmp_path, monkeypatch, raster_file, raster_argument):
+    dem_path = raster_file(np.ones((2, 2), dtype=np.float32), name="dem.tif")
     path = raster_file(np.ones((2, 2), dtype=np.float32), crs="EPSG:4326")
     schema = tmp_path / "resource/test/schema"
     schema.mkdir(parents=True)
     (schema / "schema.json").write_text(json.dumps({"epsg": 2326}))
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="reproject.*schema CRS"):
-        assembly.assembly(tmp_path, ".test.schema", [".absent"], **{raster_argument: path})
+        assembly.assembly(tmp_path, ".test.schema", [".absent"], **{"dem_path": dem_path, raster_argument: path})
+
+
+@pytest.mark.parametrize("dem_path", [None, ""])
+def test_assembly_requires_dem_before_schema_or_topology_work(tmp_path, dem_path):
+    with pytest.raises(ValueError, match="Assembly requires 'dem_path'"):
+        assembly.assembly(tmp_path, ".absent.schema", [".absent.patch"], dem_path=dem_path)
+
+
+def test_assembly_rejects_missing_dem_before_schema_or_topology_work(tmp_path):
+    with pytest.raises(FileNotFoundError, match="missing.tif"):
+        assembly.assembly(tmp_path, ".absent.schema", [".absent.patch"], dem_path=tmp_path / "missing.tif")
 
 
 def test_raster_validation_accepts_equivalent_wkt(raster_file):
