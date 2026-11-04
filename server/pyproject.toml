@@ -2,7 +2,6 @@
 name = "gridmen-backend"
 version = "0.1.0"
 description = "The Gridmen Backend"
-readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.116.1",
