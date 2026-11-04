@@ -1,170 +1,145 @@
 # Gridmen
 
-<p align="center">
-  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-42.4.0-47848F?logo=electron&logoColor=white" alt="Electron 42.4.0"></a>
-  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19.1.0-61DAFB?logo=react&logoColor=white" alt="React 19.1.0"></a>
-  <a href="https://vitejs.dev/"><img src="https://img.shields.io/badge/Vite-7.3.5-646CFF?logo=vite&logoColor=white" alt="Vite 7.3.5"></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.8%2F5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5.8/5.9"></a>
-  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind%20CSS-4.1.11-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4.1.11"></a>
-  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.116.1-009688?logo=fastapi&logoColor=white" alt="FastAPI 0.116.1"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+"></a>
-</p>
+English | [中文](README_zh.md)
 
-Gridmen is a desktop + web GIS-style grid editing and visualization workspace.
-It combines an Electron shell, a React/Vite renderer, and a Python (FastAPI) backend.
+Gridmen is an interactive tool for researchers and practitioners preparing multi-resolution Cartesian grids (MRCGs) for two-dimensional hydrodynamic flood simulation. A grid consists of a base grid and ordered vector interventions. Assembly combines patches and samples terrain and LULC once into the base grid; other scenario grids derive from that base without repeating assembly or base-attribute sampling. They reuse identical base binaries, and computational cells outside the interventions retain bitwise-identical attributes across scenarios using the same base. The `crest` intervention additionally reads local DEM windows. Gridmen exports solver-independent cell–edge topology and attributes as `ne.txt` and `ns.txt`, usable by solvers such as the separate nh-flood-2d project.
 
-## Vector elevation interventions
+[Watch the demonstration video](https://doi.org/10.6084/m9.figshare.32677584).
 
-Grid interventions apply in order to solver inputs while preserving base topology
-and sampled attributes. `set`, `add`, and `subtract` use a supplied elevation;
-`max` flattens the selection to its highest current cell elevation. Line resources
-also support `crest`, which only raises selected cells. Each cell takes the maximum
-of its current elevation (after preceding interventions), the highest DEM pixel
-centre elevation within the line footprint intersected with that cell, and an
-optional finite `value` supplying a design minimum
-(for example, `{"type": "crest", "value": 3.07}`). Omitting `value`, passing `null`,
-or leaving the UI field blank applies no design minimum; the cell still keeps at
-least its current elevation. The footprint radius is half
-the finest schema cell side, including for coarse cells. Crossed edges keep at
-least the highest adjacent selected cell's final elevation and their previous
-elevation. New base grids record the sampling DEM path in `grid.meta.json`,
-and derived grids inherit that source. `crest` reads local windows, requires full
-footprint coverage, and fails on a cell footprint without valid DEM pixels.
+## Concepts and workflow
 
-## Repository Layout
+- **Grid levels:** a `schema` defines the coordinate reference system, alignment origin, and cell dimensions at each level. Dimensions decrease between levels; each preceding dimension must be an integer multiple of the next.
+- **Patch:** an editable part of the grid, created within a schema. Subdivide, merge, delete, and recover computational cells to set the local resolution and extent.
+- **Base grid:** geometry, topology, and base attributes produced by assembly. Assembly combines patches, resolves ancestor conflicts, applies grading, rebuilds topology, and samples DEM and optional LULC. The base binaries are subsequently immutable.
+- **Vector intervention:** a vector resource with an elevation operation and/or a LULC assignment. Interventions execute in list order; later operations act on the results of earlier operations.
+- **Solver input:** export a grid to obtain its base files, scenario-specific `ne.txt` and `ns.txt`, and build report.
 
-High-level structure (monorepo):
+A typical workflow is:
 
-```text
-.
-├─ package.json                # Workspace orchestration scripts
-├─ client/                     # Electron desktop shell
-│  ├─ package.json             # Electron dependencies + build script
-│  ├─ electron/                # Electron main/preload process (TypeScript)
-│  └─ src/                     # Renderer app (Vite + React)
-│     ├─ package.json          # Frontend dependencies
-│     ├─ vite.config.ts        # Dev server + proxy + build output
-│     └─ src/                  # React app source (components/core/store/views/...)
-├─ server/                     # Python backend project (uv + FastAPI)
-│  ├─ pyproject.toml           # Python deps/constraints (incl. GIS stack)
-│  ├─ uv.lock                  # Locked Python dependency resolution
-│  └─ main.py                  # Uvicorn entrypoint
-├─ src/                        # Backend source package (gridmen_backend)
-├─ templates/                  # Frontend build output target (generated)
-├─ resource/                   # Example datasets / resources
-└─ temp/                       # Runtime/temp artifacts
-```
+1. Create a project and a schema with the required coordinate reference system, alignment origin, and grid levels.
+2. Create and edit patches under that schema to cover the simulation domain at the required resolutions.
+3. Create a grid from the patches, a DEM, and optional LULC. Raster coordinates must already match the grid coordinate reference system; assembly does not reproject them.
+4. Create or import vector resources, then add their elevation and/or LULC operations in the required order when creating a grid.
+5. For another scenario, select an existing grid as **Base Grid** and choose the new ordered vector interventions. Derivation reuses its base attributes, without inheriting its intervened solver input. The base files must be on the same filesystem because reuse uses hard links. `crest` also requires the recorded DEM to remain accessible.
+6. Use **Export Grid** to download the grid archive. Supply `ne.txt` and `ns.txt` to a compatible solver and configure the simulation in that solver.
 
-## Main Tech Stack (with versions)
+Source DEM, LULC, and vector data must be supplied with appropriate usage rights. Provider-restricted seabed data and grids or numerical values derived from it are not distributed here.
 
-Versions are taken from manifests in this repository (e.g. `package.json`, `pyproject.toml`).
+## Quick start
 
-<p align="center">
-  <a href="https://docs.mapbox.com/mapbox-gl-js/api/"><img src="https://img.shields.io/badge/Mapbox%20GL-3.13.0-000000?logo=mapbox&logoColor=white" alt="Mapbox GL 3.13.0"></a>
-  <a href="https://threejs.org/"><img src="https://img.shields.io/badge/three.js-0.180.0-000000?logo=three.js&logoColor=white" alt="three.js 0.180.0"></a>
-  <a href="https://zustand-demo.pmnd.rs/"><img src="https://img.shields.io/badge/Zustand-5.0.8-181717?logo=react&logoColor=white" alt="Zustand 5.0.8"></a>
-  <a href="https://eslint.org/"><img src="https://img.shields.io/badge/ESLint-9.37.0-4B32C3?logo=eslint&logoColor=white" alt="ESLint 9.37.0"></a>
-  <a href="https://prettier.io/"><img src="https://img.shields.io/badge/Prettier-3.6.2-F7B93E?logo=prettier&logoColor=black" alt="Prettier 3.6.2"></a>
-</p>
+Use Node.js 22.12 or newer and npm, Python 3.12 (the version selected by `server/.python-version`), and `uv`. The backend manifest allows Python 3.10 or newer, subject to the locked dependencies. Native GDAL libraries and Python bindings must match; on macOS the manifest pins GDAL 3.13.1. See the manifests for the complete dependency lists.
 
-<p align="center">
-  <a href="https://www.uvicorn.org/"><img src="https://img.shields.io/badge/Uvicorn-0.30.0-2C3E50" alt="Uvicorn 0.30.0"></a>
-  <a href="https://docs.pydantic.dev/"><img src="https://img.shields.io/badge/Pydantic-2.x-E92063?logo=pydantic&logoColor=white" alt="Pydantic 2.x"></a>
-  <a href="https://numpy.org/"><img src="https://img.shields.io/badge/NumPy-2.2.6%2B-013243?logo=numpy&logoColor=white" alt="NumPy 2.2.6+"></a>
-  <a href="https://pandas.pydata.org/"><img src="https://img.shields.io/badge/pandas-2.3.3%2B-150458?logo=pandas&logoColor=white" alt="pandas 2.3.3+"></a>
-  <a href="https://gdal.org/"><img src="https://img.shields.io/badge/GDAL-3.12.x-5CAE58" alt="GDAL 3.12.x"></a>
-  <a href="https://rasterio.readthedocs.io/"><img src="https://img.shields.io/badge/rasterio-1.4.4%2B-3E7A7C" alt="rasterio 1.4.4+"></a>
-</p>
-
-For full dependency lists, see `client/package.json`, `client/src/package.json`, and `server/pyproject.toml`.
-
-## Getting Started
-
-### Prerequisites
-
-- **Node.js** (v18 or higher recommended)
-- **Python** (3.10 or higher)
-- **uv** (Python package manager) - [Install uv](https://github.com/astral-sh/uv)
-
-### Installation
-
-Check the local toolchain and native GIS linkage:
+From a fresh checkout:
 
 ```bash
+git clone https://github.com/Dsssyc/gridmen.git
+cd gridmen
 npm run doctor
-```
-
-Install all JavaScript and Python dependencies:
-
-```bash
 npm run setup
-```
-
-`npm run setup` installs the workspace, Electron shell, Electron runtime, React/Vite renderer, and backend Python dependencies. It also runs `uv sync` in `server/`.
-
-#### Environment Configuration
-
-Copy the renderer environment template:
-
-```bash
 cp client/src/.env.example client/src/.env
 ```
 
-Then edit `client/src/.env`:
+`doctor` checks the local tools and GDAL linkage. `setup` runs `npm ci` at the root, in `client/`, and in `client/src/`, installs the Electron runtime, and runs `uv sync` in `server/`.
 
-```env
-# Replace with your local API URL, e.g., http://localhost:8000
-VITE_LOCAL_API_URL=http://localhost:8000
+Set the renderer's `VITE_API_BASE_URL` in `client/src/.env` to the backend URL (default `http://127.0.0.1:8000`). The older `VITE_LOCAL_API_URL` remains a fallback. For Mapbox styles, set `VITE_MAP_TOKEN` to your own public Mapbox token, or enter it in **Settings → Map View → General**. Without a valid public token, the map view opens but Mapbox styles cannot load. Client environment values are visible to the browser.
 
-# Replace with your remote API URL, e.g., http://xxx.yyy.zzz.www:8000
-VITE_REMOTE_API_URL=http://localhost:8000
-
-# Replace with your Mapbox token, e.g., pk.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-VITE_MAP_TOKEN=your_mapbox_token_here
-```
-
-> **Note**: Get your Mapbox token from [Mapbox Account](https://account.mapbox.com/access-tokens/). Map view opens without crashing when the token is missing, but the map canvas needs a public `pk...` token to load Mapbox styles. The `.env` value seeds the default token; it can also be edited later in Settings -> Map View -> General.
-
-### Running the Application
-
-From the repository root:
+### Desktop
 
 ```bash
 npm start
 ```
 
-This command starts and supervises:
-- Start Electron desktop shell (`client/`)
-- Launch Vite dev server (`client/src/`) on `http://127.0.0.1:5173`
-- Run the FastAPI backend (`server/`) on `http://localhost:8000`
+This starts the Electron shell, Vite at `http://127.0.0.1:5173`, and the backend on port 8000. Press Ctrl+C in that terminal to stop the supervised processes. The Electron shell loads the Vite URL; an independently started shell needs a running renderer and backend.
 
-Press `Ctrl+C` once in the root terminal to shut down all three processes.
+### Web and backend separately
 
-### Individual Development Servers
+Run these in separate terminals from the repository root:
 
-If you prefer to run components separately:
-
-**Frontend only** (Vite dev server):
 ```bash
-cd ./client/src
-npm run dev
+npm run start:server
+npm run dev:web
 ```
 
-**Electron desktop only**:
+Open the Vite URL in a browser. Vite proxies `/api` and `/noodle` to the configured backend. To start only the desktop shell after those two services are running:
+
 ```bash
-cd ./client
-npm start
+npm run start:client
 ```
 
-**Backend only**:
+The direct server entry point is:
+
 ```bash
-cd ./server
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+cd server
 uv run main.py
 ```
 
-### Notes
+The backend binds to `0.0.0.0`, uses `SERVER_PORT` (default 8000), and enables reload. Its default database, temporary state, configuration, and resources are under `server/`. `SQLITE_PATH`, `MEMORY_TEMP_PATH`, and `NOODLE_CONFIG_PATH` can be configured through `server/.env`; resource paths are relative to the backend working directory. Supply your own raster and vector files on the backend machine. Desktop file selection uses native dialogs; for Web use, file paths must refer to files accessible to the backend.
 
-- The Vite dev server proxies `/api` and `/noodle` requests to `VITE_LOCAL_API_URL`
-- Frontend build output is configured to go to `templates/`
-- Press `F12` in the Electron app to toggle DevTools
+For development checks:
+
+```bash
+cd server
+uv run pytest tests
+```
+
+```bash
+cd client/src
+npx tsc -b
+npm run build
+```
+
+The renderer build writes to the repository-root `templates/` directory. Benchmark instructions are in [docs/benchmark/patch-render-benchmark.md](docs/benchmark/patch-render-benchmark.md).
+
+## Vector elevation interventions
+
+The selection rule is: polygons select computational cells by centre and edges by midpoint inside the polygon; lines select cells and edges they cross or touch; points select cells and edges containing the point. Vector coordinates are transformed into the grid coordinate reference system. The same operation applies to selected cells and edges, except for the special edge rule of `crest`.
+
+| Operation | Elevation result |
+|---|---|
+| `set` | Set the selected elevation to the supplied value. |
+| `add` | Add the supplied value to the current elevation. |
+| `subtract` | Subtract the supplied value from the current elevation. |
+| `max` | Flatten the selection to its highest current computational-cell elevation; no value is required. |
+| `crest` | For lines only, raise each selected cell to the maximum of its current elevation, the highest valid DEM pixel-centre elevation in its footprint, and an optional design minimum. |
+
+For `crest`, the footprint is a round-ended corridor on both sides of the line. Its radius is half the finest schema cell side (the smaller dimension for rectangular cells), including when the selected cell is coarse. The DEM maximum is taken within the footprint intersected with each selected cell. Pixel centres on the corridor boundary are included; cell bounds are half-open. For example, `{"type": "crest", "value": 3.07}` supplies a design minimum. Omitting `value`, passing `null`, or leaving the UI field blank supplies no design minimum; the current elevation is still preserved as a lower bound.
+
+Crossed or touched edges retain at least their previous elevation and the highest final elevation of adjacent selected cells, including across refinement levels. Later interventions still apply in order and may change those elevations. New base grids record the sampling DEM path in `grid.meta.json`; derived grids inherit it. `crest` reads local windows, requires the DEM to have the grid coordinate reference system and a north-up, unrotated transform, and requires full footprint coverage. It fails if a selected cell footprint has no valid DEM pixel centres.
+
+An intervention can also `set` LULC for the selected cells and edges, with or without an elevation operation. The code field `lum` denotes LULC. Every grid computes its solver input afresh from base attributes and its ordered interventions; exporting does not modify the base binaries or compound a previous scenario's edits.
+
+The base sampling rule reads band 1 at the cell centre or edge midpoint. Outside the raster, NaN, or NoData becomes elevation `-9999` or LULC `0`.
+
+## Export files
+
+**Export Grid** packages the grid resource directory as a `.tar.gz` archive.
+
+| File | Contents |
+|---|---|
+| `ne.txt` | Scenario computational cells: 1-based ID, edge counts in west/east/south/north order, corresponding edge IDs, centre coordinates, elevation, and LULC. |
+| `ns.txt` | Scenario edges: 1-based ID, direction (`1` horizontal, `2` vertical), left/right/bottom/top adjacent cell IDs (`0` for an absent neighbour), length, midpoint coordinates, elevation, and LULC. |
+| `cell_topo.bin` | Internal base-grid cell geometry, connectivity, and sampled base attributes; retained for derivation. |
+| `edge_topo.bin` | Internal base-grid edge geometry, adjacency, and sampled base attributes; retained for derivation. |
+| `grid.meta.json` | Grid coordinate reference system, bounds, grid levels, subdivision rules, alignment origin, and recorded raster-source paths. |
+| `build_report.json` | Assembly or base-grid reference, cell/edge counts, intervention selection counts, and stage timings. |
+
+Base binaries describe the base grid; scenario elevation and LULC changes appear in `ne.txt` and `ns.txt`. Metadata and reports may contain local source paths; review exported archives and data permissions before sharing them.
+
+## Repository and license
+
+```text
+client/electron/      Electron shell
+client/src/           React/Vite renderer and its package.json
+server/main.py        Backend launch entry point
+server/src/           FastAPI endpoints, schemas, and settings
+server/templates/     Resource lifecycle hooks, assembly, interventions
+server/crms/          Resource implementations
+server/icrms/         Resource interfaces
+server/tests/         Backend tests
+scripts/              Setup, launch, diagnostics, benchmark analysis
+docs/benchmark/       Patch rendering and edit-latency measurement guide
+templates/            Generated renderer build (ignored)
+server/resource/      Local resources (ignored)
+```
+
+The client and server include [MIT license texts](client/LICENSE) ([server](server/LICENSE)). Package manifests currently declare ISC; this metadata is inconsistent with those license texts.

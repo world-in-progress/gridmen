@@ -1,8 +1,10 @@
 # Patch Render Benchmark
 
-This benchmark collects paper-facing rendering metrics for the patch editor. It measures topology rendering throughput and frame-time stability, not edit-operation latency.
+This benchmark measures topology rendering throughput and frame-time stability in the patch editor. It is implemented in `client/src/src/template/patch/benchmark/renderBenchmarkRunner.ts`.
 
 ## Activation
+
+Start the backend and Web client as described in the [README](../../README.md). Use a patch and data that you have permission to measure and share.
 
 Open a patch in edit mode and add URL parameters to the web client:
 
@@ -40,6 +42,8 @@ The benchmark arms itself when the patch editor is mounted, but it does not star
 
 The exported JSON includes:
 
+- `benchmark` (`patch-render`)
+- `startedAt`
 - `workload`
 - `label`
 - `patchId`
@@ -58,6 +62,8 @@ The exported JSON includes:
 - `summary.framesOver16Ms`
 - `summary.framesOver33Ms`
 - `summary.framesOver50Ms`
+- `summary.sampleCount`, `summary.frameCount`, and `summary.measuredTimeMs`
+- mean/min/max frame times and mean/p95/p99 render durations
 - raw `samples`
 
 ## Suggested Paper Figures
@@ -80,7 +86,9 @@ Repeat each data point at least five times and report mean plus standard deviati
 
 # Patch Edit Latency Benchmark
 
-This benchmark collects paper-facing operation latency metrics for the patch editor. It measures core edit-operation responsiveness after the active patch has already loaded and rendered. It does not measure initial patch loading, camera navigation FPS, full scenario assembly, or simulation runtime.
+This benchmark measures core edit-operation responsiveness after the active patch has loaded and rendered. It is implemented in `client/src/src/template/patch/benchmark/editLatencyBenchmarkRunner.ts`. Initial loading, camera navigation FPS, assembly, and simulation runtime are outside the measurement.
+
+Run it on a disposable patch: trials perform real edits against the active topology, and failed or interrupted paired operations can leave changes behind. Save any work first.
 
 ## Activation
 
@@ -100,7 +108,7 @@ benchmarkLabel=500k-edit-run-1
 benchmarkExport=both
 ```
 
-`benchmarkOperation` accepts `all`, `pick`, `subdivide`, `merge`, `delete`, or `recover`.
+`benchmarkOperation` accepts `all`, `pick`, `subdivide`, `merge`, `delete`, or `recover`. The defaults are 30 trials, 3 warm-up frames, and `all`. Each trial of `all` runs the five operations in that order.
 
 `benchmarkExport` accepts `console`, `download`, or `both`.
 
@@ -135,7 +143,7 @@ The exported JSON includes:
 - `viewport.devicePixelRatio`
 - `environment.userAgent`
 - raw per-operation `trials`
-- per-operation `summary`
+- per-operation `summary` (successful/failed trial counts and mean/median/p95/p99/min/max latency)
 
 Each trial records:
 
@@ -156,4 +164,17 @@ Use median and p95 operation latency:
 | Cells | Pick p50 | Pick p95 | Subdivide p50 | Subdivide p95 | Merge p50 | Merge p95 | Delete p50 | Delete p95 | Recover p50 | Recover p95 |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 
-Interpret medium and large patch scales as the practical interactive operating range. Treat ten-million-cell results as stress cases, consistent with the navigation rendering benchmark.
+Choose cell counts that represent the intended workload and report stress cases separately. An interactive operating range must be established from measured latency and failure counts; the benchmark does not establish one by itself.
+
+## Analysis scripts
+
+Save downloaded JSON files in separate directories for the two benchmark types. From the repository root, run:
+
+```bash
+python3 scripts/analyze_patch_render_benchmarks.py --input-dir output/render --output-dir output/render-summary
+python3 scripts/analyze_patch_edit_benchmarks.py --input-dir output/edit --output-dir output/edit-summary
+```
+
+The input directories must contain the corresponding exported JSON files. The scripts write `patch_render_summary.csv` / `patch_render_analysis.md` and `patch_edit_summary.csv` / `patch_edit_analysis.md`, respectively. Override both paths explicitly; their built-in defaults point to local `docs/paper/` directories, which are not supplied with the repository.
+
+The JSON, generated summaries, labels, and browser metadata may identify a local environment or dataset. Check permissions and remove identifying details before publishing benchmark artifacts.
