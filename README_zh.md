@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Gridmen 是一个交互式生成多分辨率笛卡尔网格（MRCG）的工具，供研究人员和工程人员为二维水动力洪水模拟准备网格。网格由基础网格及有序的矢量干预组成。装配合并 patch，并将地形和地类采样一次写入基础网格；其他情景的网格从该基础网格派生，无须重复装配或采样基础属性。它们复用相同的基础二进制文件，使用同一基础网格时，干预范围以外的计算单元在各情景间保留逐位相同的属性。`crest` 干预还会读取 DEM 的局部窗口。Gridmen 将与求解器无关的单元-边拓扑和属性导出为 `ne.txt` 和 `ns.txt`，可供独立项目 nh-flood-2d 等求解器使用。
+Gridmen 是一个供研究人员和工程人员创建、编辑多分辨率笛卡尔网格（MRCG）的工具，用于为二维洪水模拟准备网格。网格由基础网格及有序的矢量干预组成。装配合并 patch，并将地形和地类采样一次写入基础网格；其他情景的网格从该基础网格派生，无须重复装配或采样基础属性。它们复用相同的基础二进制文件，使用同一基础网格时，干预范围以外的计算单元在各情景间保留逐位相同的属性。Gridmen 将与求解器无关的单元-边拓扑和属性导出为 `ne.txt` 和 `ns.txt`，可供独立项目 nh-flood-2d 等求解器使用。
 
 [观看演示视频](https://doi.org/10.6084/m9.figshare.32677584)。
 
@@ -23,7 +23,7 @@ Gridmen 是一个交互式生成多分辨率笛卡尔网格（MRCG）的工具�
 5. 为另一个情景选择已有网格作为 **Base Grid**，并设置新的有序矢量干预。派生复用其基础属性，不继承其已经干预的求解器输入。复用使用硬链接，因此基础文件必须位于同一文件系统。`crest` 还要求记录的 DEM 仍可访问。
 6. 使用 **Export Grid** 下载网格归档。将 `ne.txt` 与 `ns.txt` 提供给兼容的求解器，并在该求解器中配置模拟。
 
-用户需自行提供具有适当使用权的 DEM、地类和矢量数据。本仓库不分发提供方限制公开的海床数据，也不分发由其派生的网格或数值。
+用户需自行提供具有适当使用权的 DEM、地类和矢量数据。
 
 ## 快速开始
 
@@ -125,21 +125,27 @@ npm run build
 
 基础二进制文件描述基础网格；情景的高程与地类变化写在 `ne.txt` 和 `ns.txt` 中。元数据与报告可能包含本机源路径，分享前需审查导出归档及数据权限。
 
+## 开发结构
+
+渲染端使用 React、TypeScript 和 Vite。可复用的界面组件位于 `client/src/src/components/ui/`，采用 shadcn/ui 与 Radix UI，样式使用 Tailwind CSS，图标使用 Lucide React。地图视图使用 Mapbox GL JS；Three.js 与 `3d-tiles-renderer` 代码位于 `client/src/src/threejs/`。
+
+资源模板位于 `client/src/src/template/`，视图实现位于 `client/src/src/views/`，网格编辑逻辑位于 `client/src/src/core/grid/`。资源树、标签页和导航组件位于 `client/src/src/components/`。Zustand 状态定义在 `client/src/src/store/storeSet.ts`，其中设置持久化到 localStorage；`client/src/src/store/store.ts` 另提供用于临时状态的内存存储。服务端通过 FastAPI 提供网格操作。
+
 ## 仓库结构与许可证
 
 ```text
-client/electron/      Electron 桌面端
-client/src/           React/Vite 渲染端及其 package.json
-server/main.py        服务端启动入口
-server/src/           FastAPI 接口、数据结构与配置
-server/templates/     资源生命周期、装配与干预
-server/crms/          资源实现
-server/icrms/         资源接口
-server/tests/         服务端测试
-scripts/              安装、启动、诊断与基准分析
-docs/benchmark/       Patch 渲染与编辑延迟测量说明
-templates/            生成的渲染端构建产物（忽略）
-server/resource/      本机资源（忽略）
+client/electron/      Electron shell
+client/src/           React/Vite renderer and its package.json
+server/main.py        Backend launch entry point
+server/src/           FastAPI endpoints, schemas, and settings
+server/templates/     Resource lifecycle hooks, assembly, interventions
+server/crms/          Resource implementations
+server/icrms/         Resource interfaces
+server/tests/         Backend tests
+scripts/              Setup, launch, diagnostics, benchmark analysis
+docs/benchmark/       Patch rendering and edit-latency measurement guide
+templates/            Generated renderer build (ignored)
+server/resource/      Local resources (ignored)
 ```
 
 客户端和服务端包含 [MIT 许可证文本](client/LICENSE)（[服务端](server/LICENSE)）。包清单目前声明 ISC，与这些许可证文本不一致。

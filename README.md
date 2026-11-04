@@ -2,7 +2,7 @@
 
 English | [中文](README_zh.md)
 
-Gridmen is an interactive tool for researchers and practitioners preparing multi-resolution Cartesian grids (MRCGs) for two-dimensional hydrodynamic flood simulation. A grid consists of a base grid and ordered vector interventions. Assembly combines patches and samples terrain and LULC once into the base grid; other scenario grids derive from that base without repeating assembly or base-attribute sampling. They reuse identical base binaries, and computational cells outside the interventions retain bitwise-identical attributes across scenarios using the same base. The `crest` intervention additionally reads local DEM windows. Gridmen exports solver-independent cell–edge topology and attributes as `ne.txt` and `ns.txt`, usable by solvers such as the separate nh-flood-2d project.
+Gridmen is a tool for researchers and engineers to create and edit multi-resolution Cartesian grids (MRCGs) for two-dimensional flood simulation. A grid consists of a base grid and ordered vector interventions. Assembly combines patches and samples terrain and LULC once into the base grid; other scenario grids derive from that base without repeating assembly or base-attribute sampling. They reuse identical base binaries, and computational cells outside the interventions retain bitwise-identical attributes across scenarios using the same base. Gridmen exports solver-independent cell–edge topology and attributes as `ne.txt` and `ns.txt`, usable by solvers such as the separate nh-flood-2d project.
 
 [Watch the demonstration video](https://doi.org/10.6084/m9.figshare.32677584).
 
@@ -23,7 +23,7 @@ A typical workflow is:
 5. For another scenario, select an existing grid as **Base Grid** and choose the new ordered vector interventions. Derivation reuses its base attributes, without inheriting its intervened solver input. The base files must be on the same filesystem because reuse uses hard links. `crest` also requires the recorded DEM to remain accessible.
 6. Use **Export Grid** to download the grid archive. Supply `ne.txt` and `ns.txt` to a compatible solver and configure the simulation in that solver.
 
-Source DEM, LULC, and vector data must be supplied with appropriate usage rights. Provider-restricted seabed data and grids or numerical values derived from it are not distributed here.
+Source DEM, LULC, and vector data must be supplied with appropriate usage rights.
 
 ## Quick start
 
@@ -124,6 +124,12 @@ The base sampling rule reads band 1 at the cell centre or edge midpoint. Outside
 | `build_report.json` | Assembly or base-grid reference, cell/edge counts, intervention selection counts, and stage timings. |
 
 Base binaries describe the base grid; scenario elevation and LULC changes appear in `ne.txt` and `ns.txt`. Metadata and reports may contain local source paths; review exported archives and data permissions before sharing them.
+
+## Development structure
+
+The renderer uses React and TypeScript with Vite. Its reusable UI components are in `client/src/src/components/ui/`, using shadcn/ui and Radix UI, with Tailwind CSS for styling and Lucide React for icons. Map views use Mapbox GL JS; the Three.js and `3d-tiles-renderer` code is in `client/src/src/threejs/`.
+
+Resource templates are in `client/src/src/template/`, view implementations in `client/src/src/views/`, and grid-editing logic in `client/src/src/core/grid/`. The resource tree, tabs, and navigation components are in `client/src/src/components/`. Zustand stores are defined in `client/src/src/store/storeSet.ts`, including settings persisted in localStorage; `client/src/src/store/store.ts` provides a separate in-memory store for transient state. The backend serves grid operations through FastAPI.
 
 ## Repository and license
 
