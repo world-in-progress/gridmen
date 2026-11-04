@@ -148,4 +148,4 @@ templates/            Generated renderer build (ignored)
 server/resource/      Local resources (ignored)
 ```
 
-客户端和服务端包含 [MIT 许可证文本](client/LICENSE)（[服务端](server/LICENSE)）。包清单目前声明 ISC，与这些许可证文本不一致。
+Gridmen 以 [MIT 许可证](LICENSE)发布。

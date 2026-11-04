@@ -148,4 +148,4 @@ templates/            Generated renderer build (ignored)
 server/resource/      Local resources (ignored)
 ```
 
-The client and server include [MIT license texts](client/LICENSE) ([server](server/LICENSE)). Package manifests currently declare ISC; this metadata is inconsistent with those license texts.
+Gridmen is released under the [MIT License](LICENSE).
