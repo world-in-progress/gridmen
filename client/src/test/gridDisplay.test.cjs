@@ -31,6 +31,10 @@ const colorContract = {
     OUTLINE_DARKENING: 0.65,
     elevationColor: () => [0.23, 0.32, 0.41],
 }
+const mathContract = { outlineCoverage: (s, c) => {
+    const u = Math.min(1, s / c)
+    return 1 - (1 - u) ** 2
+} }
 const deferred = () => {
     let resolve, reject
     const promise = new Promise((a, b) => { resolve = a; reject = b })
@@ -66,26 +70,38 @@ test('map readiness removes both map events on ready and abort', async () => {
     assert.equal(map.listenerCount(), 0)
 })
 
-test('API uses encoded node keys, exact display request bodies, HTTP errors and abort signals', async () => {
+test('API uses encoded node keys, revision block paths, HTTP errors and abort signals', async () => {
     const calls = []
-    let response = { ok: true, json: async () => ({ actual: true }) }
+    const block = { blockLayer: 3, x: -2, y: 5, displayLayer: 1 }
+    const meta = { revision: 'rev/a b', cellCount: 3 }
+    const payload = new ArrayBuffer(8)
+    let response = { ok: true, json: async () => ({ actual: true }), arrayBuffer: async () => payload }
+    const decoded = []
     const api = load('template/api/grid.ts', {
         './utils': { decodeNodeInfo: () => ({ address: 'http://local.test', nodeKey: 'a/b grid' }) },
         '@/i18n/gridDisplay': i18n,
+        '@/core/grid/displayWire': {
+            decodeDisplayBlock: (buffer, requested, metadata) => {
+                decoded.push([buffer, requested, metadata])
+                return { key: 'block', bounds: [0, 0, 1, 1], cells: [], fields: [] }
+            },
+            displayBlockView: (chunks, cellCount) => ({ chunks, cellCount }),
+        },
     }, { fetch: async (url, options) => { calls.push({ url, options }); return response } })
     const signal = new AbortController().signal
     assert.equal((await api.getGridDisplayMeta('node', signal)).actual, true)
     assert.equal(calls[0].url, 'http://local.test/api/grid/a%2Fb%20grid/display/meta')
     assert.equal(calls[0].options.signal, signal)
-    await api.queryGridDisplay('node', [1, 2, 3, 4], 2.5, signal)
-    assert.deepEqual(JSON.parse(calls[1].options.body), { bounds: [1, 2, 3, 4], metersPerPixel: 2.5 })
-    assert.equal(calls[1].options.method, 'POST')
+    assert.equal((await api.queryGridDisplayBlocks('node', meta, [block], signal)).cellCount, 3)
+    assert.equal(calls[1].url, 'http://local.test/api/grid/a%2Fb%20grid/display/nodes/rev%2Fa%20b/3/-2/5/1')
+    assert.equal(calls[1].options.method, undefined)
     assert.equal(calls[1].options.signal, signal)
+    assert.deepEqual(decoded, [[payload, block, meta]])
     await api.inspectGrid('node', -10.5, 9, signal)
     assert.match(calls[2].url, /display\/inspect\?x=-10.5&y=9$/)
     response = { ok: false, status: 422, text: async () => 'corrupt topology' }
     await assert.rejects(api.getGridDisplayMeta('node'), /HTTP 422.*corrupt topology/)
-    await assert.rejects(api.queryGridDisplay('node', [1, 2, 3, 4], 1), /corrupt topology/)
+    await assert.rejects(api.queryGridDisplayBlocks('node', meta, [block]), /corrupt topology/)
     await assert.rejects(api.inspectGrid('node', 1, 2), /corrupt topology/)
     assert.equal(api.getGridBlockMeta, undefined)
     assert.equal(typeof api.exportGridTopo, 'function')
@@ -93,7 +109,7 @@ test('API uses encoded node keys, exact display request bodies, HTTP errors and 
 
 function sessionDependencies() {
     const map = new TestMap()
-    const meta = { bounds: [0, 0, 10, 10], epsg: 4326, grid_info: [[1, 1]], subdivide_rules: [[2, 2]] }
+    const meta = { revision: 'test', displayLayers: [], bounds: [0, 0, 10, 10], epsg: 4326, grid_info: [[1, 1]], subdivide_rules: [[2, 2]] }
     const counts = { created: 0, removed: 0, source: 0, core: 0, unregister: 0, link: 0, unlink: 0 }
     const layer = { setReadOnlySource: async source => { layer.source = source; counts.source++ } }
     const manager = {
@@ -121,7 +137,7 @@ test('grid tabs share one source, propagate viewport errors and cancel requests 
     let observedSignal
     ctx.dependencies['../api/grid'] = {
         getGridDisplayMeta: async () => ctx.meta,
-        queryGridDisplay: async (_node, _bounds, _resolution, signal) => {
+        queryGridDisplayBlocks: async (_node, _meta, _blocks, signal) => {
             observedSignal = signal
             if (fail) throw new Error('broken viewport')
             return { chunks: [], cellCount: 0 }
@@ -139,11 +155,11 @@ test('grid tabs share one source, propagate viewport errors and cancel requests 
     let notifications = 0
     first.listeners.add(() => notifications++)
     fail = true
-    await assert.rejects(ctx.layer.source.loadView([0, 0, 1, 1], 1, new AbortController().signal), /broken viewport/)
+    await assert.rejects(ctx.layer.source.loadBlocks([{ blockLayer: 0, x: 0, y: 0, displayLayer: 0 }], new AbortController().signal), /broken viewport/)
     assert.match(first.error, /broken viewport/)
     assert.equal(notifications, 1)
     fail = false
-    await ctx.layer.source.loadView([0, 0, 1, 1], 1, new AbortController().signal)
+    await ctx.layer.source.loadBlocks([{ blockLayer: 0, x: 0, y: 0, displayLayer: 0 }], new AbortController().signal)
     assert.equal(first.error, null)
     assert.equal(notifications, 2)
     node.context.__cleanup.topology()
@@ -236,6 +252,7 @@ test('display statistics skip identical notifications and remove their listener'
     }
     const Panel = load('components/gridDisplay/GridDisplayPanel.tsx', {
         '@/core/grid/displayColors': colorContract,
+        '@/core/grid/displayMath': mathContract,
         react: {
             useEffect: effect => effects.push(effect),
             useState: initial => { const index = stateIndex++; return [typeof initial === 'function' ? initial() : initial, value => updates.push({ index, value })] },
@@ -419,6 +436,7 @@ function renderLegend(attribute, props = {}, colors = colorContract, language = 
     palette.set([90, 91, 92], 255 * 3)
     const Panel = load('components/gridDisplay/GridDisplayPanel.tsx', {
         '@/core/grid/displayColors': colors,
+        '@/core/grid/displayMath': mathContract,
         react: { useEffect: () => {}, useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
         '@/i18n/gridDisplay': { useGridDisplayTranslation: () => ({ t: translation.gridDisplayI18n.t.bind(translation.gridDisplayI18n) }) },
         './useGridInspection': { useGridInspection: () => ({ inspection: null, loading: false, error: null }) },
@@ -460,7 +478,7 @@ test('elevation legend consumes shared endpoints/function, including zero-width 
 
 test('outline legend multiplies white by the shared darkening constant', () => {
     const html = renderLegend('level')
-    for (const coverage of [0.25, 0.5, 1]) {
+    for (const coverage of [0.234375, 0.4375, 1]) {
         const value = 255 * (1 - colorContract.OUTLINE_DARKENING * coverage)
         assert.ok(html.includes(`rgb(${value}, ${value}, ${value})`))
     }

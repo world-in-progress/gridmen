@@ -46,27 +46,28 @@ void main() {
         float category = displayAttribute == 0 ? sampleValues.x : sampleValues.z;
         color = texelFetch(paletteTexture, ivec2(int(mod(category, 256.0)), 0), 0).rgb;
     }
-    float coverage = min(1.0, 2.0 * metersPerPixel / sampleValues.w);
+    float u = min(1.0, metersPerPixel / sampleValues.w);
+    float coverage = 1.0 - (1.0 - u) * (1.0 - u);
     if (sampleFlags.x > 0.0) {
-        // Native schema dimensions of this field sample, independent of occupancy.
-        // Recover the local CRS footprint of a CSS pixel even at pitch/rotation.
+        // Grid distance per CSS pixel, from this four-corner node's raster footprint.
         vec2 dx = dFdx(uv) * sampleFlags.xy * devicePixelRatio;
         vec2 dy = dFdy(uv) * sampleFlags.xy * devicePixelRatio;
-        float trace = dot(dx, dx) + dot(dy, dy);
-        float determinant = dx.x * dy.y - dx.y * dy.x;
-        float localScale = sqrt(0.5 * (trace + sqrt(max(0.0, trace * trace - 4.0 * determinant * determinant))));
-        coverage = min(1.0, 2.0 * localScale / sampleValues.w);
+        float s = max(length(dx), length(dy));
+        u = min(1.0, s / sampleValues.w);
+        coverage = 1.0 - (1.0 - u) * (1.0 - u);
     } else {
-        // Each neighbor supplies half of a one-CSS-pixel edge. A field never
-        // uses this UV boundary, so summary bins cannot become fake cells.
-        vec2 cssDerivative = fwidth(uv) * devicePixelRatio;
+        vec2 dx = dFdx(uv);
+        vec2 dy = dFdy(uv);
+        vec2 cssDerivative = vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y))) * devicePixelRatio;
         float pixels = 1.0 / max(cssDerivative.x, cssDerivative.y);
         vec2 edgeDistance = min(uv, 1.0 - uv) / max(cssDerivative, vec2(0.0000001));
-        float outline = 1.0 - smoothstep(0.0, 1.0, min(edgeDistance.x, edgeDistance.y));
-        float realCoverage = min(1.0, 2.0 / max(pixels, 0.00001));
+        // Box-filter a one-CSS-pixel centered line against the actual device pixel.
+        vec2 line = clamp((vec2(0.5 + 0.5 / devicePixelRatio) - edgeDistance) * devicePixelRatio, 0.0, 1.0);
+        float outline = 1.0 - (1.0 - line.x) * (1.0 - line.y);
+        u = min(1.0, 1.0 / pixels);
+        float realCoverage = 1.0 - (1.0 - u) * (1.0 - u);
         coverage = mix(realCoverage, outline, smoothstep(CELL_THRESHOLD, FULL_OUTLINE_THRESHOLD, pixels));
         if (sampleFlags.y > 0.5) color = mix(color, vec3(0.75, 0.20, 0.16), 0.7);
-
     }
     color = mix(color, vec3(1.0, 0.78, 0.20), 0.7 * sampleFlags.z);
     color *= 1.0 - outlineDarkening * coverage;

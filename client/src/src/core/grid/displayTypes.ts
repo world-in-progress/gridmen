@@ -3,7 +3,30 @@ export type Bounds = [number, number, number, number]
 
 export type DisplayAttribute = 'level' | 'elevation' | 'landClass'
 
+export interface DisplayLayer {
+    width: number
+    height: number
+    x0: number
+    y0: number
+    nx: number
+    ny: number
+    nativeLevel: number | null
+    /** A dyadic interval resets at each native parent; the last strip is clipped. */
+    xLayout: [number, number] | null
+    yLayout: [number, number] | null
+}
+
+/** A complete grid-coordinate node, sampled at a finer display layer. */
+export interface DisplayBlock {
+    blockLayer: number
+    x: number
+    y: number
+    displayLayer: number
+}
+
 export interface GridDisplayMeta {
+    revision: string
+    displayLayers: DisplayLayer[]
     epsg: number
     bounds: Bounds
     grid_info: [number, number][]
@@ -58,7 +81,7 @@ export interface GridInspection {
 
 export interface ReadOnlyGridSource {
     meta: GridDisplayMeta
-    loadView(bounds: Bounds, metersPerPixel: number, signal: AbortSignal): Promise<GridDisplayView>
+    loadBlocks(blocks: DisplayBlock[], signal: AbortSignal): Promise<GridDisplayView>
     inspect(x: number, y: number): Promise<GridInspection>
 }
 

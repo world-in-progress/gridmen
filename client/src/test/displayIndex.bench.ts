@@ -19,16 +19,18 @@ const index = new DisplayIndex([0, 0, 1, 1], {
 })
 let id = 1
 const buildStart = performance.now()
-for (let y = 0; y < side; y++) {
-    for (let x = 0; x < side; x++) {
-        if ((x + y) % 2 === 0) {
-            index.upsert({
-                id: id++, bounds: [x / side, y / side, (x + 1) / side, (y + 1) / side],
-                level: 1, elevation: 10, landClass: 2,
-            })
+index.load((function* () {
+    for (let y = 0; y < side; y++) {
+        for (let x = 0; x < side; x++) {
+            if ((x + y) % 2 === 0) {
+                yield {
+                    id: id++, bounds: [x / side, y / side, (x + 1) / side, (y + 1) / side] as [number, number, number, number],
+                    level: 1, elevation: 10, landClass: 2,
+                }
+            }
         }
     }
-}
+})())
 const buildMs = performance.now() - buildStart
 global.gc()
 const heapMiB = (process.memoryUsage().heapUsed - beforeHeap) / 1048576
@@ -37,8 +39,11 @@ const view = index.query([0, 0, 1, 1], 1)
 const queryMs = performance.now() - queryStart
 const field = view.chunks.flatMap(chunk => chunk.fields).find(item =>
     item.bounds[0] === 0 && item.bounds[1] === 0)
-if (field?.occupiedFraction !== 0.5) throw new Error('Checkerboard area summary failed')
+const occupiedArea = field && field.occupiedFraction *
+    (field.bounds[2] - field.bounds[0]) * (field.bounds[3] - field.bounds[1])
+if (occupiedArea !== 0.5) throw new Error('Checkerboard area summary failed')
 
 console.log(JSON.stringify({
     cells: id - 1, buildMs, queryMs, heapMiB, queryVisits: index.queryVisits,
+    displayNodes: view.chunks.reduce((sum, chunk) => sum + chunk.cells.length + chunk.fields.length, 0),
 }))

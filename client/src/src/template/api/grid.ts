@@ -1,32 +1,34 @@
 import { decodeNodeInfo } from './utils'
-import type { Bounds, GridDisplayMeta, GridDisplayView, GridInspection } from '@/core/grid/displayTypes'
+import type { DisplayBlock, GridDisplayMeta, GridDisplayView, GridInspection } from '@/core/grid/displayTypes'
 import type { BaseResponse } from './types'
+import { decodeDisplayBlock, displayBlockView } from '@/core/grid/displayWire'
 import { gridDisplayI18n } from '@/i18n/gridDisplay'
 
 const API_PREFIX = `/api/grid`
-async function requestGridDisplay<T>(nodeInfo: string, path: string, options?: RequestInit): Promise<T> {
+async function requestGridDisplay(nodeInfo: string, path: string, options?: RequestInit): Promise<Response> {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
     const response = await fetch(`${address}${API_PREFIX}/${encodeURIComponent(nodeKey)}/display/${path}`, options)
     if (!response.ok) {
         const detail = await response.text()
         throw new Error(gridDisplayI18n.t('httpError', { path, status: response.status, detail: detail ? ` — ${detail}` : '' }))
     }
-    return response.json()
+    return response
 }
 
-export const getGridDisplayMeta = (nodeInfo: string, signal?: AbortSignal): Promise<GridDisplayMeta> =>
-    requestGridDisplay(nodeInfo, 'meta', { signal })
+export const getGridDisplayMeta = async (nodeInfo: string, signal?: AbortSignal): Promise<GridDisplayMeta> =>
+    (await requestGridDisplay(nodeInfo, 'meta', { signal })).json()
 
-export const queryGridDisplay = (nodeInfo: string, bounds: Bounds, metersPerPixel: number, signal?: AbortSignal): Promise<GridDisplayView> =>
-    requestGridDisplay(nodeInfo, 'query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bounds, metersPerPixel }),
-        signal,
-    })
+export async function queryGridDisplayBlocks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal?: AbortSignal): Promise<GridDisplayView> {
+    const chunks = await Promise.all(blocks.map(async block => {
+        const path = `nodes/${encodeURIComponent(meta.revision)}/${block.blockLayer}/${block.x}/${block.y}/${block.displayLayer}`
+        const response = await requestGridDisplay(nodeInfo, path, { signal })
+        return decodeDisplayBlock(await response.arrayBuffer(), block, meta)
+    }))
+    return displayBlockView(chunks, meta.cellCount)
+}
 
-export const inspectGrid = (nodeInfo: string, x: number, y: number, signal?: AbortSignal): Promise<GridInspection> =>
-    requestGridDisplay(nodeInfo, `inspect?${new URLSearchParams({ x: String(x), y: String(y) })}`, { signal })
+export const inspectGrid = async (nodeInfo: string, x: number, y: number, signal?: AbortSignal): Promise<GridInspection> =>
+    (await requestGridDisplay(nodeInfo, `inspect?${new URLSearchParams({ x: String(x), y: String(y) })}`, { signal })).json()
 
 export const exportGridTopo = async (nodeInfo: string, targetPath: string): Promise<BaseResponse> => {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)

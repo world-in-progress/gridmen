@@ -6,32 +6,33 @@ built once per source revision; viewport queries only visit intersecting nodes.
 """
 from __future__ import annotations
 
-from collections import OrderedDict
-from contextlib import ExitStack, closing
 import errno
 import hashlib
 import json
 import math
 import mmap
 import os
-from pathlib import Path
 import sqlite3
 import struct
 import sys
 import tempfile
 import threading
 import time
+from collections import defaultdict
+from contextlib import ExitStack, closing
+from itertools import pairwise
+from pathlib import Path
 
 import numpy as np
-from pydantic_core import to_json
 
 FILES = ('grid.meta.json', 'cell_topo.bin', 'edge_topo.bin', 'ne.txt', 'ns.txt')
-VERSION = 3
+VERSION = 7
 TILE = 64
 CELL = struct.Struct('!QdddddBBBBB')
 EDGE = struct.Struct('!IQBddddQQdi')
+DISPLAY_RECORD = struct.Struct('<Q7dII')
 NODE = np.dtype([('id', '<u8'), ('area', '<f8'), ('z', '<f8'),
-                 ('min', '<f8'), ('max', '<f8'), ('level', '<u2'), ('land', 'u1')])
+                 ('min', '<f8'), ('level', '<u2'), ('land', 'u1')])
 _LOCK = threading.Lock()
 
 
@@ -75,13 +76,28 @@ def checked_meta(source):
     return meta
 
 
-class Layer:
-    """Sparse tile directory over one growable memory-mapped file per layer."""
-    def __init__(self, directory, number, spec, mode='r', tiles=(), dtype=NODE):
-        self.path, self.mode, self.dtype = directory / f'layer-{number}.bin', mode, np.dtype(dtype)
+class Lattice:
+    """Grid coordinates shared by stored layers and their implicit ancestors."""
+    def __init__(self, spec):
         self.spec = spec
         self.w, self.h, self.x0, self.y0, self.nx, self.ny, self.level = spec[:7]
         self.layout = spec[7] if len(spec) == 8 else (None,None)
+
+    def bounds(self, x, y, origin):
+        x0,x1 = _axis_bounds(x,self.w,self.layout[0])
+        y0,y1 = _axis_bounds(y,self.h,self.layout[1])
+        return [origin[0]+x0,origin[1]+y0,origin[0]+x1,origin[1]+y1]
+
+    def locate(self,x,y,origin):
+        return (_axis_index(x-origin[0],self.w,self.layout[0]),
+                _axis_index(y-origin[1],self.h,self.layout[1]))
+
+
+class Layer(Lattice):
+    """Sparse tile directory over one growable memory-mapped file per layer."""
+    def __init__(self, directory, number, spec, mode='r', tiles=(), dtype=NODE):
+        super().__init__(spec)
+        self.path, self.mode, self.dtype = directory / f'layer-{number}.bin', mode, np.dtype(dtype)
         self.tiles = {(x,y):slot for x,y,slot in tiles}
         self.mapping = None
         self.tile_bytes = TILE*TILE*self.dtype.itemsize
@@ -115,39 +131,12 @@ class Layer:
         return np.ndarray((TILE,TILE),dtype=self.dtype,buffer=self.mapping,
                           offset=self.tiles[key]*self.tile_bytes)
 
-    def bounds(self, x, y, origin):
-        x0,x1 = _axis_bounds(x,self.w,self.layout[0])
-        y0,y1 = _axis_bounds(y,self.h,self.layout[1])
-        return [origin[0]+x0,origin[1]+y0,origin[0]+x1,origin[1]+y1]
-
-    def locate(self,x,y,origin):
-        return (_axis_index(x-origin[0],self.w,self.layout[0]),
-                _axis_index(y-origin[1],self.h,self.layout[1]))
-
     def get(self, x, y):
         if self.x0 <= x < self.x0 + self.nx and self.y0 <= y < self.y0 + self.ny:
             tile = self.tile(x//TILE,y//TILE)
             # A copied scalar survives growth of a writable layer mapping.
             return None if tile is None else tile[y%TILE,x%TILE].copy()
         return None
-
-    def gather(self,x,y):
-        """Read a query frontier with one mapped-array operation per tile."""
-        result = np.zeros(len(x),dtype=self.dtype)
-        tx,ty = x//TILE,y//TILE
-        order = np.lexsort((tx,ty))
-        breaks = np.r_[0,np.flatnonzero((np.diff(tx[order]) != 0) | (np.diff(ty[order]) != 0))+1,len(order)]
-        for start,end in zip(breaks[:-1],breaks[1:]):
-            ids = order[start:end]
-            if not len(ids):
-                continue
-            tile = self.tile(tx[ids[0]],ty[ids[0]])
-            if tile is not None:
-                valid = ((x[ids] >= self.x0) & (x[ids] < self.x0+self.nx)
-                         & (y[ids] >= self.y0) & (y[ids] < self.y0+self.ny))
-                ids = ids[valid]
-                result[ids] = tile[y[ids]%TILE,x[ids]%TILE]
-        return result
 
     def put(self,x,y,value):
         self.tile(x//TILE,y//TILE,True)[y%TILE,x%TILE] = value
@@ -168,11 +157,27 @@ def _axis_bounds(index,size,layout):
 
 def _axis_index(value,size,layout):
     if layout is None:
-        return np.floor(np.asarray(value)/size).astype(np.int64)
+        return np.floor(_lattice_integer(np.asarray(value)/size)).astype(np.int64)
     period,count = layout
-    group = np.floor(np.asarray(value)/period).astype(np.int64)
-    local = np.floor((value-group*period)/size).astype(np.int64)
+    group = np.floor(_lattice_integer(np.asarray(value)/period)).astype(np.int64)
+    local = np.floor(_lattice_integer((value-group*period)/size)).astype(np.int64)
     return group*count+np.minimum(local,count-1)
+
+
+def _lattice_integer(value):
+    """Match client lattice-line roundoff; original half-open bounds stay exact."""
+    below = np.floor(value)
+    nearest = below+(value-below >= .5)  # JavaScript Math.round, including half ties.
+    return np.where(np.abs(value-nearest) <= 4*np.finfo(float).eps*np.maximum(1,np.abs(value)),
+                    nearest,value)
+
+
+def _axis_end(value,size,layout):
+    if layout is None:
+        return int(np.ceil(_lattice_integer(value/size)))
+    period,count = layout
+    group = int(np.floor(_lattice_integer(value/period)))
+    return group*count+min(count,int(np.ceil(_lattice_integer((value-group*period)/size))))
 
 
 def _groups(child,parent,tx,ty,occupied):
@@ -200,41 +205,223 @@ def _rollup(child,parent):
                 np.add.at(target[field],(dy,dx),source[field][sy,sx])
             target['min'][dy,dx] = np.where(target['min'][dy,dx] > 0,target['min'][dy,dx],np.inf)
             np.minimum.at(target['min'],(dy,dx),source['min'][sy,sx])
-            for field in ('max','level'):
-                np.maximum.at(target[field],(dy,dx),source[field][sy,sx])
+            np.maximum.at(target['level'],(dy,dx),source['level'][sy,sx])
             b = parent.bounds(dx+ux*TILE,dy+uy*TILE,(0,0))
-            require(np.all(target['area'][dy,dx] <= (b[2]-b[0])*(b[3]-b[1])+1e-7), 'Overlapping cells')
+            width = np.asarray(b[2], dtype='<f8')-np.asarray(b[0], dtype='<f8')
+            height = np.asarray(b[3], dtype='<f8')-np.asarray(b[1], dtype='<f8')
+            require(np.all(target['area'][dy,dx] <= width*height+1e-7), 'Overlapping cells')
 
 
-def _categories(directory,layers,categories):
-    # Preserve full per-category areas through each reduction; winners alone
-    # are not sufficient statistics for categorical area aggregation.
-    hist = [Layer(directory,f'hist-{i}',l.spec,'w+',dtype='<f8') for i,l in enumerate(layers)]
-    best = [Layer(directory,f'best-{i}',l.spec,'w+',dtype='<f8') for i,l in enumerate(layers)]
-    try:
-        for category in sorted(categories):
-            for layer,values in zip(layers,hist):
-                for tx,ty in sorted(layer.tiles):
-                    node = layer.tile(tx,ty)
-                    values.tile(tx,ty,True)[:] = np.where((node['id'] > 0) & (node['land'] == category),node['area'],0)
-            for i,(child,parent) in enumerate(zip(layers,layers[1:])):
-                for tx,ty in sorted(hist[i].tiles):
-                    source = hist[i].tile(tx,ty)
-                    for ux,uy,dy,dx,sy,sx in _groups(child,parent,tx,ty,source > 0):
-                        np.add.at(hist[i+1].tile(ux,uy,True),(dy,dx),source[sy,sx])
-            for layer,values,winners in zip(layers,hist,best):
-                for tx,ty in sorted(layer.tiles):
-                    node,areas,maximum = layer.tile(tx,ty),values.tile(tx,ty),winners.tile(tx,ty,True)
-                    better = (areas > maximum) & (node['id'] == 0)
-                    node['land'][better] = category
-                    maximum[better] = areas[better]
-    finally:
-        for layer in hist+best:
-            layer.close()
-        for path in directory.glob('layer-hist-*.bin'):
-            path.unlink()
-        for path in directory.glob('layer-best-*.bin'):
-            path.unlink()
+def _histograms(directory, layers):
+    """Persist sparse, exact class weights in finest-lattice area units.
+
+    Native schema ratios are validated integers. Each original contributes an
+    integer number of finest cells, so equal class areas tie exactly even when
+    the schema sizes (such as 0.3 and 0.1) are not exact binary floats. Counts
+    use Python integers and hexadecimal persistence without a numeric cap.
+    """
+    native = sorted((layer for layer in layers if layer.level > 0),
+                    key=lambda layer: layer.level, reverse=True)
+    units = {native[0].level: 1}
+    for child, parent in pairwise(native):
+        units[parent.level] = (units[child.level]
+                               * round(parent.w/child.w) * round(parent.h/child.h))
+    unit_area = native[0].w * native[0].h
+    tile_indexes = [[] for _ in layers]
+    for i, (child, parent) in enumerate(pairwise(layers), 1):
+        sources = defaultdict(set)
+        for tx, ty in child.tiles:
+            occupied = child.tile(tx, ty)['area'] > 0
+            for ux, uy, *_ in _groups(child, parent, tx, ty, occupied):
+                sources[(ux, uy)].add((tx, ty))
+        previous = {(tx, ty): (offset, length)
+                    for tx, ty, offset, length in tile_indexes[i-1]}
+        previous_path = directory / f'hist-{i-1}.bin'
+        previous_data = previous_path.read_bytes() if previous else b''
+        cursor = 0
+        with (directory / f'hist-{i}.bin').open('wb') as output:
+            for (ux, uy), child_tiles in sorted(sources.items()):
+                node = parent.tile(ux, uy)
+                areas = {}
+
+                def add(land, y, x, count, areas=areas):
+                    key = int(y), int(x), int(land)
+                    areas[key] = areas.get(key, 0) + int(count)
+
+                for tx, ty in sorted(child_tiles):
+                    child_node = child.tile(tx, ty)
+                    if child.level > 0:
+                        for gx, gy, dy, dx, sy, sx in _groups(
+                                child, parent, tx, ty, child_node['id'] > 0):
+                            if (gx, gy) == (ux, uy):
+                                for yy, xx, land in zip(
+                                        dy, dx, child_node['land'][sy, sx]):
+                                    add(land, yy, xx, units[child.level])
+                    if (tx, ty) not in previous:
+                        continue
+                    start, length = previous[(tx, ty)]
+                    entries = json.loads(previous_data[start:start+length])
+                    x = np.array([entry[0] for entry in entries], dtype=np.int64)+tx*TILE
+                    y = np.array([entry[1] for entry in entries], dtype=np.int64)+ty*TILE
+                    bounds = child.bounds(x, y, (0, 0))
+                    px, py = parent.locate((bounds[0]+bounds[2])/2,
+                                           (bounds[1]+bounds[3])/2, (0, 0))
+                    for entry, xx, yy in zip(entries, px, py):
+                        if xx//TILE == ux and yy//TILE == uy:
+                            add(entry[2], yy%TILE, xx%TILE, int(entry[3], 16))
+
+                summary = (node['area'] > 0) & (node['id'] == 0)
+                totals, winners = {}, {}
+                records = []
+                for (y, x, category), count in sorted(areas.items()):
+                    if not summary[y, x]:
+                        continue
+                    key = y, x
+                    totals[key] = totals.get(key, 0) + count
+                    current = winners.get(key)
+                    if current is None or count > current[0] or (
+                            count == current[0] and category < current[1]):
+                        winners[key] = count, category
+                    records.append([x, y, category, format(count, 'x')])
+                ys, xs = np.nonzero(summary)
+                for y, x in zip(ys, xs):
+                    key = int(y), int(x)
+                    require(key in totals and math.isclose(
+                        totals[key]*unit_area, float(node['area'][y, x]),
+                        rel_tol=1e-12, abs_tol=1e-7),
+                        'Display histogram differs from occupied area')
+                    node['land'][y, x] = winners[key][1]
+                if records:
+                    payload = json.dumps(records, separators=(',', ':')).encode()
+                    output.write(payload)
+                    tile_indexes[i].append([ux, uy, cursor, len(payload)])
+                    cursor += len(payload)
+    return tile_indexes
+
+
+def _coordinate_ranges(lo, hi):
+    """Encode a float64 half-open interval as at most three integer boxes.
+
+    IEEE bits, sign-adjusted, sort in numeric order. Splitting that 64-bit
+    interval at its two end high words gives exact Cartesian ranges in two
+    signed int32 coordinates, even across zero or very distant clusters.
+    Subtracting one from the exclusive upper key preserves touching edges.
+    Neither magnitude nor the finest schema unit limits the precision.
+    """
+    def key(value):
+        # Give both representations of zero the same boundary ownership.
+        bits = struct.unpack('<Q', struct.pack('<d', value if value else 0.0))[0]
+        return bits ^ (0xffffffffffffffff if bits >> 63 else 0x8000000000000000)
+
+    first, last = key(lo), key(hi)-1
+    first_hi, first_lo = divmod(first, 1 << 32)
+    last_hi, last_lo = divmod(last, 1 << 32)
+    if first_hi == last_hi:
+        ranges = [(first_hi, last_hi, first_lo, last_lo)]
+    else:
+        ranges = [(first_hi, first_hi, first_lo, 0xffffffff),
+                  (last_hi, last_hi, 0, last_lo)]
+        if first_hi+1 < last_hi:
+            ranges.append((first_hi+1, last_hi-1, 0, 0xffffffff))
+    return [tuple(word-(1 << 31) for word in interval) for interval in ranges]
+
+
+def _rectangle_ranges(bounds):
+    return [x+y for x in _coordinate_ranges(bounds[0], bounds[2])
+            for y in _coordinate_ranges(bounds[1], bounds[3])]
+
+
+def _directory_query(db, name, columns, ranges, first_layer, last_layer):
+    # The outer, bounded search table drives integer-Rtree probes; coordinates
+    # are fetched by primary key only after the exact spatial/level match.
+    # One statement per directory, at most nine probes, with no native-level
+    # loop. A rectangle can match several fragments; callers deduplicate IDs.
+    values = ','.join('(?,?,?,?,?,?,?,?)' for _ in ranges)
+    return db.execute(f'''
+        WITH search(xh0,xh1,xl0,xl1,yh0,yh1,yl0,yl1) AS (VALUES {values})
+        SELECT {columns}
+        FROM search AS s
+        CROSS JOIN {name}_bounds AS b
+        CROSS JOIN {name}_coords AS c ON c.id=b.entry_id
+        WHERE b.max_xhi >= s.xh0 AND b.min_xhi <= s.xh1
+          AND b.max_xlo >= s.xl0 AND b.min_xlo <= s.xl1
+          AND b.max_yhi >= s.yh0 AND b.min_yhi <= s.yh1
+          AND b.max_ylo >= s.yl0 AND b.min_ylo <= s.yl1
+          AND b.max_layer >= ? AND b.min_layer <= ?
+    ''', (*[value for interval in ranges for value in interval], first_layer, last_layer))
+
+
+def _tile_rtree(directory, layers, origin, source):
+    path = directory / 'tile-rtree.sqlite'
+    with closing(sqlite3.connect(path)) as db:
+        for name in ('tile', 'original'):
+            db.execute(f'''CREATE VIRTUAL TABLE {name}_bounds USING rtree_i32(
+                id, min_xhi, max_xhi, min_xlo, max_xlo,
+                min_yhi, max_yhi, min_ylo, max_ylo,
+                min_layer, max_layer, +entry_id)''')
+        db.execute('CREATE TABLE tile_coords (id INTEGER PRIMARY KEY, layer INTEGER, tx INTEGER, ty INTEGER)')
+        db.execute('CREATE TABLE original_coords (id INTEGER PRIMARY KEY, layer INTEGER, x INTEGER, y INTEGER)')
+        fragments = {'tile': 0, 'original': 0}
+
+        def insert(name, entry_id, number, bounds):
+            for interval in _rectangle_ranges(bounds):
+                fragments[name] += 1
+                db.execute(f'INSERT INTO {name}_bounds VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                           (fragments[name], *interval, number, number, entry_id))
+
+        rows = ((number, tx, ty) for number, layer in enumerate(layers) for tx, ty in sorted(layer.tiles))
+        for tile_id, (number, tx, ty) in enumerate(rows, 1):
+            layer = layers[number]
+            sx, sy = max(tx*TILE, layer.x0), max(ty*TILE, layer.y0)
+            ex = min((tx+1)*TILE, layer.x0+layer.nx)-1
+            ey = min((ty+1)*TILE, layer.y0+layer.ny)-1
+            first, last = layer.bounds(sx, sy, origin), layer.bounds(ex, ey, origin)
+            insert('tile', tile_id, number, (first[0], first[1], last[2], last[3]))
+            db.execute('INSERT INTO tile_coords VALUES (?, ?, ?, ?)', (tile_id, number, tx, ty))
+        # Only native levels coarser than the finest can be requested as
+        # standalone originals. Index their exact validated binary geometry,
+        # so sparse holes cannot make coarse-tile searches scale with the
+        # length of a block boundary.
+        count = 0
+        offsets = np.memmap(directory/'offsets.bin', dtype='<u8', mode='r')
+        try:
+            with (source/'cell_topo.bin').open('rb') as cell_file:
+                cells = mmap.mmap(cell_file.fileno(), 0, access=mmap.ACCESS_READ)
+                try:
+                    for number, layer in enumerate(layers[1:], 1):
+                        if layer.level <= 0:
+                            continue
+                        for tx, ty in sorted(layer.tiles):
+                            tile = layer.tile(tx, ty)
+                            sy, sx = np.nonzero(tile['id'])
+                            for local_y, local_x in zip(sy, sx):
+                                cid = int(tile['id'][local_y, local_x])
+                                original = CELL.unpack_from(cells, int(offsets[cid-1])+4)
+                                x0,y0,x1,y1 = original[1:5]
+                                insert('original', cid, number, (x0, y0, x1, y1))
+                                db.execute('INSERT INTO original_coords VALUES (?, ?, ?, ?)',
+                                           (cid, number, int(local_x)+tx*TILE, int(local_y)+ty*TILE))
+                                count += 1
+                finally:
+                    cells.close()
+        finally:
+            offsets._mmap.close()
+        db.commit()
+    return count, fragments
+
+
+def _checksum(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024*1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _content_files(layers):
+    return ['offsets.bin', 'tile-rtree.sqlite'] + [
+        layer.path.name for layer in layers if layer.tiles
+    ] + [f'hist-{i}.bin' for i in range(1, len(layers))]
 
 
 def layer_specs(meta):
@@ -259,14 +446,15 @@ def layer_specs(meta):
     while True:
         w,h,level = w*2,h*2,level-1
         sizes.append((w,h,level,[None,None]))
-        if math.ceil((b[2]-o[0])/w)-math.floor((b[0]-o[0])/w) <= 2 and math.ceil((b[3]-o[1])/h)-math.floor((b[1]-o[1])/h) <= 2:
+        if (_axis_end(b[2]-o[0],w,None)-int(_axis_index(b[0]-o[0],w,None)) <= 2
+                and _axis_end(b[3]-o[1],h,None)-int(_axis_index(b[1]-o[1],h,None)) <= 2):
             break
     specs = []
     for w,h,level,layout in sizes:
         x0,y0 = int(_axis_index(b[0]-o[0],w,layout[0])),int(_axis_index(b[1]-o[1],h,layout[1]))
-        # An upper boundary belongs to the next node only if it has positive
-        # intersection. nextafter also handles a clipped final strip.
-        ex,ey = int(_axis_index(np.nextafter(b[2]-o[0],-np.inf),w,layout[0]))+1,int(_axis_index(np.nextafter(b[3]-o[1],-np.inf),h,layout[1]))+1
+        # Exclusive endpoints also work at zero, where nextafter/size could
+        # underflow back to zero and invent an extra root across the origin.
+        ex,ey = _axis_end(b[2]-o[0],w,layout[0]),_axis_end(b[3]-o[1],h,layout[1])
         spec = [w,h,x0,y0,ex-x0,ey-y0,level]
         if any(layout):
             spec.append(layout)
@@ -334,6 +522,7 @@ def _build_into(source, directory, initial_fingerprint, resources):
                 header = CELL.unpack_from(cells, offset + 4)
                 cid, x0, y0, x1, y1, base_z, _, *counts = header
                 count += 1
+                require(count <= (1 << 53) - 1, 'Cell ID exceeds JavaScript safe integer range')
                 require(cid == count, 'Cell IDs must be sequential and 1-based')
                 require(length == CELL.size + 8 * sum(counts) and offset + 4 + length <= len(cells), 'Invalid cell record length')
                 require(all(math.isfinite(v) for v in (x0, y0, x1, y1, base_z)), 'Nonfinite cell geometry/attribute')
@@ -358,7 +547,7 @@ def _build_into(source, directory, initial_fingerprint, resources):
                 require(node is None or node['id'] == 0, 'Duplicate cell geometry')
                 validate_cell_edges(edges, cid, (x0, y0, x1, y1), counts, ids, edge_count, seen)
                 area = layer.w * layer.h
-                layer.put(ix,iy,(cid, area, z*area, min(layer.w,layer.h), min(layer.w,layer.h), level, land))
+                layer.put(ix,iy,(cid, area, z*area, min(layer.w,layer.h), level, land))
                 offsets.write(struct.pack('<Q', offset))
                 zmin, zmax = min(zmin, z), max(zmax, z)
                 categories.add(land)
@@ -382,18 +571,24 @@ def _build_into(source, directory, initial_fingerprint, resources):
                 require(ns.read() == '', 'Extra ns.txt records')
     seen._mmap.close()
     (directory / 'edge-seen.tmp').unlink()
-    for child,parent in zip(layers,layers[1:]):
+    for child,parent in pairwise(layers):
         _rollup(child,parent)
-    _categories(directory,layers,categories)
+    histogram_tiles = _histograms(directory,layers)
+    original_count, fragments = _tile_rtree(directory,layers,meta['alignment_origin'],source)
     layer_tiles = [[[x,y,slot] for (x,y),slot in sorted(layer.tiles.items())] for layer in layers]
     for layer in layers:
         layer.close()
+    checksums = {name:_checksum(directory/name) for name in _content_files(layers)}
     require(fingerprint(source) == initial_fingerprint, 'Grid changed during display index construction')
     meta.update(cellCount=count, landClasses=sorted(categories), attributes=['level','elevation','landClass'], elevationRange=[zmin,zmax])
-    manifest = {'version':VERSION,'meta':meta,'layers':specs,'layerTiles':layer_tiles,'source':str(source),
+    manifest = {'version':VERSION,'meta':meta,'layers':specs,'layerTiles':layer_tiles,
+                'tileDirectory':'float64-i32-v1','originalDirectoryCount':original_count,
+                'directoryFragments':fragments,
+                'histogramFormat':'exact-unit-json-v1',
+                'histogramTiles':histogram_tiles,'source':str(source),
                 'fingerprint':initial_fingerprint, 'edgeCount':edge_count,
                 'buildSeconds':time.perf_counter()-started,
-                'peakRssBytes':_peak_rss()}
+                'peakRssBytes':_peak_rss(), 'checksums':checksums}
     (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     return manifest
 
@@ -458,7 +653,13 @@ class GridDisplayIndex:
                 and len(self.manifest['layerTiles']) == len(specs), 'Invalid display layer layout')
         require(all(self.manifest['meta'][key] == value for key,value in meta.items()), 'Display metadata mismatch')
         self.directory = directory
-        self.meta = self.manifest['meta']
+        self.revision = key
+        self.meta = dict(self.manifest['meta'], revision=key, displayLayers=[{
+            'width':spec[0], 'height':spec[1], 'x0':spec[2], 'y0':spec[3],
+            'nx':spec[4], 'ny':spec[5], 'nativeLevel':spec[6] if spec[6] > 0 else None,
+            'xLayout':spec[7][0] if len(spec) == 8 else None,
+            'yLayout':spec[7][1] if len(spec) == 8 else None,
+        } for spec in specs])
         self.origin = self.meta['alignment_origin']
         self.layers = [Layer(directory,i,spec,tiles=tiles) for i,(spec,tiles) in enumerate(zip(self.manifest['layers'],self.manifest['layerTiles']))]
         self.offsets = self.cells = self.edges = None
@@ -474,6 +675,12 @@ class GridDisplayIndex:
             self.edges = mmap.mmap(self._edge_file.fileno(),0,access=mmap.ACCESS_READ)
             require(len(self.edges) == self.manifest['edgeCount']*EDGE.size, 'Invalid display edge count')
             self._check_offsets()
+            self._check_directories()
+            self._check_contents()
+            self._roots = self._root_summaries()
+        except sqlite3.DatabaseError as exc:
+            self.close()
+            raise ValueError('Invalid display tile directory') from exc
         except Exception:
             self.close()
             raise
@@ -497,6 +704,53 @@ class GridDisplayIndex:
                 require(np.array_equal(ids,np.arange(start+1,start+len(offsets)+1)), 'Display offset cell ID mismatch')
         finally:
             del raw
+
+    def _check_directories(self):
+        require(self.manifest.get('tileDirectory') == 'float64-i32-v1',
+                'Invalid display tile directory version')
+        require(self.manifest.get('histogramFormat') == 'exact-unit-json-v1',
+                'Invalid display histogram version')
+        indexes = self.manifest['histogramTiles']
+        require(len(indexes) == len(self.layers) and not indexes[0], 'Invalid display histogram layout')
+        for i, tiles in enumerate(indexes[1:], 1):
+            cursor = 0
+            for tx, ty, offset, count in tiles:
+                require(all(type(v) is int for v in (tx,ty,offset,count))
+                        and count > 0 and offset == cursor and (tx,ty) in self.layers[i].tiles,
+                        'Invalid display histogram tile')
+                cursor += count
+            require((self.directory/f'hist-{i}.bin').stat().st_size == cursor,
+                    'Invalid display histogram length')
+        path = self.directory/'tile-rtree.sqlite'
+        require(path.is_file(), 'Missing display tile directory')
+        with closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as db:
+            count = db.execute('SELECT count(*) FROM tile_bounds').fetchone()[0]
+            originals = db.execute('SELECT count(*) FROM original_bounds').fetchone()[0]
+            require(count == self.manifest['directoryFragments']['tile']
+                    and originals == self.manifest['directoryFragments']['original']
+                    and db.execute('SELECT count(*) FROM tile_coords').fetchone()[0]
+                        == sum(len(layer.tiles) for layer in self.layers)
+                    and db.execute('SELECT count(*) FROM original_coords').fetchone()[0]
+                        == self.manifest['originalDirectoryCount']
+                    and db.execute('PRAGMA quick_check').fetchone()[0] == 'ok',
+                    'Invalid display tile directory')
+            for cid, i, x, y in db.execute('SELECT id, layer, x, y FROM original_coords'):
+                require(1 <= cid <= self.meta['cellCount']
+                        and 0 < i < len(self.layers) and self.layers[i].level > 0,
+                        'Invalid original display directory')
+                node = self.layers[i].get(x, y)
+                require(node is not None and int(node['id']) == cid,
+                        'Invalid original display directory')
+
+    def _check_contents(self):
+        # Check every persisted derived byte once at opening. Requests trust
+        # this boundary and never hash or repair a damaged cache on demand.
+        checksums = self.manifest.get('checksums')
+        require(isinstance(checksums, dict) and set(checksums) == set(_content_files(self.layers)),
+                'Invalid display content checksums')
+        for name, expected in checksums.items():
+            require(_checksum(self.directory/name) == expected,
+                    f'Invalid display contents: {name} checksum mismatch')
 
     def close(self):
         for mapping in (self.cells,self.edges):
@@ -566,195 +820,151 @@ class GridDisplayIndex:
             cursor += n
         return {'cell':cell,'neighbors':list(neighbors.values())}
 
-    def query(self,bounds,meters_per_pixel):
-        return self._query(bounds,meters_per_pixel,materialize=True)
+    def _layer(self, number):
+        if number < len(self.layers):
+            return self.layers[number]
+        root = self.layers[-1]
+        depth = number-len(self.layers)+1
+        try:
+            w,h = math.ldexp(root.w,depth),math.ldexp(root.h,depth)
+        except (OverflowError, TypeError):
+            raise ValueError('Display ancestor exceeds finite grid coordinates') from None
+        require(math.isfinite(w) and math.isfinite(h),
+                'Display ancestor exceeds finite grid coordinates')
+        factor = 1 << depth
+        x0,y0 = root.x0//factor,root.y0//factor
+        ex,ey = -(-(root.x0+root.nx)//factor),-(-(root.y0+root.ny)//factor)
+        return Lattice([w,h,x0,y0,ex-x0,ey-y0,0])
 
-    def query_json(self,bounds,meters_per_pixel):
-        # Consume fields as they are generated instead of retaining hundreds of
-        # thousands of pixel dictionaries until a second serialization pass.
-        return to_json(self._query(bounds,meters_per_pixel,materialize=False))
+    def _root_summaries(self):
+        """At most four storage roots, retaining every class's exact weight."""
+        root = self.layers[-1]
+        histograms = defaultdict(dict)
+        with (self.directory/f'hist-{len(self.layers)-1}.bin').open('rb') as source:
+            for tx,ty,offset,length in self.manifest['histogramTiles'][-1]:
+                source.seek(offset)
+                for x,y,category,count in json.loads(source.read(length)):
+                    histograms[(tx*TILE+x,ty*TILE+y)][category] = int(count,16)
+        roots = []
+        for y in range(root.y0,root.y0+root.ny):
+            for x in range(root.x0,root.x0+root.nx):
+                node = root.get(x,y)
+                if node is not None and node['area'] > 0:
+                    require(bool(histograms[(x,y)]), 'Missing display root histogram')
+                    roots.append((x,y,node,histograms[(x,y)]))
+        return roots
 
-    def _query(self,bounds,meters_per_pixel,*,materialize):
-        require(len(bounds) == 4 and all(math.isfinite(v) for v in bounds)
-                and bounds[2] > bounds[0] and bounds[3] > bounds[1], 'Invalid viewport bounds')
-        require(math.isfinite(meters_per_pixel) and meters_per_pixel > 0, 'Invalid metersPerPixel')
-        s = meters_per_pixel
-        # Clip only search coordinates, before integer lattice conversion.
-        # Valid finite viewports may extend far beyond int64 lattice indices.
-        domain = self.meta['bounds']
-        search = [min(max(value,domain[axis%2]),domain[axis%2+2]) for axis,value in enumerate(bounds)]
-        base = next(i for i,l in enumerate(self.layers) if l.level == 1)
-        chunk_level = base
-        while chunk_level+1 < len(self.layers) and max(self.layers[chunk_level].w,self.layers[chunk_level].h) < 128*s:
-            chunk_level += 1
+    def validate_nodes(self, block_layer, x, y, display_layer):
+        require(all(type(v) is int for v in (block_layer, x, y, display_layer)),
+                'Display block coordinates must be integers')
+        require(0 <= display_layer <= block_layer,
+                'Invalid display layer selection')
+        block = self._layer(block_layer)
+        require(block.x0 <= x < block.x0+block.nx and block.y0 <= y < block.y0+block.ny,
+                'Display block outside grid')
 
-        def visible(b):
-            return ((b[:,0] < bounds[2]) & (b[:,2] > bounds[0])
-                    & (b[:,1] < bounds[3]) & (b[:,3] > bounds[1]))
+    def nodes(self, block_layer, x, y, display_layer):
+        """Return one camera-independent block in the GDN4 wire format."""
+        self.validate_nodes(block_layer, x, y, display_layer)
+        return self._nodes(block_layer, x, y, display_layer)
 
-        # Keep the original depth-first order while evaluating each frontier in
-        # bulk. Big-endian path digits sort lexically, without a depth/bit limit.
-        top = self.layers[-1]
-        y,x = np.mgrid[top.y0:top.y0+top.ny,top.x0:top.x0+top.nx]
-        x,y = x.ravel(),y.ravel()
-        paths = np.zeros((len(x),len(self.layers)),dtype='>u4')
-        paths[:,0] = np.arange(len(x))
-        terminals, visited = [], 0
-        for i in range(len(self.layers)-1,-1,-1):
-            if not len(x):
-                break
-            layer = self.layers[i]
-            b = np.column_stack(layer.bounds(x,y,self.origin))
-            keep = visible(b)
-            x,y,b,paths = x[keep],y[keep],b[keep],paths[keep]
-            visited += len(x)
-            nodes = layer.gather(x,y)
-            keep = nodes['area'] > 0
-            x,y,b,paths,nodes = x[keep],y[keep],b[keep],paths[keep],nodes[keep]
-            native = nodes['id'] != 0
-            summary = (~native) & (i <= chunk_level) & (max(layer.w,layer.h) <= s)
-            stop = native | summary
-            if np.any(stop):
-                selected = nodes[stop]
-                sample_area = ((b[stop,2]-b[stop,0])*(b[stop,3]-b[stop,1])) if any(layer.layout) else layer.w*layer.h
-                occupied = np.where(selected['id'] != 0,1.,np.minimum(1.,selected['area']/sample_area))
-                cells = (selected['id'] != 0) & (selected['min'] >= 4*s)
-                terminals.append((b[stop],selected,occupied,cells,paths[stop]))
-            if i == 0:
-                break
-            child = self.layers[i-1]
-            keep = ~stop
-            x,y,b,paths = x[keep],y[keep],b[keep],paths[keep]
-            if not any(layer.layout) and not any(child.layout):
-                rx,ry = round(layer.w/child.w),round(layer.h/child.h)
-                # Clip the integer child ranges before allocating coordinates.
-                # Boundary neighbors are filtered by exact intersection above.
-                vx0,vy0 = child.locate(search[0],search[1],self.origin)
-                vx1,vy1 = child.locate(search[2],search[3],self.origin)
-                lx,ly = np.maximum(x*rx,vx0-1),np.maximum(y*ry,vy0-1)
-                hx,hy = np.minimum((x+1)*rx-1,vx1+1),np.minimum((y+1)*ry-1,vy1+1)
-            else:
-                lx,ly = child.locate(np.maximum(b[:,0],bounds[0]),np.maximum(b[:,1],bounds[1]),self.origin)
-                hx,hy = child.locate(np.minimum(b[:,2],bounds[2]),np.minimum(b[:,3],bounds[3]),self.origin)
-                lx,ly,hx,hy = lx-1,ly-1,hx+1,hy+1
-            nx,ny = np.maximum(0,hx-lx+1),np.maximum(0,hy-ly+1)
-            count = nx*ny
-            parent = np.repeat(np.arange(len(x)),count)
-            offset = np.arange(int(count.sum()))-np.repeat(np.cumsum(count)-count,count)
-            cx,cy = lx[parent]+offset%nx[parent],ly[parent]+offset//nx[parent]
-            paths = paths[parent]
-            paths[:,len(self.layers)-i] = offset
-            if any(layer.layout) or any(child.layout):
-                cb = child.bounds(cx,cy,self.origin)
-                px,py = layer.locate((cb[0]+cb[2])/2,(cb[1]+cb[3])/2,self.origin)
-                belongs = (px == x[parent]) & (py == y[parent])
-                cx,cy,paths = cx[belongs],cy[belongs],paths[belongs]
-            x,y = cx,cy
+    def _nodes(self, block_layer, x, y, display_layer):
+        block = self._layer(block_layer)
+        box = block.bounds(x, y, self.origin)
+        if display_layer >= len(self.layers):
+            return self._ancestor_nodes(block_layer,x,y,display_layer)
+        records = []
+        visited = 0
+        tile_scans = 0
+        directory_queries = 0
+        path = self.directory/'tile-rtree.sqlite'
+        search = _rectangle_ranges(box)
+        max_native = max(i for i, layer in enumerate(self.layers) if layer.level > 0)
+        with closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as db:
+            directory_queries += 1
+            tiles = _directory_query(db, 'tile', 'c.tx, c.ty', search,
+                                     display_layer, display_layer)
+            layer = self.layers[display_layer]
+            seen_tiles = set()
+            for tx, ty in tiles:
+                if (tx, ty) in seen_tiles:
+                    continue
+                seen_tiles.add((tx, ty))
+                tile = layer.tile(tx, ty)
+                tile_scans += 1
+                visited += TILE*TILE
+                sy, sx = np.nonzero(tile['area'] > 0)
+                if not len(sx):
+                    continue
+                gx, gy = sx+tx*TILE, sy+ty*TILE
+                valid = ((gx >= layer.x0) & (gx < layer.x0+layer.nx)
+                         & (gy >= layer.y0) & (gy < layer.y0+layer.ny))
+                sy, sx, gx, gy = sy[valid], sx[valid], gx[valid], gy[valid]
+                bounds = layer.bounds(gx, gy, self.origin)
+                # Midpoint ownership follows the clipped-dyadic hierarchy.
+                bx, by = block.locate((bounds[0]+bounds[2])/2,
+                                       (bounds[1]+bounds[3])/2, self.origin)
+                for pos in np.flatnonzero((bx == x) & (by == y)):
+                    node = tile[sy[pos], sx[pos]]
+                    cid = int(node['id'])
+                    if cid:
+                        original = CELL.unpack_from(self.cells, int(self.offsets[cid-1])+4)
+                        chosen = original[1:5]
+                        if not (chosen[0] < box[2] and chosen[2] > box[0]
+                                and chosen[1] < box[3] and chosen[3] > box[1]):
+                            continue
+                    else:
+                        chosen = tuple(float(axis[pos]) for axis in bounds)
+                    records.append(DISPLAY_RECORD.pack(
+                        cid, *chosen, float(node['area']), float(node['z']),
+                        float(node['min']), int(node['level']), int(node['land'])))
 
+            if display_layer < max_native:
+                directory_queries += 1
+                originals = _directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
+                                             search, display_layer+1, max_native)
+                seen_originals = set()
+                for cid, i, gx, gy in originals:
+                    if cid in seen_originals:
+                        continue
+                    seen_originals.add(cid)
+                    visited += 1
+                    exact = CELL.unpack_from(self.cells, int(self.offsets[cid-1])+4)[1:5]
+                    if not (exact[0] < box[2] and exact[2] > box[0]
+                            and exact[1] < box[3] and exact[3] > box[1]):
+                        continue
+                    node = self.layers[i].get(gx, gy)
+                    records.append(DISPLAY_RECORD.pack(
+                        cid, *exact, float(node['area']), float(node['z']),
+                        float(node['min']), int(node['level']), int(node['land'])))
         self.last_query_nodes = visited
-        if not terminals:
-            return {'chunks':[],'cellCount':self.meta['cellCount']}
-        if len(terminals) == 1:
-            ranks = np.arange(len(terminals[0][0]))
-        else:
-            path = np.concatenate([t[4] for t in terminals])
-            order = path.view(f'V{path.shape[1]*4}').ravel().argsort(kind='stable')
-            ranks = np.empty(len(order),dtype=np.intp)
-            ranks[order] = np.arange(len(order))
-            del path,order
-        field_batches, cell_batches, cursor = [], [], 0
-        for b,nodes,occupied,cells,_ in terminals:
-            rank = ranks[cursor:cursor+len(b)]
-            cursor += len(b)
-            if np.any(cells):
-                cell_batches.append((b[cells],nodes[cells],rank[cells]))
-            keep = ~cells
-            b,nodes,occupied,rank = b[keep],nodes[keep],occupied[keep],rank[keep]
-            # Midpoint splitting must use each actual floating point extent:
-            # nominally equal lattice widths can straddle s after rounding.
-            if not len(b):
-                continue
-            if np.all((b[:,2]-b[:,0] <= s) & (b[:,3]-b[:,1] <= s)):
-                field_batches.append((b,nodes,occupied,rank))
-                continue
-            depth = 1+max(0,math.ceil(math.log2(max(np.max(b[:,2]-b[:,0]),np.max(b[:,3]-b[:,1]))/s)))
-            path = np.zeros((len(b),depth+1),dtype='>u4')
-            path[:,0] = np.arange(len(b))
-            finished = []
-            for step in range(depth+1):
-                split_x,split_y = b[:,2]-b[:,0] > s,b[:,3]-b[:,1] > s
-                done = ~(split_x | split_y)
-                if np.any(done):
-                    finished.append((b[done],nodes[done],occupied[done],rank[done],path[done]))
-                if np.all(done):
-                    break
-                keep = ~done
-                b,nodes,occupied,rank,path = (v[keep] for v in (b,nodes,occupied,rank,path))
-                split_x,split_y = split_x[keep],split_y[keep]
-                children,masks = [],[]
-                mx,my = (b[:,0]+b[:,2])/2,(b[:,1]+b[:,3])/2
-                for right in range(2 if np.any(split_x) else 1):
-                    for upper in range(2 if np.any(split_y) else 1):
-                        children.append(np.column_stack((
-                            mx if right else b[:,0],my if upper else b[:,1],
-                            np.where(split_x,mx,b[:,2]) if not right else b[:,2],
-                            np.where(split_y,my,b[:,3]) if not upper else b[:,3])))
-                        masks.append((split_x if right else np.ones(len(b),dtype=bool))
-                                     & (split_y if upper else np.ones(len(b),dtype=bool)))
-                count = len(children)
-                b = np.stack(children,axis=1).reshape(-1,4)
-                nodes,occupied,rank,path = (np.repeat(v,count,axis=0) for v in (nodes,occupied,rank,path))
-                path[:,step+1] = np.tile(np.arange(count),len(b)//count)
-                keep = np.stack(masks,axis=1).ravel() & visible(b)
-                b,nodes,occupied,rank,path = (v[keep] for v in (b,nodes,occupied,rank,path))
-            if finished:
-                values = [np.concatenate([v[k] for v in finished]) for k in range(5)]
-                path = values[-1]
-                order = path.view(f'V{path.shape[1]*4}').ravel().argsort(kind='stable')
-                field_batches.append(tuple(v[order] for v in values[:4]))
+        self.last_query_tiles = tile_scans
+        self.last_query_directory_queries = directory_queries
+        require(len(records) <= 0xffffffff, 'Display block has too many records')
+        return b'GDN4' + struct.pack('<I', len(records)) + b''.join(records)
 
-        # Group once per chunk, rather than formatting a key and looking up a
-        # dictionary for every pixel. Only the final JSON objects use Python.
-        chunk_layer = self.layers[chunk_level]
-        chunks = {}
-        def groups(b,rank):
-            cx = np.floor(((b[:,0]+b[:,2])/2-self.origin[0])/chunk_layer.w).astype(np.int64)
-            cy = np.floor(((b[:,1]+b[:,3])/2-self.origin[1])/chunk_layer.h).astype(np.int64)
-            order = np.lexsort((rank,cx,cy))
-            breaks = np.r_[0,np.flatnonzero((np.diff(cx[order]) != 0) | (np.diff(cy[order]) != 0))+1,len(order)]
-            for start,end in zip(breaks[:-1],breaks[1:]):
-                ids = order[start:end]
-                x,y = int(cx[ids[0]]),int(cy[ids[0]])
-                key = f'{chunk_layer.level}:{x}:{y}'
-                if key not in chunks:
-                    chunks[key] = (int(rank[ids].min()),{'key':key,'bounds':chunk_layer.bounds(x,y,self.origin),'cells':[],'fields':[]})
-                else:
-                    first,chunk = chunks[key]
-                    chunks[key] = (min(first,int(rank[ids].min())),chunk)
-                yield chunks[key][1],ids
-
-        if field_batches:
-            b = np.concatenate([v[0] for v in field_batches])
-            nodes = np.concatenate([v[1] for v in field_batches])
-            occupied = np.concatenate([v[2] for v in field_batches])
-            rank = np.concatenate([v[3] for v in field_batches])
-            z = nodes['z']/nodes['area']
-            for chunk,ids in groups(b,rank):
-                fields = (dict(bounds=box,occupiedFraction=area,minCellSize=size,
-                    level=level,elevation=elevation,landClass=land)
-                    for box,area,size,level,elevation,land in zip(b[ids].tolist(),occupied[ids].tolist(),
-                        nodes['min'][ids].tolist(),nodes['level'][ids].tolist(),z[ids].tolist(),nodes['land'][ids].tolist()))
-                chunk['fields'] = list(fields) if materialize else fields
-        if cell_batches:
-            b = np.concatenate([v[0] for v in cell_batches])
-            nodes = np.concatenate([v[1] for v in cell_batches])
-            rank = np.concatenate([v[2] for v in cell_batches])
-            z = nodes['z']/nodes['area']
-            for chunk,ids in groups(b,rank):
-                # Original binary bounds retain their exact floating point
-                # values; lattice reconstruction is only for spatial lookup.
-                chunk['cells'] = [dict(id=cid,bounds=list(CELL.unpack_from(self.cells,int(self.offsets[cid-1])+4)[1:5]),
-                    level=level,elevation=elevation,landClass=land)
-                    for cid,level,elevation,land in zip(nodes['id'][ids].tolist(),nodes['level'][ids].tolist(),z[ids].tolist(),nodes['land'][ids].tolist())]
-        return {'chunks':[chunk for _,chunk in sorted(chunks.values(),key=lambda pair:pair[0])],
-                'cellCount':self.meta['cellCount']}
+    def _ancestor_nodes(self, block_layer, x, y, display_layer):
+        layer = self._layer(display_layer)
+        root_number = len(self.layers)-1
+        display_factor = 1 << (display_layer-root_number)
+        block_factor = 1 << (block_layer-root_number)
+        groups = defaultdict(list)
+        for rx,ry,node,histogram in self._roots:
+            if (rx//block_factor,ry//block_factor) == (x,y):
+                groups[(rx//display_factor,ry//display_factor)].append((node,histogram))
+        records = []
+        for (gx,gy),children in sorted(groups.items()):
+            weights = defaultdict(int)
+            for _,histogram in children:
+                for category,count in histogram.items():
+                    weights[category] += count
+            winner = min(weights,key=lambda category:(-weights[category],category))
+            records.append(DISPLAY_RECORD.pack(
+                0,*layer.bounds(gx,gy,self.origin),
+                sum(float(node['area']) for node,_ in children),
+                sum(float(node['z']) for node,_ in children),
+                min(float(node['min']) for node,_ in children),
+                max(int(node['level']) for node,_ in children),winner))
+        self.last_query_nodes = len(self._roots)
+        self.last_query_tiles = self.last_query_directory_queries = 0
+        return b'GDN4' + struct.pack('<I',len(records)) + b''.join(records)

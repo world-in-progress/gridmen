@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const evidence = resolve(root, '../../.verification/client-tests')
+const evidence = resolve(process.env.GRID_TEST_EVIDENCE ?? resolve(root, '../../.verification/client-tests'))
 const output = resolve(evidence, 'node-tests')
 await mkdir(output, { recursive: true })
 const files = (await readdir(resolve(root, 'test'))).sort()

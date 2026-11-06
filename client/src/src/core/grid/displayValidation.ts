@@ -1,4 +1,4 @@
-import type { Bounds, DisplayCell, GridDisplayMeta, GridDisplayView } from './displayTypes'
+import type { Bounds, DisplayCell, DisplayLayer, GridDisplayMeta, GridDisplayView } from './displayTypes'
 
 function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) }
 function positive(value: unknown): value is number { return finite(value) && value > 0 }
@@ -12,9 +12,16 @@ function cell(value: DisplayCell): boolean {
         && (value.deleted === undefined || typeof value.deleted === 'boolean')
 }
 
+function layer(value: DisplayLayer): boolean {
+    const layout = (entry: [number, number] | null) => entry === null || pair(entry) && positive(entry[0]) && integer(entry[1]) && entry[1] > 0
+    return !!value && positive(value.width) && positive(value.height) && Number.isSafeInteger(value.x0) && Number.isSafeInteger(value.y0)
+        && integer(value.nx) && value.nx > 0 && integer(value.ny) && value.ny > 0 && (value.nativeLevel === null || integer(value.nativeLevel))
+        && layout(value.xLayout) && layout(value.yLayout)
+}
+
 /** Fail at the source boundary; rendering code can then trust its samples. */
 export function validateDisplayMeta(meta: GridDisplayMeta): void {
-    if (!meta || !integer(meta.epsg) || meta.epsg === 0 || !bounds(meta.bounds) || !integer(meta.cellCount)
+    if (!meta || typeof meta.revision !== 'string' || !meta.revision || !Array.isArray(meta.displayLayers) || !meta.displayLayers.length || meta.displayLayers.some(value => !layer(value)) || !integer(meta.epsg) || meta.epsg === 0 || !bounds(meta.bounds) || !integer(meta.cellCount)
         || !Array.isArray(meta.landClasses) || meta.landClasses.some((category, index) => !integer(category) || (index > 0 && category <= meta.landClasses[index - 1]))
         || !pair(meta.alignment_origin) || !pair(meta.elevationRange) || meta.elevationRange[0] > meta.elevationRange[1]
         || !Array.isArray(meta.attributes) || meta.attributes.some(attribute => !['level', 'elevation', 'landClass'].includes(attribute))

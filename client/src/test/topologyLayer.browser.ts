@@ -1,9 +1,11 @@
+import { OUTLINE_DARKENING } from '../src/core/grid/displayColors'
 import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
 import PatchCore from '../src/core/grid/patchCore'
 import DisplayIndex from '../src/core/grid/displayIndex'
+import { displayLayers } from '../src/core/grid/displayHierarchy'
 import type Dispatcher from '../src/core/message/dispatcher'
 import BoundingBox2D from '../src/core/util/boundingBox2D'
-import type { Bounds, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
+import type { DisplayBlock, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#gl')!
 const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false })!
@@ -27,6 +29,7 @@ function deferred<T>() {
 }
 
 class PublicCamera {
+    span = SPAN
     centerX = 0
     centerY = 0
     listeners = new Map<string, Set<() => void>>()
@@ -44,15 +47,15 @@ class PublicCamera {
     project(lngLat: [number, number]) {
         const x = lngLat[0] * EARTH / 360
         const y = Math.log(Math.tan(Math.PI / 4 + lngLat[1] * Math.PI / 360)) * EARTH / (2 * Math.PI)
-        return { x: SIZE / 2 + (x - this.centerX) * SIZE / SPAN, y: SIZE / 2 - (y - this.centerY) * SIZE / SPAN }
+        return { x: SIZE / 2 + (x - this.centerX) * SIZE / this.span, y: SIZE / 2 - (y - this.centerY) * SIZE / this.span }
     }
     unproject(point: [number, number]) {
-        const x = this.centerX + (point[0] - SIZE / 2) * SPAN / SIZE
-        const y = this.centerY - (point[1] - SIZE / 2) * SPAN / SIZE
+        const x = this.centerX + (point[0] - SIZE / 2) * this.span / SIZE
+        const y = this.centerY - (point[1] - SIZE / 2) * this.span / SIZE
         return { lng: x / EARTH * 360, lat: (2 * Math.atan(Math.exp(y * 2 * Math.PI / EARTH)) - Math.PI / 2) * 180 / Math.PI }
     }
     matrix(): number[] {
-        const scale = 2 * EARTH / SPAN
+        const scale = 2 * EARTH / this.span
         const x = 0.5 + this.centerX / EARTH
         const y = 0.5 - this.centerY / EARTH
         return [scale, 0, 0, 0, 0, -scale, 0, 0, 0, 0, 1, 0, -scale * x, scale * y, 0, 1]
@@ -63,8 +66,8 @@ const view: GridDisplayView = { cellCount: 102, chunks: [{
     key: 'center', bounds: [-2000, 0, 2000, 1000],
     cells: [{ id: 7, bounds: [-2000, 0, -1000, 1000], level: 0, elevation: 40, landClass: 1 }],
     fields: [
-        { bounds: [0, 0, 15.625, 15.625], occupiedFraction: 0.5, minCellSize: 2, level: 1, elevation: 40, landClass: 1 },
-        { bounds: [15.625, 0, 31.25, 15.625], occupiedFraction: 1, minCellSize: 2, level: 1, elevation: 40, landClass: 1 },
+        { bounds: [0, 0, 32, 32], occupiedFraction: 0.5, minCellSize: 2, level: 1, elevation: 40, landClass: 1 },
+        { bounds: [32, 0, 64, 32], occupiedFraction: 1, minCellSize: 2, level: 1, elevation: 40, landClass: 1 },
     ],
 }] }
 const farView: GridDisplayView = { cellCount: 102, chunks: [{
@@ -78,7 +81,7 @@ function pixel(x: number, y: number): number[] {
     return Array.from(data)
 }
 function draw(layer: TopologyLayer, camera: PublicCamera) {
-    gl.viewport(0, 0, SIZE, SIZE)
+    gl.viewport(0, 0, canvas.width, canvas.height)
     gl.clearColor(0, 0, 0, 0)
     gl.clear(gl.COLOR_BUFFER_BIT)
     layer.render(gl, camera.matrix())
@@ -91,18 +94,19 @@ async function main() {
     const layer = new TopologyLayer(camera as never)
     const inspection = { cell: view.chunks[0].cells[0], neighbors: [] }
     const inspectCalls: [number, number][] = []
-    const requests: { bounds: Bounds, signal: AbortSignal, resolve: (value: GridDisplayView) => void }[] = []
-    const cameraQueries: { bounds: Bounds, metersPerPixel: number }[] = []
+    const requests: { blocks: DisplayBlock[], signal: AbortSignal, resolve: (value: GridDisplayView) => void }[] = []
+    const cameraQueries: DisplayBlock[][] = []
     let nextView: GridDisplayView | null = view
     const source: ReadOnlyGridSource = {
-        meta: { epsg: 3857, bounds: [-2000, 0, 9000, 1000], grid_info: [[1000, 1000], [200, 200]],
-            level_info: [{ width: 11, height: 1 }, { width: 55, height: 5 }], subdivide_rules: [[5, 5]],
+        meta: { revision: 'browser-fixture', displayLayers: displayLayers([-2000, 0, 9000, 1000], [[1000, 1000], [2, 2]], [-2000, 0]),
+            epsg: 3857, bounds: [-2000, 0, 9000, 1000], grid_info: [[1000, 1000], [2, 2]],
+            level_info: [{ width: 11, height: 1 }, { width: 5500, height: 500 }], subdivide_rules: [[500, 500]],
             alignment_origin: [-2000, 0], cellCount: 102, attributes: ['level', 'elevation', 'landClass'], elevationRange: [0, 100], landClasses: [1] },
-        loadView(bounds, metersPerPixel, signal) {
-            cameraQueries.push({ bounds, metersPerPixel })
+        loadBlocks(blocks, signal) {
+            cameraQueries.push(blocks)
             if (nextView) { const value = nextView; nextView = null; return Promise.resolve(value) }
             const request = deferred<GridDisplayView>()
-            requests.push({ bounds, signal, resolve: request.resolve })
+            requests.push({ blocks, signal, resolve: request.resolve })
             return request.promise
         },
         inspect(x, y) { inspectCalls.push([x, y]); return Promise.resolve(inspection) },
@@ -112,20 +116,20 @@ async function main() {
     await layer.initialize(camera as never, gl)
     await layer.setReadOnlySource(source)
     draw(layer, camera)
-    measurements.cameraScale = cameraQueries[0].metersPerPixel
+    measurements.cameraBlocks = cameraQueries[0]
     const drawError = gl.getError()
     check('real shader compiles, links, and draws without GL error', drawError === gl.NO_ERROR, drawError)
-    check('public camera supplies exact grid bounds and scale', cameraQueries.length === 1
-        && cameraQueries[0].bounds.every((v, i) => near(v, [-4000, -4000, 4000, 4000][i], 0.01))
-        && near(cameraQueries[0].metersPerPixel, SPAN / SIZE, 0.01), cameraQueries)
-    const half = pixel(256, 255), full = pixel(257, 255), hole = pixel(224, 224), real = pixel(160, 224)
+    check('public camera selects visible schema blocks', cameraQueries.length === 1
+        && cameraQueries[0].length > 0
+        && cameraQueries[0].every(block => block.displayLayer <= block.blockLayer), cameraQueries)
+    const half = pixel(256, 255), full = pixel(259, 255), hole = pixel(224, 224), real = pixel(160, 224)
     check('half occupied field has alpha about one half', near(half[3], 128), { half })
     check('full field has saturated alpha', full[3] === 255, { full })
     check('half occupied color is premultiplied once', half.slice(0, 3).every((v, i) => near(v, full[i] * 0.5, 4)), { half, full })
     check('hole stays transparent', hole[3] === 0, { hole })
     check('original cell renders', real[3] === 255, { real })
     const palette = Array.from(layer.paletteColorList.slice(3, 6))
-    check('one-pixel field uses saturated density without invented outline', full.slice(0, 3).every((v, i) => near(v, palette[i] * 0.35, 3)), { full, palette })
+    check('grid-node interior uses saturated density without invented outline', full.slice(0, 3).every((v, i) => near(v, palette[i] * 0.35, 3)), { full, palette })
     const stats = layer.getDisplayStats()
     check('GPU bytes equal three instance records plus palette', stats.gpuBytes === 3 * 64 + 768, stats)
     check('stats distinguish original cells from field samples', stats.visibleChunks === 1 && stats.visibleCells === 1 && stats.fieldSamples === 2 && stats.fieldMode && stats.ready, stats)
@@ -198,7 +202,7 @@ async function main() {
     } as unknown as Dispatcher
     const core = new PatchCore({ nodeInfo: 'fixture', lockId: 'lock', srcCS: 'EPSG:3857', targetCS: 'EPSG:4326', bBox: new BoundingBox2D(-4000, -4000, 4000, 4000), rules: [[2, 2], [2, 2], [2, 2]] }, { dispatcher })
     core.updateMultiCellRenderInfo({ levels: new Uint8Array([1, 1, 1, 1]), globalIds: new Uint32Array([0, 1, 2, 3]) })
-    core.init = callback => callback?.()
+    core.init = callback => callback?.(undefined as never)
     editLayer.patchCore = core
     await tick()
     editLayer.executePickCells('brush', true, [64, 448])
@@ -246,15 +250,16 @@ async function main() {
         const densityLayer = new TopologyLayer(camera as never)
         await densityLayer.initialize(camera as never, gl)
         await densityLayer.setReadOnlySource({
-            meta: { epsg: 3857, bounds: [0, 0, 1000, 1000], grid_info: [[1000, 1000], [pitch, pitch]], level_info: [{ width: 1, height: 1 }, { width: side, height: side }], subdivide_rules: [[side, side]], alignment_origin: [0, 0], cellCount: id - 1, attributes: ['level'], elevationRange: [0, 0], landClasses: [0] },
-            loadView(bounds, scale) { return Promise.resolve(index.query(bounds, scale)) },
+            meta: { revision: `checkerboard-${side}`, displayLayers: index.displayLayers,
+                epsg: 3857, bounds: [0, 0, 1000, 1000], grid_info: [[1000, 1000], [pitch, pitch]], level_info: [{ width: 1, height: 1 }, { width: side, height: side }], subdivide_rules: [[side, side]], alignment_origin: [0, 0], cellCount: id - 1, attributes: ['level'], elevationRange: [0, 0], landClasses: [0] },
+            loadBlocks(blocks) { return Promise.resolve(index.queryBlocks(blocks)) },
             inspect(x, y) { return Promise.resolve(index.inspect(x, y)) },
         })
         draw(densityLayer, camera)
         const stats = densityLayer.getDisplayStats()
         check(`checkerboard ${id - 1} displays half occupied opacity`, near(pixel(288, 224)[3], 128), pixel(288, 224))
         densityStats.push({ originals: id - 1, fields: stats.fieldSamples, gpuBytes: stats.gpuBytes })
-        check(`checkerboard ${id - 1} originals draws only field samples`, stats.visibleCells === 0 && stats.fieldSamples === 4096 && stats.gpuBytes === 4096 * 64 + 768, stats)
+        check(`checkerboard ${id - 1} originals draws only field samples`, stats.visibleCells === 0 && stats.fieldSamples === 1024 && stats.gpuBytes === 1024 * 64 + 768, stats)
         densityLayer.remove(camera as never, gl)
     }
     measurements.checkerboards = densityStats
@@ -284,6 +289,59 @@ async function main() {
     restoringLayer.remove(camera as never, gl)
     gl.createProgram = createProgram
     window.fetch = realFetch
+
+
+    // Test the production shader, rather than only its CPU density helper.
+    // The same uniform grid is viewed immediately below/above four CSS pixels.
+    const uniformSide = 62.5
+    const thresholdIndex = new DisplayIndex([-4000, -4000, 4000, 4000], {
+        grid_info: [[1000, 1000], [uniformSide, uniformSide]], alignment_origin: [-4000, -4000],
+    })
+    const uniformCells = []
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+        const x0 = -4000 + x * uniformSide, y0 = -4000 + y * uniformSide
+        uniformCells.push({ id: y * 128 + x, bounds: [x0, y0, x0 + uniformSide, y0 + uniformSide] as [number, number, number, number], level: 1, elevation: 0, landClass: 0 })
+    }
+    thresholdIndex.load(uniformCells)
+    const thresholdMeasurements = []
+    for (const dpr of [1, 2]) {
+        canvas.width = SIZE * dpr; canvas.height = SIZE * dpr
+        const pair = []
+        for (const cellPixels of [3.999, 4.001, 16]) {
+            const thresholdCamera = new PublicCamera()
+            thresholdCamera.span = SIZE * uniformSide / cellPixels
+            const thresholdLayer = new TopologyLayer(thresholdCamera as never)
+            await thresholdLayer.initialize(thresholdCamera as never, gl)
+            await thresholdLayer.setReadOnlySource({
+                meta: { revision: 'threshold-uniform', displayLayers: thresholdIndex.displayLayers,
+                    epsg: 3857, bounds: [-4000, -4000, 4000, 4000], grid_info: [[1000, 1000], [uniformSide, uniformSide]],
+                    level_info: [{ width: 8, height: 8 }, { width: 128, height: 128 }], subdivide_rules: [[16, 16]],
+                    alignment_origin: [-4000, -4000], cellCount: uniformCells.length, attributes: ['level'], elevationRange: [0, 0], landClasses: [0] },
+                loadBlocks: async blocks => thresholdIndex.queryBlocks(blocks),
+                inspect: async (x, y) => thresholdIndex.inspect(x, y),
+            })
+            draw(thresholdLayer, thresholdCamera)
+            const palette = Array.from(thresholdLayer.paletteColorList.slice(3, 6))
+            const channel = palette.indexOf(Math.max(...palette)), base = palette[channel]
+            const extent = 384 * dpr, pixels = new Uint8Array(extent * extent * 4)
+            gl.readPixels(64 * dpr, 64 * dpr, extent, extent, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+            let sum = 0
+            for (let i = channel; i < pixels.length; i += 4) sum += pixels[i]
+            const meanDarkening = 1 - sum / (extent * extent * base)
+            const expected = OUTLINE_DARKENING * (1 - (1 - 1 / cellPixels) ** 2)
+            const stats = thresholdLayer.getDisplayStats()
+            check(`DPR ${dpr} uniform ${cellPixels}px shader matches centered-line coverage`, Math.abs(meanDarkening - expected) < 0.01,
+                { meanDarkening, expected, base, stats })
+            check(`DPR ${dpr} uniform ${cellPixels}px field indicator matches transition`, stats.fieldMode === (cellPixels < 4), stats)
+            pair.push({ cellPixels, meanDarkening, expected, stats })
+            thresholdLayer.remove(thresholdCamera as never, gl)
+        }
+        const difference = Math.abs(pair[0].meanDarkening - pair[1].meanDarkening)
+        check(`DPR ${dpr} uniform grid threshold mean darkening changes less than 0.01`, difference < 0.01, { difference, pair })
+        thresholdMeasurements.push({ dpr, difference, pair })
+    }
+    canvas.width = SIZE; canvas.height = SIZE
+    measurements.uniformThresholds = thresholdMeasurements
 
 
 }

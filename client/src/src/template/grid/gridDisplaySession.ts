@@ -1,7 +1,7 @@
 import type { Map as MapboxMap } from 'mapbox-gl'
 import type { GridDisplayMeta, ReadOnlyGridSource } from '@/core/grid/displayTypes'
 import { ResourceNode } from '../scene/scene'
-import { getGridDisplayMeta, inspectGrid, queryGridDisplay } from '../api/grid'
+import { getGridDisplayMeta, inspectGrid, queryGridDisplayBlocks } from '../api/grid'
 import { errorMessage } from '@/i18n/gridDisplay'
 import { displayBoundsOn4326 } from '@/components/gridDisplay/displayBounds'
 import { waitForDisplayMap } from '@/components/gridDisplay/mapReady'
@@ -18,10 +18,10 @@ async function createGridDisplay(node: ResourceNode, map: MapboxMap, signal: Abo
     signal.throwIfAborted()
     const source: ReadOnlyGridSource = {
         meta,
-        loadView: async (bounds, metersPerPixel, requestSignal) => {
+        loadBlocks: async (blocks, requestSignal) => {
             const combined = AbortSignal.any([signal, requestSignal])
             try {
-                const view = await queryGridDisplay(node.nodeInfo, bounds, metersPerPixel, combined)
+                const view = await queryGridDisplayBlocks(node.nodeInfo, meta, blocks, combined)
                 if (!combined.aborted) reportError(null)
                 return view
             } catch (error) {

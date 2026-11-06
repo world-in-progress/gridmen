@@ -3,7 +3,7 @@ import proj4 from 'proj4'
 import type { Converter } from 'proj4/dist/lib/core'
 import PatchCore, { type PatchCellChange } from '../../../core/grid/patchCore'
 import DisplayIndex from '../../../core/grid/displayIndex'
-import type { Bounds, DisplayAttribute, DisplayCell, DisplayChunk, DisplayField, DisplayStats, GridDisplayView, GridInspection, ReadOnlyGridSource } from '../../../core/grid/displayTypes'
+import type { Bounds, DisplayAttribute, DisplayBlock, DisplayCell, DisplayChunk, DisplayField, DisplayStats, GridDisplayView, GridInspection, ReadOnlyGridSource } from '../../../core/grid/displayTypes'
 import { ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, OUTLINE_DARKENING } from '../../../core/grid/displayColors'
 import type { CellCheckInfo, MultiCellBaseInfo } from '../../../core/grid/types'
 import VibrantColorGenerator from '../../../core/util/vibrantColorGenerator'
@@ -14,7 +14,10 @@ import type CustomLayerGroup from './customLayerGroup'
 import type { NHCustomLayerInterface } from './interfaces'
 import type { TopologyRenderSample } from './renderSample'
 import { chunkMatrix, chunkOnScreen, displayCamera, gridPoint, mercatorPoint, polygonIntersectsBox } from './displayProjection'
-import { validateDisplayMeta, validateDisplayView } from '../../../core/grid/displayValidation'
+import { selectDisplayBlocks } from '../../../core/grid/displayHierarchy'
+import { CELL_PIXEL_THRESHOLD, cellSide } from '../../../core/grid/displayMath'
+import { gridDisplayI18n } from '../../../i18n/gridDisplay'
+import { validateDisplayMeta } from '../../../core/grid/displayValidation'
 
 const LEVEL_PALETTE_LENGTH = 256
 const BENCHMARK_RENDER_FRAME_TIMEOUT_MS = 10000
@@ -69,6 +72,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _loading = false
     private _view: GridDisplayView = { chunks: [], cellCount: 0 }
     private _metersPerPixel = 1
+    private _blocks: DisplayBlock[] = []
     private _request?: AbortController
     private _viewPromise?: Promise<void>
     private _pendingView = false
@@ -79,6 +83,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _removed = false
     private _overlayCanvas: HTMLCanvasElement | null = null
     private _overlayCtx: CanvasRenderingContext2D | null = null
+    private _fieldIndicator: HTMLDivElement | null = null
+    private _updateFieldIndicator = () => {
+        if (!this._fieldIndicator) return
+        this._fieldIndicator.textContent = gridDisplayI18n.t('fieldActive')
+        this._fieldIndicator.style.display = this.visible && this._stats.fieldMode ? 'block' : 'none'
+    }
     private _resizeObserver?: ResizeObserver
     private _renderSampleListeners = new Set<RenderSampleListener>()
     private _displayListeners = new Set<(stats: DisplayStats) => void>()
@@ -195,6 +205,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         Object.assign(this._overlayCanvas.style, { top: '0', left: '0', position: 'absolute', pointerEvents: 'none', zIndex: '1' })
         this._overlayCtx = this._overlayCanvas.getContext('2d')
         this.map.getContainer().appendChild(this._overlayCanvas)
+        this._fieldIndicator = document.createElement('div')
+        this._fieldIndicator.setAttribute('role', 'status')
+        Object.assign(this._fieldIndicator.style, { position: 'absolute', bottom: '12px', left: '12px', padding: '4px 8px', background: '#252525', color: '#fff', fontSize: '12px', pointerEvents: 'none', zIndex: '1' })
+        this.map.getContainer().appendChild(this._fieldIndicator)
+        this._updateFieldIndicator()
+        gridDisplayI18n.on('languageChanged', this._updateFieldIndicator)
         this._resizeObserver = new ResizeObserver(this.resizeHandler)
         this._resizeObserver.observe(this.map.getContainer())
         this.resizeOverlay()
@@ -260,10 +276,13 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._subdividableIds.clear()
         this._mergeGroups.clear()
         this._completeMergeGroups.clear()
-        for (let id = 0; id < core.cellNum; id++) {
+        this._index.load(this.patchCells())
+    }
+    private *patchCells(): IterableIterator<DisplayCell> {
+        for (let id = 0; id < this.patchCore.cellNum; id++) {
             const cell = this.patchCell(id)
-            this._index.upsert(cell)
             this.trackCell(cell, true)
+            yield cell
         }
     }
     private patchChanged(change: PatchCellChange): void {
@@ -313,7 +332,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
             while (this._pendingView && this._dataReady && this.visible && !this._removed && generation === this._generation) {
                 if (!this._forceView && this.map.isMoving()) break
                 const camera = displayCamera(this.map, this._projection!)
-                const signature = `${camera.bounds.join(',')}:${camera.metersPerPixel}`
+                const signature = `${camera.bounds.join(',')}:${camera.metersPerPixel}:${camera.rasterRatio}`
                 const force = this._forceView
                 this._pendingView = false
                 this._forceView = false
@@ -323,13 +342,19 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                 this._loading = true
                 this.emitStats()
                 try {
+                    const layers = this._source?.meta.displayLayers ?? this._index!.displayLayers
+                    const origin = this._source?.meta.alignment_origin ?? this._index!.origin
+                    const blocks = signature === this._lastCamera ? this._blocks : selectDisplayBlocks(layers, origin, camera.bounds, point => {
+                        const screen = this.map.project(this._projection!.forward(point) as [number, number])
+                        return [screen.x * camera.rasterRatio, screen.y * camera.rasterRatio]
+                    })
                     const view = this._source
-                        ? await this._source.loadView(camera.bounds, camera.metersPerPixel, request.signal)
-                        : this._index!.query(camera.bounds, camera.metersPerPixel, this._showDeletedCells)
+                        ? await this._source.loadBlocks(blocks, request.signal)
+                        : this._index!.queryBlocks(blocks, this._showDeletedCells)
                     if (request.signal.aborted || generation !== this._generation || this._removed) return
-                    if (this._source) validateDisplayView(view)
                     this._view = this._source ? reuseChunks(this._view, view) : view
                     this._lastCamera = signature
+                    this._blocks = blocks
                     this._metersPerPixel = camera.metersPerPixel
                     this.syncGPU()
                     this.map.triggerRepaint()
@@ -386,11 +411,12 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private emitStats(): void {
         const resources = [...(this._buffers?.chunks.values() ?? [])]
         const fieldSamples = resources.reduce((sum, chunk) => sum + chunk.fieldSamples, 0)
-        const next: DisplayStats = { gpuBytes: (this._buffers?.gpuBytes ?? 0) + this._textureBytes, visibleChunks: resources.length, visibleCells: resources.reduce((sum, chunk) => sum + chunk.visibleCells, 0), fieldSamples, fieldMode: fieldSamples > 0, ready: this.isReady }
+        const next: DisplayStats = { gpuBytes: (this._buffers?.gpuBytes ?? 0) + this._textureBytes, visibleChunks: resources.length, visibleCells: resources.reduce((sum, chunk) => sum + chunk.visibleCells, 0), fieldSamples, fieldMode: fieldSamples > 0 || resources.some(chunk => chunk.source.cells.some(cell => cellSide(cell) / this._metersPerPixel < CELL_PIXEL_THRESHOLD)), ready: this.isReady }
         if (Object.keys(next).some(key => next[key as keyof DisplayStats] !== this._stats[key as keyof DisplayStats])) {
             this._stats = next
             for (const listener of this._displayListeners) listener({ ...next })
         }
+        this._updateFieldIndicator()
     }
 
     render(gl: WebGL2RenderingContext, matrix: number[]): void {
@@ -825,6 +851,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._pendingView = false
         this._forceView = false
         this._lastCamera = undefined
+        this._blocks = []
         this._loading = false
         this._buffers?.clear()
         this._view = { chunks: [], cellCount: this._view.cellCount }
@@ -839,6 +866,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._pendingView = false
         this._forceView = false
         this._lastCamera = undefined
+        this._blocks = []
         this._generation++
         this._unsubscribePatch?.()
         this._unsubscribePatch = undefined
@@ -888,6 +916,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.map.getCanvas().removeEventListener('webglcontextrestored', this._contextRestored)
         window.removeEventListener('keydown', this._keyDown)
         this._resizeObserver?.disconnect()
+        gridDisplayI18n.off('languageChanged', this._updateFieldIndicator)
+        this._fieldIndicator?.remove()
+        this._fieldIndicator = null
         this._overlayCanvas?.remove()
         this._overlayCanvas = null
         this._overlayCtx = null

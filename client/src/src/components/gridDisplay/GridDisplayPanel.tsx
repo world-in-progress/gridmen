@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Map as MapboxMap } from 'mapbox-gl'
 import type { DisplayAttribute, GridDisplayMeta } from '@/core/grid/displayTypes'
 import { ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, OUTLINE_DARKENING, elevationColor } from '@/core/grid/displayColors'
+import { outlineCoverage } from '@/core/grid/displayMath'
 import type TopologyLayer from '@/views/mapView/topology/TopologyLayer'
 import { useGridDisplayTranslation } from '@/i18n/gridDisplay'
 import GridInspector from './GridInspector'
@@ -87,11 +88,12 @@ export default function GridDisplayPanel({ map, layer, attributes, gridInfo, ele
         </section>}
         <section className='space-y-1'>
             <h2 className='font-bold text-base'>{t('density')}</h2>
-            <div className='h-3 bg-white flex' aria-hidden='true'>{[0.25, 0.5, 1].map(coverage => {
+            <div className='h-3 bg-white flex' aria-hidden='true'>{[8, 4, 1].map(pixels => {
+                const coverage = outlineCoverage(1, pixels)
                 const channel = 1 - OUTLINE_DARKENING * coverage
                 return <span key={coverage} className='flex-1' style={{ backgroundColor: normalizedColor([channel, channel, channel]) }} />
             })}</div>
-            <div className='flex justify-between text-xs'><span>0.25</span><span>0.5</span><span>1</span></div>
+            <div className='flex justify-between text-xs'><span>0.234375</span><span>0.4375</span><span>1</span></div>
             <p>{t('densityHint')}</p><p className='text-xs text-gray-300'>{t('densityFormula')}</p><p className='text-xs text-gray-300'>{t('densityThreshold')}</p>
         </section>
         <section className='space-y-1' aria-live='polite'>

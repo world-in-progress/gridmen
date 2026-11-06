@@ -6,6 +6,7 @@ import { MercatorCoordinate } from '../../../core/math/mercatorCoordinate'
 export interface DisplayCamera {
     bounds: Bounds
     metersPerPixel: number
+    rasterRatio: number
 }
 
 export function gridPoint(map: MapboxMap, projection: Converter, point: [number, number]): [number, number] {
@@ -13,31 +14,22 @@ export function gridPoint(map: MapboxMap, projection: Converter, point: [number,
     return projection.inverse([lngLat.lng, lngLat.lat]) as [number, number]
 }
 
-/** Sample the public camera in CSS pixels, including edge midpoints at pitch. */
+/** The public zero-pitch, zero-bearing camera uses CSS coordinates for widths. */
 export function displayCamera(map: MapboxMap, projection: Converter): DisplayCamera {
     const canvas = map.getCanvas()
-    const width = Math.max(1, canvas.clientWidth)
-    const height = Math.max(1, canvas.clientHeight)
-    const bounds: Bounds = [Infinity, Infinity, -Infinity, -Infinity]
-    let metersPerPixel = Infinity
-    for (const u of [0, 0.5, 1]) {
-        for (const v of [0, 0.5, 1]) {
-            const point: [number, number] = [u * width, v * height]
-            const xy = gridPoint(map, projection, point)
-            if (!xy.every(Number.isFinite)) throw new Error('Camera does not intersect finite grid coordinates')
-            bounds[0] = Math.min(bounds[0], xy[0])
-            bounds[1] = Math.min(bounds[1], xy[1])
-            bounds[2] = Math.max(bounds[2], xy[0])
-            bounds[3] = Math.max(bounds[3], xy[1])
-            for (const delta of [[1, 0], [0, 1]]) {
-                const adjacent = gridPoint(map, projection, [point[0] + delta[0], point[1] + delta[1]])
-                const distance = Math.hypot(adjacent[0] - xy[0], adjacent[1] - xy[1])
-                if (Number.isFinite(distance) && distance > 0) metersPerPixel = Math.min(metersPerPixel, distance)
-            }
-        }
-    }
+    const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight)
+    const corners = [[0, 0], [width, 0], [width, height], [0, height]] as [number, number][]
+    const points = corners.map(point => gridPoint(map, projection, point))
+    if (points.some(point => !point.every(Number.isFinite))) throw new Error('Camera does not intersect finite grid coordinates')
+    const bounds: Bounds = [Math.min(...points.map(p => p[0])), Math.min(...points.map(p => p[1])), Math.max(...points.map(p => p[0])), Math.max(...points.map(p => p[1]))]
+    const center = gridPoint(map, projection, [width / 2, height / 2])
+    const steps = [[width / 2 + 1, height / 2], [width / 2, height / 2 + 1]] as [number, number][]
+    const metersPerPixel = Math.min(...steps.map(point => {
+        const adjacent = gridPoint(map, projection, point)
+        return Math.hypot(adjacent[0] - center[0], adjacent[1] - center[1])
+    }))
     if (!(metersPerPixel > 0) || !Number.isFinite(metersPerPixel)) throw new Error('Invalid camera scale')
-    return { bounds, metersPerPixel }
+    return { bounds, metersPerPixel, rasterRatio: canvas.width / width }
 }
 
 export function mercatorPoint(projection: Converter, point: [number, number]): [number, number] {
@@ -65,7 +57,7 @@ export function chunkOnScreen(map: MapboxMap, projection: Converter, bounds: Bou
         && Math.max(...screen.map(p => p.y)) >= 0 && Math.min(...screen.map(p => p.y)) <= canvas.clientHeight
 }
 
-/** Convex projected-cell/selection intersection, also valid under map rotation. */
+/** Projected-cell intersection with a screen selection box. */
 export function polygonIntersectsBox(polygon: [number, number][], box: Bounds): boolean {
     const rectangle = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]]
     const axes: [number, number][] = [[1, 0], [0, 1]]

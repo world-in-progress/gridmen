@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
-import type { Bounds, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
+import { displayLayers } from '../src/core/grid/displayHierarchy'
+import type { DisplayBlock, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
 
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 const view: GridDisplayView = { cellCount: 1, chunks: [{
@@ -12,7 +13,7 @@ const view: GridDisplayView = { cellCount: 1, chunks: [{
 class Camera {
     center = 0
     moving = false
-    canvas = Object.assign(new EventTarget(), { clientWidth: 100, clientHeight: 100 })
+    canvas = Object.assign(new EventTarget(), { width: 100, height: 100, clientWidth: 100, clientHeight: 100 })
     listeners = new Map<string, Set<() => void>>()
     container = { appendChild() {}, getBoundingClientRect: () => ({ width: 100, height: 100 }) }
     getCanvas() { return this.canvas }
@@ -20,6 +21,7 @@ class Camera {
     triggerRepaint() {}
     isMoving() { return this.moving }
     unproject([x, y]: [number, number]) { return { lng: (x + this.center) * 0.01, lat: -y * 0.01 } }
+    project([lng, lat]: [number, number]) { return { x: lng / 0.01 - this.center, y: -lat / 0.01 } }
     on(event: string, fn: () => void) {
         const listeners = this.listeners.get(event) ?? new Set()
         listeners.add(fn)
@@ -30,9 +32,10 @@ class Camera {
 }
 
 function fixture(t: { after(fn: () => void): void }) {
-    const overlay = { style: {}, getContext: () => null, remove() {} }
+    const overlay = { style: {}, width: 0, height: 0, getContext: () => null, remove() {} }
+    const indicator = { style: {}, textContent: '', hidden: false, setAttribute() {}, remove() {} }
     const globals = {
-        document: { createElement: () => overlay }, window: new EventTarget(),
+        document: { createElement: (tag: string) => tag === 'canvas' ? overlay : indicator }, window: new EventTarget(),
         ResizeObserver: class { observe() {} disconnect() {} },
     }
     const originals = Object.getOwnPropertyDescriptors(globalThis)
@@ -43,16 +46,17 @@ function fixture(t: { after(fn: () => void): void }) {
     const layer = new TopologyLayer(camera as never)
     layer.initDOM()
     layer.initialized = true
-    const calls: { bounds: Bounds; signal: AbortSignal; resolve: (data: GridDisplayView) => void }[] = []
+    const calls: { blocks: DisplayBlock[]; center: number; signal: AbortSignal; resolve: (data: GridDisplayView) => void }[] = []
     let active = 0, maxActive = 0
     const source: ReadOnlyGridSource = {
-        meta: { epsg: 4326, bounds: [-10, -10, 10, 10], grid_info: [[1, 1]],
+        meta: { revision: 'scheduling-fixture', displayLayers: displayLayers([-10, -10, 10, 10], [[1, 1]], [0, 0]),
+            epsg: 4326, bounds: [-10, -10, 10, 10], grid_info: [[1, 1]],
             alignment_origin: [0, 0], level_info: [{ width: 20, height: 20 }], subdivide_rules: [],
             cellCount: 1, attributes: ['level'], elevationRange: [0, 0], landClasses: [0] },
-        loadView(bounds, _mpp, signal) {
+        loadBlocks(blocks, signal) {
             active++
             maxActive = Math.max(active, maxActive)
-            return new Promise<GridDisplayView>(resolve => calls.push({ bounds, signal, resolve }))
+            return new Promise<GridDisplayView>(resolve => calls.push({ blocks, center: camera.center, signal, resolve }))
                 .finally(() => { active-- })
         },
         inspect: async () => ({ cell: null, neighbors: [] }),
@@ -92,7 +96,7 @@ test('camera movement keeps visible data and requests only the final camera', as
     f.camera.emit('moveend')
     await tick()
     assert.equal(f.calls.length, 2)
-    assert.equal(f.calls[1].bounds[0], 1.2)
+    assert.equal(f.calls[1].center, 120)
     f.calls[1].resolve(view)
     await tick()
     assert.equal(f.layer.isReady, true)
@@ -118,7 +122,7 @@ test('one in-flight query coalesces camera bursts and reaches final ready', asyn
     f.calls[0].resolve(view)
     await tick()
     assert.equal(f.calls.length, 2)
-    assert.equal(f.calls[1].bounds[0], 1.2, 'only the most recent camera may follow the first query')
+    assert.equal(f.calls[1].center, 120, 'only the most recent camera may follow the first query')
     assert.equal(f.layer.isReady, false)
     for (let i = 121; i <= 240; i++) {
         f.camera.center = i
@@ -130,7 +134,7 @@ test('one in-flight query coalesces camera bursts and reaches final ready', asyn
     f.calls[1].resolve(view)
     await tick()
     assert.equal(f.calls.length, 3)
-    assert.equal(f.calls[2].bounds[0], 2.4)
+    assert.equal(f.calls[2].center, 240)
     f.calls[2].resolve(view)
     await started
     assert.equal(f.layer.isReady, true)

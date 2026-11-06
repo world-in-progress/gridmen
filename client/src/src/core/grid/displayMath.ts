@@ -4,7 +4,8 @@ export const CELL_PIXEL_THRESHOLD = 4
 export const FULL_OUTLINE_THRESHOLD = 8
 
 export function outlineCoverage(metersPerPixel: number, minCellSize: number): number {
-    return Math.min(1, 2 * metersPerPixel / minCellSize)
+    const u = Math.min(1, metersPerPixel / minCellSize)
+    return 1 - (1 - u) ** 2
 }
 
 /** Smooth opacity handoff from field density to the original cell outlines. */
@@ -37,79 +38,47 @@ export function cellSide(cell: DisplayCell): number {
     return Math.min(cell.bounds[2] - cell.bounds[0], cell.bounds[3] - cell.bounds[1])
 }
 
-/** The smallest schema-aligned dyadic interval no wider than one CSS pixel. */
-export function sampleStep(unit: number, metersPerPixel: number): number {
-    // Public geographic projection round-trips can land infinitesimally below
-    // a power of two. Snap that numerical boundary to avoid doubling samples
-    // on an otherwise unchanged CSS-pixel lattice.
-    const exponent = Math.floor(Math.log2(metersPerPixel / unit) + 1e-8)
-    return unit * 2 ** exponent
-}
-
+/** Physical float64 totals and exact class weights in a shared finest-lattice area unit. */
 export class AreaSummary {
     occupiedArea = 0
     elevationArea = 0
     private singleClass: number | undefined
-    private singleClassArea = 0
-    private multiClasses: Map<number, number> | undefined
-    private readonly sideAreas: Map<number, number> | null
-    private readonly levelAreas: Map<number, number> | null
+    private singleClassUnits = 0n
+    private multiClasses: Map<number, bigint> | undefined
     minCellSize = Infinity
     finestLevel = -Infinity
 
-    constructor(private readonly fixedSide?: number, private readonly fixedLevel?: number) {
-        this.sideAreas = fixedSide === undefined ? new Map() : null
-        this.levelAreas = fixedLevel === undefined ? new Map() : null
-    }
+    constructor(private readonly trackExtrema = true) {}
 
     clone(): AreaSummary {
-        const copy = new AreaSummary(this.fixedSide, this.fixedLevel)
+        const copy = new AreaSummary(this.trackExtrema)
         copy.occupiedArea = this.occupiedArea
         copy.elevationArea = this.elevationArea
         copy.minCellSize = this.minCellSize
         copy.finestLevel = this.finestLevel
         copy.singleClass = this.singleClass
-        copy.singleClassArea = this.singleClassArea
+        copy.singleClassUnits = this.singleClassUnits
         if (this.multiClasses) copy.multiClasses = new Map(this.multiClasses)
-        for (const [side, area] of this.sideAreas ?? []) copy.sideAreas!.set(side, area)
-        for (const [level, area] of this.levelAreas ?? []) copy.levelAreas!.set(level, area)
         return copy
     }
 
-    addCell(cell: DisplayCell, area: number, sign: 1 | -1): void {
+    addCell(cell: DisplayCell, area: number, sign: 1 | -1, classUnits: bigint): void {
         if (area <= 0) return
         const signedArea = area * sign
         this.occupiedArea += signedArea
         this.elevationArea += signedArea * cell.elevation
-        this.adjustClass(cell.landClass, signedArea)
-        if (this.fixedSide !== undefined && this.fixedLevel !== undefined) {
-            this.minCellSize = this.occupiedArea > 0 ? this.fixedSide : Infinity
-            this.finestLevel = this.occupiedArea > 0 ? this.fixedLevel : -Infinity
-        } else {
-            const side = cellSide(cell)
-            this.adjust(this.sideAreas!, side, signedArea)
-            this.adjust(this.levelAreas!, cell.level, signedArea)
-            if (sign === 1) {
-                this.minCellSize = Math.min(this.minCellSize, side)
-                this.finestLevel = Math.max(this.finestLevel, cell.level)
-            } else {
-                if (!this.sideAreas!.has(this.minCellSize)) {
-                    this.minCellSize = Infinity
-                    for (const size of this.sideAreas!.keys()) this.minCellSize = Math.min(this.minCellSize, size)
-                }
-                if (!this.levelAreas!.has(this.finestLevel)) {
-                    this.finestLevel = -Infinity
-                    for (const level of this.levelAreas!.keys()) this.finestLevel = Math.max(this.finestLevel, level)
-                }
-            }
+        this.updateClass(cell.landClass, classUnits * BigInt(sign))
+        if (this.trackExtrema && sign === 1) {
+            this.minCellSize = Math.min(this.minCellSize, cellSide(cell))
+            this.finestLevel = Math.max(this.finestLevel, cell.level)
         }
     }
 
-    addSummary(other: AreaSummary, scale = 1): void {
-        if (scale <= 0 || other.occupiedArea <= 0) return
-        this.occupiedArea += other.occupiedArea * scale
-        this.elevationArea += other.elevationArea * scale
-        other.forEachClass((category, area) => this.adjustClass(category, area * scale))
+    addSummary(other: AreaSummary): void {
+        if (other.occupiedArea <= 0) return
+        this.occupiedArea += other.occupiedArea
+        this.elevationArea += other.elevationArea
+        other.forEachClass((category, units) => this.updateClass(category, units))
         this.minCellSize = Math.min(this.minCellSize, other.minCellSize)
         this.finestLevel = Math.max(this.finestLevel, other.finestLevel)
     }
@@ -118,13 +87,12 @@ export class AreaSummary {
         if (this.occupiedArea <= 0) return null
         const sampleArea = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
         let landClass = Infinity
-        let classArea = -Infinity
-        const tieTolerance = sampleArea * 1e-12
-        this.forEachClass((category, area) => {
-            if (area > classArea + tieTolerance ||
-                (Math.abs(area - classArea) <= tieTolerance && category < landClass)) {
+        let winningUnits = -1n
+        this.forEachClass((category, units) => {
+            if (units > winningUnits ||
+                (units === winningUnits && category < landClass)) {
                 landClass = category
-                classArea = area
+                winningUnits = units
             }
         })
         return {
@@ -137,41 +105,41 @@ export class AreaSummary {
         }
     }
 
-    private adjust(map: Map<number, number>, key: number, delta: number): void {
-        const next = (map.get(key) ?? 0) + delta
+    private adjust(map: Map<number, bigint>, key: number, delta: bigint): void {
+        const next = (map.get(key) ?? 0n) + delta
         // Each removal uses the same geometric contribution as its insertion.
-        if (next === 0) map.delete(key)
+        if (next === 0n) map.delete(key)
         else map.set(key, next)
     }
 
-    private adjustClass(key: number, delta: number): void {
-        if (delta === 0) return
+    updateClass(key: number, delta: bigint): void {
+        if (delta === 0n) return
         if (this.multiClasses) {
             this.adjust(this.multiClasses, key, delta)
             if (this.multiClasses.size <= 1) {
-                const last = this.multiClasses.entries().next().value as [number, number] | undefined
+                const last = this.multiClasses.entries().next().value as [number, bigint] | undefined
                 this.singleClass = last?.[0]
-                this.singleClassArea = last?.[1] ?? 0
+                this.singleClassUnits = last?.[1] ?? 0n
                 this.multiClasses = undefined
             }
         } else if (this.singleClass === undefined) {
             this.singleClass = key
-            this.singleClassArea = delta
+            this.singleClassUnits = delta
         } else if (this.singleClass === key) {
-            this.singleClassArea += delta
-            if (this.singleClassArea === 0) this.singleClass = undefined
+            this.singleClassUnits += delta
+            if (this.singleClassUnits === 0n) this.singleClass = undefined
         } else {
-            this.multiClasses = new Map([[this.singleClass, this.singleClassArea], [key, delta]])
+            this.multiClasses = new Map([[this.singleClass, this.singleClassUnits], [key, delta]])
             this.singleClass = undefined
-            this.singleClassArea = 0
+            this.singleClassUnits = 0n
         }
     }
 
-    private forEachClass(visit: (category: number, area: number) => void): void {
+    private forEachClass(visit: (category: number, units: bigint) => void): void {
         if (this.multiClasses) {
             for (const [category, area] of this.multiClasses) visit(category, area)
         } else if (this.singleClass !== undefined) {
-            visit(this.singleClass, this.singleClassArea)
+            visit(this.singleClass, this.singleClassUnits)
         }
     }
 }

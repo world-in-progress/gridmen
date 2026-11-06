@@ -15,7 +15,7 @@ from fastapi.routing import APIRoute
 
 from ...core import settings
 from ...schemas.base import BaseResponse
-from ...schemas.grid import GridExportRequest, GridDisplayQuery
+from ...schemas.grid import GridExportRequest
 from ...grid_display import GridDisplayIndex, fingerprint
 
 logger = logging.getLogger(__name__)
@@ -217,17 +217,27 @@ def _accepts_gzip(value):
     return 0 < qualities.get('gzip',qualities.get('*',0)) <= 1
 
 
-@display_router.post('/{node_key}/display/query')
-def display_query(node_key: str, req: GridDisplayQuery, request: Request):
+@display_router.get('/{node_key}/display/nodes/{revision}/{block_layer}/{x}/{y}/{display_layer}')
+def display_nodes(node_key: str, revision: str, block_layer: int, x: int, y: int,
+                  display_layer: int, request: Request):
     with _display(node_key) as index:
-        # The index already returns validated JSON primitives. Encoding here
-        # avoids FastAPI's second Python walk over every pixel dictionary.
-        payload = index.query_json(req.bounds, req.metersPerPixel)
-    headers = {'Vary':'Accept-Encoding'}
+        if revision != index.revision:
+            raise HTTPException(status_code=409, detail='Grid display revision changed')
+        try:
+            index.validate_nodes(block_layer, x, y, display_layer)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        etag = f'W/"{revision}:{block_layer}:{x}:{y}:{display_layer}"'
+        headers = {'ETag':etag, 'Cache-Control':'public, max-age=31536000, immutable',
+                   'Vary':'Accept-Encoding'}
+        validators = {value.strip() for value in request.headers.get('if-none-match','').split(',')}
+        if '*' in validators or etag in validators:
+            return Response(status_code=304, headers=headers)
+        payload = index._nodes(block_layer, x, y, display_layer)
     if len(payload) >= 1000 and _accepts_gzip(request.headers.get('accept-encoding','')):
         payload = gzip.compress(payload,compresslevel=1,mtime=0)
         headers['Content-Encoding'] = 'gzip'
-    return Response(payload,media_type='application/json',headers=headers)
+    return Response(payload,media_type='application/octet-stream',headers=headers)
 
 
 @display_router.get('/{node_key}/display/inspect')

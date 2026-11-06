@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path'
 import { build } from 'esbuild'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const evidence = resolve(root, '../../.verification/topology-browser')
+const evidence = resolve(process.env.GRID_TEST_EVIDENCE ?? resolve(root, '../../.verification/topology-browser'))
 await mkdir(evidence, { recursive: true })
 await build({ entryPoints: [resolve(root, 'test/topologyLayer.browser.ts')], bundle: true, platform: 'browser',
     format: 'esm', target: 'chrome120', outfile: resolve(evidence, 'topologyLayer.bundle.js'),

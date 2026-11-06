@@ -1,127 +1,203 @@
-"""Measure moving display viewports over real loopback HTTP and published indexes.
-
-Supply PYTHONPATH=server/src:server and a task-local TMPDIR/settings/cache before
-running. This probe never builds an index or writes to source/cache directories.
-"""
+"""Benchmark cold display-index construction and GDN4 loopback HTTP blocks."""
 import argparse
-import cProfile
-import gzip
 import hashlib
-import importlib.util
 import json
-from pathlib import Path
-import pstats
 import socket
+import struct
+import subprocess
 import threading
 import time
+from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
-from pydantic_core import to_json
 import uvicorn
-
-from gridmen_backend import grid_display
+from fastapi import FastAPI
 from gridmen_backend.api.endpoints import grid
+from gridmen_backend.grid_display import GridDisplayIndex, fingerprint
 
 
-def snapshot(root):
-    return [(str(p.relative_to(root)),p.stat().st_size,p.stat().st_mtime_ns)
-            for p in sorted(root.rglob('*')) if p.is_file()]
+def emit(**values):
+    print(json.dumps(values, sort_keys=True), flush=True)
+
+
+def snapshot(path):
+    return [(str(file.relative_to(path)), file.stat().st_size, file.stat().st_mtime_ns)
+            for file in sorted(path.rglob('*')) if file.is_file()]
+
+
+def select_blocks(index, bounds, scale):
+    """Delegate benchmark camera selection to the actual client implementation."""
+    adapter = Path(__file__).resolve().parent.parent/'client/src/test/selectDisplayBlocks.mjs'
+    result = subprocess.run(['node',str(adapter)],input=json.dumps({
+        'layers':index.meta['displayLayers'],'origin':index.origin,
+        'viewport':bounds,'metersPerPixel':scale,
+    }),text=True,capture_output=True,check=True)
+    return json.loads(result.stdout)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('source',type=Path)
-    parser.add_argument('cache',type=Path)
-    parser.add_argument('--reference-module',type=Path)
-    parser.add_argument('--profile-dir',type=Path)
-    parser.add_argument('--trials',type=int,default=3)
-    parser.add_argument('--scales',type=float,nargs='+',default=[32,4,.5])
+    parser = argparse.ArgumentParser()
+    parser.add_argument('source', type=Path)
+    parser.add_argument('cache', type=Path)
     args = parser.parse_args()
-    source,cache = args.source.resolve(),args.cache.resolve()
-    module = grid_display
-    if args.reference_module:
-        spec = importlib.util.spec_from_file_location('reference_display',args.reference_module)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    revision = module.fingerprint(source)
-    identity = [module.VERSION,str(source),revision]
-    if any(len(spec) == 8 for spec in grid_display.layer_specs(grid_display.checked_meta(source))):
-        identity.append('clipped-dyadic-1')
-    key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
-    directory = cache/key
-    if not (directory/'manifest.json').is_file():
-        raise RuntimeError('A published matching manifest is required; this probe cannot build an index')
-    before = snapshot(directory)
+    source = args.source.resolve()
+    cache = args.cache.resolve()
+    before_source = fingerprint(source)
     started = time.perf_counter()
-    index = module.GridDisplayIndex(source,cache)
-    print(json.dumps(dict(stage='index',module=module.__file__,source=str(source),cache=str(directory),
-                          openMs=(time.perf_counter()-started)*1000)),flush=True)
+    index = GridDisplayIndex(source, cache)
+    emit(stage='index', source=str(source), cells=index.meta['cellCount'],
+         revision=index.revision, buildOrOpenSeconds=round(time.perf_counter()-started, 3),
+         buildSeconds=index.manifest['buildSeconds'],
+         derivedMigrationSeconds=index.manifest.get('derivedMigrationSeconds'),
+         peakRssBytes=index.manifest['peakRssBytes'],
+         cacheBytes=sum(file.stat().st_size for file in index.directory.rglob('*') if file.is_file()))
+    if source.name == 'b4i':
+        bounds = index._cell(8)[0]['bounds']
+        inspected = index.inspect((bounds[0]+bounds[2])/2, (bounds[1]+bounds[3])/2)
+        east = [(entry['cell']['id'], entry['edgeIds']) for entry in inspected['neighbors']
+                if entry['side'] == 'east']
+        assert east == [(42475,[24]),(42479,[25])], east
+        emit(stage='topology', cell=8, east=east)
+    before_cache = snapshot(index.directory)
+    block_layer = next(i for i, layer in enumerate(index.layers) if layer.w >= 256 and layer.h >= 256)
+    choices = []
+    for cid in (1, max(2, index.meta['cellCount']//2), index.meta['cellCount']):
+        bounds = index._cell(cid)[0]['bounds']
+        x, y = index.layers[block_layer].locate((bounds[0]+bounds[2])/2,
+                                                 (bounds[1]+bounds[3])/2, index.origin)
+        point = (int(x), int(y))
+        if point not in choices:
+            choices.append(point)
+        if len(choices) == 2:
+            break
+    assert len(choices) == 2, 'Need two distinct occupied block positions'
+    display_layers = sorted({0, next(i for i,layer in enumerate(index.layers) if layer.level == 1),
+                             block_layer})
 
-    # Profiles run without a server thread, independently of timed HTTP trials.
-    if args.profile_dir:
-        args.profile_dir.mkdir(parents=True,exist_ok=True)
-        for scale in args.scales:
-            bounds = [820965.5-512*scale,835829.5-384*scale,820965.5+512*scale,835829.5+384*scale]
-            profile = cProfile.Profile()
-            action = index.query if args.reference_module else index.query_json
-            payload = profile.runcall(action,bounds,scale)
-            del payload
-            with (args.profile_dir/f'{source.name}-{scale}.txt').open('w') as output:
-                pstats.Stats(profile,stream=output).strip_dirs().sort_stats('cumtime').print_stats(35)
-
-    grid._display_source = lambda key:source
-    grid._DISPLAY_CACHE[(source,tuple(revision))] = index
+    grid._display_source = lambda _: source
+    grid.settings.ROOT_DIR = cache.parent.parent
+    grid._DISPLAY_CACHE[(source,tuple(before_source))] = index
     app = FastAPI()
-    if args.reference_module:
-        # The original endpoint returns dictionaries to FastAPI's encoder.
-        def reference_endpoint(req:grid.GridDisplayQuery):
-            with grid._display('benchmark') as active:
-                return active.query(req.bounds,req.metersPerPixel)
-        app.post('/api/grid/benchmark/display/query')(reference_endpoint)
-    else:
-        app.include_router(grid.router,prefix='/api')
+    app.include_router(grid.router, prefix='/api')
     sock = socket.socket()
     sock.bind(('127.0.0.1',0))
-    server = uvicorn.Server(uvicorn.Config(app,log_level='error',lifespan='off'))
-    thread = threading.Thread(target=server.run,kwargs={'sockets':[sock]},daemon=True)
+    server = uvicorn.Server(uvicorn.Config(app, log_level='error', lifespan='off'))
+    thread = threading.Thread(target=server.run, kwargs={'sockets':[sock]}, daemon=True)
     thread.start()
     while not server.started:
         time.sleep(.01)
     try:
-        with httpx.Client(base_url=f'http://127.0.0.1:{sock.getsockname()[1]}',trust_env=False,timeout=120) as client:
-            for scale in args.scales:
-                for trial in range(args.trials):
-                    x,y = 820965.5+64*scale*trial,835829.5+24*scale*trial
-                    bounds = [x-512*scale,y-384*scale,x+512*scale,y+384*scale]
+        with httpx.Client(base_url=f'http://127.0.0.1:{sock.getsockname()[1]}',
+                          trust_env=False, timeout=120) as client:
+            meta = client.get('/api/grid/probe/display/meta')
+            meta.raise_for_status()
+            assert meta.json()['revision'] == index.revision
+            meta_path = cache.parent.parent/f'{source.name}-meta.json'
+            meta_path.write_text(meta.text)
+            emit(stage='meta',path=str(meta_path))
+            for position, (x,y) in enumerate(choices):
+                for display_layer in display_layers:
+                    path = f'/api/grid/probe/display/nodes/{index.revision}/{block_layer}/{x}/{y}/{display_layer}'
                     started = time.perf_counter()
-                    view = index.query(bounds,scale)
-                    query_ms = (time.perf_counter()-started)*1000
-                    stats = dict(cells=sum(len(c['cells']) for c in view['chunks']),
-                                 fields=sum(len(c['fields']) for c in view['chunks']),nodes=index.last_query_nodes)
-                    expected = hashlib.sha256(to_json(view)).hexdigest()
-                    del view
-                    for encoding in ['identity'] if args.reference_module else ['identity','gzip']:
-                        started = time.perf_counter()
-                        response = client.post('/api/grid/benchmark/display/query',
-                            json=dict(bounds=bounds,metersPerPixel=scale),headers={'Accept-Encoding':encoding})
-                        elapsed = (time.perf_counter()-started)*1000
-                        response.raise_for_status()
-                        # Parsing is outside the request-to-full-bytes timing.
-                        # Re-encoding also normalizes the stdlib float spelling.
-                        actual = hashlib.sha256(to_json(response.json())).hexdigest()
-                        assert actual == expected,'HTTP changed query semantics or order'
-                        print(json.dumps(dict(stage='navigation',scale=scale,trial=trial,bounds=bounds,
-                            encoding=encoding,queryMs=query_ms,httpMs=elapsed,bytes=len(response.content),
-                            wireBytes=int(response.headers['content-length']),semanticSha256=actual,**stats)),flush=True)
+                    expected = index.nodes(block_layer,x,y,display_layer)
+                    direct_ms = (time.perf_counter()-started)*1000
+                    started = time.perf_counter()
+                    response = client.get(path, headers={'Accept-Encoding':'identity'})
+                    http_ms = (time.perf_counter()-started)*1000
+                    response.raise_for_status()
+                    assert response.content == expected
+                    assert response.content[:4] == b'GDN4'
+                    count = struct.unpack_from('<I', response.content, 4)[0]
+                    assert len(response.content) == 8+72*count
+                    assert client.get(path,headers={'If-None-Match':response.headers['etag']}).status_code == 304
+                    emit(stage='http', position=position, block=[block_layer,x,y],
+                         displayLayer=display_layer, records=count,
+                         directMs=round(direct_ms,3), httpMs=round(http_ms,3),
+                         bytes=len(response.content), visitedSlots=index.last_query_nodes,
+                         tileScans=index.last_query_tiles,
+                         rtreeQueries=index.last_query_directory_queries,
+                         sha256=hashlib.sha256(response.content).hexdigest())
+                    if position == 1 and display_layer == 0:
+                        wire_path = cache.parent.parent/f'{source.name}-dense-fine.gdn4'
+                        wire_path.write_bytes(response.content)
+                        emit(stage='wireSample',path=str(wire_path),block=[block_layer,x,y],
+                             displayLayer=display_layer)
+
+            # A pan asks for a new spatial block after the index is warm.
+            anchor_x,anchor_y = choices[-1]
+            for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
+                px,py = anchor_x+dx,anchor_y+dy
+                layer = index.layers[block_layer]
+                if (px,py) in choices or not (layer.x0 <= px < layer.x0+layer.nx
+                        and layer.y0 <= py < layer.y0+layer.ny):
+                    continue
+                pan_expected = index.nodes(block_layer,px,py,0)
+                if struct.unpack_from('<I',pan_expected,4)[0]:
+                    break
+            else:
+                raise AssertionError('No occupied adjacent block for warm pan')
+            pan_path = f'/api/grid/probe/display/nodes/{index.revision}/{block_layer}/{px}/{py}/0'
+            started = time.perf_counter()
+            pan = client.get(pan_path,headers={'Accept-Encoding':'identity'})
+            pan_ms = (time.perf_counter()-started)*1000
+            pan.raise_for_status()
+            assert pan.content == pan_expected
+            emit(stage='warmPan',fromBlock=[block_layer,anchor_x,anchor_y],
+                 toBlock=[block_layer,px,py],displayLayer=0,
+                 records=struct.unpack_from('<I',pan.content,4)[0],bytes=len(pan.content),
+                 httpMs=round(pan_ms,3),visitedSlots=index.last_query_nodes,
+                 tileScans=index.last_query_tiles,
+                 rtreeQueries=index.last_query_directory_queries)
+
+            # Issue every block for two 1024x768 views at physically distinct
+            # positions. Block and selected levels follow the display lattice.
+            for position,(center_x,center_y) in enumerate(choices):
+                center_box = index.layers[block_layer].bounds(center_x,center_y,index.origin)
+                cx,cy = (center_box[0]+center_box[2])/2,(center_box[1]+center_box[3])/2
+                for scale in (4.0,0.5,index.layers[-1].h*8):
+                    bounds = (cx-512*scale,cy-384*scale,cx+512*scale,cy+384*scale)
+                    selections = select_blocks(index,bounds,scale)
+                    started = time.perf_counter()
+                    blocks=nonempty=records=total_bytes=slots=tiles=rtree_queries=0
+                    for selection in selections:
+                        view_path = (f'/api/grid/probe/display/nodes/{index.revision}/'
+                                     f'{selection["blockLayer"]}/{selection["x"]}/'
+                                     f'{selection["y"]}/{selection["displayLayer"]}')
+                        view = client.get(view_path,headers={'Accept-Encoding':'identity'})
+                        view.raise_for_status()
+                        n = struct.unpack_from('<I',view.content,4)[0]
+                        blocks += 1
+                        nonempty += n > 0
+                        records += n
+                        total_bytes += len(view.content)
+                        slots += index.last_query_nodes
+                        tiles += index.last_query_tiles
+                        rtree_queries += index.last_query_directory_queries
+                    emit(stage='fullViewport',position=position,scale=scale,
+                         requestedBlocks=selections,
+                         blocks=blocks,nonemptyBlocks=nonempty,records=records,
+                         bytes=total_bytes,visitedSlots=slots,tileScans=tiles,
+                         rtreeQueries=rtree_queries,
+                         httpMs=round((time.perf_counter()-started)*1000,3))
+            stale = client.get(path.replace(index.revision,'stale'),headers={'Accept-Encoding':'identity'})
+            assert stale.status_code == 409
+            zipped_path = (f'/api/grid/probe/display/nodes/{index.revision}/'
+                           f'{block_layer}/{anchor_x}/{anchor_y}/0')
+            zipped_expected = index.nodes(block_layer,anchor_x,anchor_y,0)
+            gzip_response = client.get(zipped_path,headers={'Accept-Encoding':'gzip'})
+            gzip_response.raise_for_status()
+            assert gzip_response.content == zipped_expected
+            emit(stage='cache', staleStatus=stale.status_code,
+                 gzipEncoding=gzip_response.headers.get('content-encoding'),
+                 etag=gzip_response.headers['etag'])
     finally:
         server.should_exit = True
         thread.join(10)
         sock.close()
         grid._close_display_cache()
-    assert module.fingerprint(source) == revision,'Source files changed'
-    assert snapshot(directory) == before,'Published index files changed'
-    print(json.dumps(dict(stage='verifiedReadOnly',source=str(source),cache=str(directory))),flush=True)
+    assert fingerprint(source) == before_source
+    assert snapshot(index.directory) == before_cache
+    emit(stage='verifiedReadOnly',source=str(source),cache=str(index.directory))
 
 
 if __name__ == '__main__':

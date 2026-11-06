@@ -1,250 +1,207 @@
 import type {
-    Bounds, DisplayCell, DisplayChunk, DisplayField, GridDisplayMeta, GridDisplayView, GridInspection,
+    Bounds, DisplayBlock, DisplayCell, DisplayChunk, DisplayField, DisplayLayer, GridDisplayMeta, GridDisplayView, GridInspection,
 } from './displayTypes'
-import {
-    AreaSummary, CELL_PIXEL_THRESHOLD, cellSide, containsPoint, intersects, sampleStep, validBounds,
-} from './displayMath'
+import { AreaSummary, cellSide, containsPoint, intersectionArea, intersects, validBounds } from './displayMath'
+import { axisIndex, blockKey, displayLayer, displayLayers, nodeBounds, selectDisplayBlocks } from './displayHierarchy'
 
 const CHUNK_SIZE = 64
 const MAX_CACHED_CHUNKS = 768
 
 type Schema = Partial<Pick<GridDisplayMeta, 'grid_info' | 'level_info' | 'alignment_origin'>>
-
-interface YNode {
-    lo: number
-    hi: number
-    all: AreaSummary
-    live: AreaSummary
-    directAll?: AreaSummary
-    directLive?: AreaSummary
-    left?: YNode
-    right?: YNode
-}
-
-interface XNode {
-    lo: number
-    hi: number
-    total?: YNode
-    direct?: YNode
-    left?: XNode
-    right?: XNode
-}
-
-interface CellTile {
+interface CellTile { x: number; y: number; ids: Set<number> }
+interface LevelStore { level: number; width: number; height: number; tiles: Map<string, CellTile> }
+interface SummaryNode {
     x: number
     y: number
-    ids: Set<number>
+    layer: number
+    all: AreaSummary
+    live: AreaSummary
+    original?: DisplayCell
+    hasDeleted: boolean
+    children: SummaryNode[]
+    /** Last node on a unary path, so sparse queries do not walk empty depth per output. */
+    jump?: SummaryNode
 }
+interface CachedChunk { chunk: DisplayChunk; revision: number; block?: string }
+function tileKey(x: number, y: number): string { return `${x},${y}` }
 
-interface LevelStore {
-    level: number
-    width: number
-    height: number
-    widthUnits: number
-    heightUnits: number
-    root: XNode
-    tiles: Map<string, CellTile>
-}
-
-interface CachedChunk {
-    chunk: DisplayChunk
-    bounds: Bounds
-    level?: number
-    fineLevels?: number[]
-    revision: number
-}
-
-function tileKey(x: number, y: number): string {
-    return `${x},${y}`
-}
-
-function makeY(lo: number, hi: number, cell: DisplayCell): YNode {
-    const side = cellSide(cell)
-    const all = new AreaSummary(side, cell.level)
-    return {
-        lo, hi, all, live: all,
-    }
-}
-
-const EMPTY_SUMMARY = new AreaSummary()
-
-function summary(node: YNode, showDeleted: boolean, direct: boolean): AreaSummary {
-    return direct
-        ? (showDeleted ? node.directAll ?? EMPTY_SUMMARY : node.directLive ?? EMPTY_SUMMARY)
-        : (showDeleted ? node.all : node.live)
-}
-
-function axisRange(bounds: Bounds, axis: 0 | 1, origin: number, unit: number): [number, number] {
-    const lo = Math.floor((bounds[axis] - origin) / unit)
-    const hi = Math.ceil((bounds[axis + 2] - origin) / unit)
-    const size = 2 ** Math.ceil(Math.log2(Math.max(1, hi - lo)))
-    return [lo, lo + size]
-}
-
-function alignedCoordinate(value: number, origin: number, unit: number): number {
-    const coordinate = (value - origin) / unit
-    const rounded = Math.round(coordinate)
-    if (!Number.isSafeInteger(rounded) || Math.abs(coordinate - rounded) > 1e-6) {
-        throw new Error('Display cell does not align to the schema lattice')
-    }
-    return rounded
-}
-
-/** Dynamic spatial index for original cells and exact area summaries at display resolution. */
+/** The same native/dyadic hierarchy as the server. An edit changes one ancestor path. */
 export default class DisplayIndex {
     readonly bounds: Bounds
-    /** Nodes visited by the most recent display query, useful for guarding query cost. */
+    readonly displayLayers: DisplayLayer[]
+    readonly origin: [number, number]
     queryVisits = 0
-
-    private readonly schema: Schema
+    updateVisits = 0
     private readonly cells = new Map<number, DisplayCell>()
     private readonly levels = new Map<number, LevelStore>()
+    private readonly nodes: Map<string, SummaryNode>[]
+    private readonly nativeLayers = new Map<number, number>()
+    private readonly classUnits = new Map<number, bigint>()
     private readonly chunks = new Map<string, CachedChunk>()
+    private readonly blockCaches = new Map<string, Set<string>>()
     private readonly edgeIds = new Map<string, number>()
     private readonly edgeKeys = new Map<number, string>()
     private nextRevision = 1
-    private originX: number
-    private originY: number
-    private unitX = 0
-    private unitY = 0
-    private rootX: [number, number] = [0, 1]
-    private rootY: [number, number] = [0, 1]
+    private readonly originX: number
+    private readonly originY: number
+    private readonly unitX: number
+    private readonly unitY: number
 
     constructor(bounds: Bounds, schema: Schema) {
         if (!validBounds(bounds)) throw new Error('Invalid display index bounds')
         this.bounds = [...bounds]
-        this.schema = schema
-        this.originX = schema.alignment_origin?.[0] ?? bounds[0]
-        this.originY = schema.alignment_origin?.[1] ?? bounds[1]
-        if (!Number.isFinite(this.originX) || !Number.isFinite(this.originY)) {
-            throw new Error('Invalid display alignment origin')
+        this.origin = schema.alignment_origin ?? [bounds[0], bounds[1]]
+        ;[this.originX, this.originY] = this.origin
+        if (!this.origin.every(Number.isFinite)) throw new Error('Invalid display alignment origin')
+        const sizes: [number, number][] = schema.grid_info ?? schema.level_info?.map(info => [
+            (bounds[2] - bounds[0]) / info.width, (bounds[3] - bounds[1]) / info.height,
+        ]) ?? []
+        this.displayLayers = displayLayers(bounds, sizes, this.origin)
+        this.nodes = this.displayLayers.map(() => new Map())
+        let units = 1n
+        for (let i = sizes.length - 1; i >= 0; i--) {
+            if (i + 1 < sizes.length) units *= BigInt(Math.round(sizes[i][0] / sizes[i + 1][0])) * BigInt(Math.round(sizes[i][1] / sizes[i + 1][1]))
+            this.classUnits.set(i, units)
         }
-        if (schema.grid_info?.length) {
-            this.unitX = Math.min(...schema.grid_info.map(info => info[0]))
-            this.unitY = Math.min(...schema.grid_info.map(info => info[1]))
-        } else if (schema.level_info?.length) {
-            this.unitX = Math.min(...schema.level_info.map(info => (bounds[2] - bounds[0]) / info.width))
-            this.unitY = Math.min(...schema.level_info.map(info => (bounds[3] - bounds[1]) / info.height))
+        this.unitX = sizes[sizes.length - 1][0]
+        this.unitY = sizes[sizes.length - 1][1]
+        this.displayLayers.forEach((layer, i) => {
+            if (layer.nativeLevel !== null) {
+                this.nativeLayers.set(layer.nativeLevel, i)
+                this.levels.set(layer.nativeLevel, { level: layer.nativeLevel, width: layer.width, height: layer.height, tiles: new Map() })
+            }
+        })
+    }
+
+    /** Initial build visits each stored node and its sparse class entries once, bottom-up. */
+    load(cells: Iterable<DisplayCell>): void {
+        if (this.cells.size) throw new Error('Initial display load requires an empty index')
+        for (const input of cells) {
+            const cell = this.checkedCell(input)
+            if (this.cells.has(cell.id)) throw new Error('Duplicate display cell ID')
+            const layer = this.nativeLayers.get(cell.level)!
+            const [x, y] = this.locate(layer, (cell.bounds[0] + cell.bounds[2]) / 2, (cell.bounds[1] + cell.bounds[3]) / 2)
+            const node = this.node(layer, x, y)
+            if (node.original) throw new Error('Duplicate display cell geometry')
+            node.original = cell
+            node.all.addCell(cell, (cell.bounds[2] - cell.bounds[0]) * (cell.bounds[3] - cell.bounds[1]), 1, this.classUnits.get(cell.level)!)
+            if (cell.deleted) node.live = new AreaSummary(false)
+            this.storeCell(cell, true)
         }
-        this.initializeLattice()
+        for (let i = 0; i < this.nodes.length; i++) {
+            for (const node of this.nodes[i].values()) {
+                this.refreshSummary(node)
+                if (i + 1 === this.nodes.length) continue
+                const [x, y] = this.parentCoordinates(node)
+                const parent = this.node(i + 1, x, y)
+                if (parent.original) throw new Error('Overlapping coarse and fine display cells')
+                parent.children.push(node)
+                if (node.live !== node.all && parent.live === parent.all) parent.live = parent.all.clone()
+                parent.all.addSummary(node.all)
+                if (parent.live !== parent.all) parent.live.addSummary(node.live)
+            }
+        }
     }
 
     upsert(input: DisplayCell): void {
-        if (!validBounds(input.bounds) || !Number.isSafeInteger(input.id) || input.id < 0 ||
-            !Number.isSafeInteger(input.level) || input.level < 0 ||
-            !Number.isFinite(input.elevation) || !Number.isFinite(input.landClass)) {
-            throw new Error('Invalid display cell')
-        }
-        const cell: DisplayCell = { ...input, bounds: [...input.bounds] }
-        const previous = this.cells.get(cell.id)
-
-        const store = this.getLevel(cell)
-        const x0 = alignedCoordinate(cell.bounds[0], this.originX, this.unitX)
-        const x1 = alignedCoordinate(cell.bounds[2], this.originX, this.unitX)
-        const y0 = alignedCoordinate(cell.bounds[1], this.originY, this.unitY)
-        const y1 = alignedCoordinate(cell.bounds[3], this.originY, this.unitY)
-        if (x0 < this.rootX[0] || x1 > this.rootX[1] || y0 < this.rootY[0] || y1 > this.rootY[1]) throw new Error('Display cell lies outside index bounds')
-        if (x1 - x0 !== store.widthUnits || y1 - y0 !== store.heightUnits || x0 % store.widthUnits !== 0 || y0 % store.heightUnits !== 0) throw new Error('Display cell does not match its schema level')
-        if (previous) this.remove(cell.id)
-        this.updateX(store.root, cell, x0, x1, y0, y1, 1)
-        const tx = Math.floor(x0 / (store.widthUnits * CHUNK_SIZE))
-        const ty = Math.floor(y0 / (store.heightUnits * CHUNK_SIZE))
-        const key = tileKey(tx, ty)
-        let tile = store.tiles.get(key)
-        if (!tile) {
-            tile = { x: tx, y: ty, ids: new Set() }
-            store.tiles.set(key, tile)
-        }
-        tile.ids.add(cell.id)
-        this.cells.set(cell.id, cell)
-        this.invalidate(cell)
+        const cell = this.checkedCell(input)
+        this.updateVisits = 0
+        const old = this.cells.get(cell.id)
+        if (old) this.change(old, -1)
+        this.change(cell, 1)
     }
 
     remove(id: number): void {
+        this.updateVisits = 0
         const cell = this.cells.get(id)
-        if (!cell) return
-        const store = this.levels.get(cell.level)!
-        const x0 = alignedCoordinate(cell.bounds[0], this.originX, this.unitX)
-        const x1 = alignedCoordinate(cell.bounds[2], this.originX, this.unitX)
-        const y0 = alignedCoordinate(cell.bounds[1], this.originY, this.unitY)
-        const y1 = alignedCoordinate(cell.bounds[3], this.originY, this.unitY)
-        this.updateX(store.root, cell, x0, x1, y0, y1, -1)
-        const tx = Math.floor(x0 / (store.widthUnits * CHUNK_SIZE))
-        const ty = Math.floor(y0 / (store.heightUnits * CHUNK_SIZE))
-        const key = tileKey(tx, ty)
-        const tile = store.tiles.get(key)!
-        tile.ids.delete(id)
-        if (!tile.ids.size) store.tiles.delete(key)
-        this.cells.delete(id)
-        this.invalidate(cell)
+        if (cell) this.change(cell, -1)
     }
 
-    getCell(id: number): DisplayCell | undefined {
-        return this.cells.get(id)
-    }
+    getCell(id: number): DisplayCell | undefined { return this.cells.get(id) }
 
-    /** Exact original-cell coverage for a display sample or selection overlay. */
+    /** Selection opacity is queried on the exact same display node, without leaf descent. */
     summarize(bounds: Bounds, showDeleted = true): DisplayField | null {
         if (!validBounds(bounds)) throw new Error('Invalid summary bounds')
-        return this.rangeSummary(bounds, [...this.levels.keys()], showDeleted).toField(bounds)
+        for (let i = 0; ; i++) {
+            const layer = this.layer(i)
+            if (i >= this.displayLayers.length && (layer.width > (bounds[2] - bounds[0]) * (1 + 1e-12)
+                || layer.height > (bounds[3] - bounds[1]) * (1 + 1e-12))) break
+            const [x, y] = this.locate(i, bounds[0], bounds[1])
+            const b = nodeBounds(layer, x, y, this.origin)
+            if (b.every((v, k) => Math.abs(v - bounds[k]) < Math.max(1, Math.abs(v)) * 1e-12)) {
+                this.ensureLayer(i)
+                const node = this.nodes[i].get(tileKey(x, y))
+                if (node) return (showDeleted ? node.all : node.live).toField(bounds)
+                for (let j = i + 1; j < this.displayLayers.length; j++) {
+                    const [cx, cy] = this.locate(j, (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
+                    const cell = this.nodes[j].get(tileKey(cx, cy))?.original
+                    if (cell && (showDeleted || !cell.deleted)) {
+                        const summary = new AreaSummary()
+                        summary.addCell(cell, intersectionArea(bounds, cell.bounds), 1, this.classUnits.get(cell.level)!)
+                        return summary.toField(bounds)
+                    }
+                }
+                return null
+            }
+        }
+        throw new Error('Selection summary must address a display node')
     }
 
     query(bounds: Bounds, metersPerPixel: number, showDeleted = true): GridDisplayView {
-        if (!validBounds(bounds) || !Number.isFinite(metersPerPixel) || metersPerPixel <= 0) {
-            throw new Error('Invalid display query')
-        }
+        if (!validBounds(bounds) || !(metersPerPixel > 0) || !Number.isFinite(metersPerPixel)) throw new Error('Invalid display query')
+        return this.queryBlocks(selectDisplayBlocks(this.displayLayers, this.origin, bounds, ([x, y]) => [x / metersPerPixel, y / metersPerPixel]), showDeleted)
+    }
+
+    queryBlocks(blocks: DisplayBlock[], showDeleted = true): GridDisplayView {
         this.queryVisits = 0
         const chunks: DisplayChunk[] = []
-        const visible: Bounds = [
-            Math.max(bounds[0], this.bounds[0]), Math.max(bounds[1], this.bounds[1]),
-            Math.min(bounds[2], this.bounds[2]), Math.min(bounds[3], this.bounds[3]),
-        ]
-        if (!validBounds(visible)) return { chunks, cellCount: this.cells.size }
-
-        const fineLevels: number[] = []
-        for (const store of [...this.levels.values()].sort((a, b) => a.level - b.level)) {
-            if (!store.tiles.size) continue
-            if (Math.min(store.width, store.height) / metersPerPixel < CELL_PIXEL_THRESHOLD) {
-                fineLevels.push(store.level)
-            } else {
-                this.visitTiles(store, visible, tile => {
-                    const key = `cell:${store.level}:${tile.x}:${tile.y}:${showDeleted ? 1 : 0}`
-                    const chunk = this.cached(key, this.cellChunk(store, tile, showDeleted), store.level)
-                    if (chunk.cells.length) chunks.push(chunk)
-                })
+        const originals = new Set<number>()
+        for (const block of blocks) {
+            const { blockLayer: i, x, y, displayLayer } = block
+            if (!Number.isSafeInteger(i) || !Number.isSafeInteger(displayLayer) || displayLayer < 0 || displayLayer > i
+                || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) throw new Error('Invalid display block')
+            const layer = this.layer(i)
+            if (x < layer.x0 || x >= layer.x0 + layer.nx || y < layer.y0 || y >= layer.y0 + layer.ny) throw new Error('Display block outside grid')
+            this.ensureLayer(i)
+            const bounds = nodeBounds(layer, x, y, this.origin)
+            let enclosing: DisplayCell | undefined
+            for (let j = i + 1; j < this.displayLayers.length; j++) {
+                const [cx, cy] = this.locate(j, (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
+                this.queryVisits++
+                const cell = this.nodes[j].get(tileKey(cx, cy))?.original
+                if (cell) { enclosing = cell; break }
             }
-        }
-
-        if (fineLevels.length) {
-            const stepX = sampleStep(this.unitX, metersPerPixel)
-            const stepY = sampleStep(this.unitY, metersPerPixel)
-            if (!(stepX > 0) || !(stepY > 0)) throw new Error('Display resolution is out of range')
-            const firstX = Math.floor((visible[0] - this.originX) / (stepX * CHUNK_SIZE))
-            const lastX = Math.floor((visible[2] - this.originX) / (stepX * CHUNK_SIZE))
-            const firstY = Math.floor((visible[1] - this.originY) / (stepY * CHUNK_SIZE))
-            const lastY = Math.floor((visible[3] - this.originY) / (stepY * CHUNK_SIZE))
-            // Mode belongs to the fixed schema, not to the currently populated
-            // stores. A local edit may create or empty a level anywhere.
-            const schemaSizes = this.schema.grid_info?.length ? this.schema.grid_info
-                : this.schema.level_info!.map(info => [
-                    (this.bounds[2] - this.bounds[0]) / info.width,
-                    (this.bounds[3] - this.bounds[1]) / info.height,
-                ])
-            const levelSignature = schemaSizes.flatMap(([width, height], level) =>
-                Math.min(width, height) / metersPerPixel < CELL_PIXEL_THRESHOLD ? [level] : []).join(',')
-            for (let cy = firstY; cy <= lastY; cy++) {
-                for (let cx = firstX; cx <= lastX; cx++) {
-                    const key = `field:${stepX}:${stepY}:${levelSignature}:${cx}:${cy}:${showDeleted ? 1 : 0}`
-                    const chunkBounds: Bounds = [
-                        this.originX + cx * CHUNK_SIZE * stepX,
-                        this.originY + cy * CHUNK_SIZE * stepY,
-                        this.originX + (cx + 1) * CHUNK_SIZE * stepX,
-                        this.originY + (cy + 1) * CHUNK_SIZE * stepY,
-                    ]
-                    const chunk = this.cached(key, () => this.fieldChunk(key, chunkBounds, cx, cy, stepX, stepY, fineLevels, showDeleted), undefined, fineLevels, chunkBounds)
-                    if (chunk.fields.length) chunks.push(chunk)
+            if (enclosing) {
+                if ((showDeleted || !enclosing.deleted) && !originals.has(enclosing.id)) {
+                    originals.add(enclosing.id)
+                    chunks.push(this.cached(`original:${enclosing.id}`, () => ({ key: '', bounds: enclosing!.bounds, cells: [enclosing!], fields: [] })))
                 }
+                continue
             }
+            const key = `${blockKey(block)}:${showDeleted ? 1 : 0}`
+            const chunk = this.cached(key, () => {
+                const cells: DisplayCell[] = [], fields: DisplayField[] = []
+                const visit = (node: SummaryNode) => {
+                    this.queryVisits++
+                    const summary = showDeleted ? node.all : node.live
+                    if (summary.occupiedArea <= 0) return
+                    if (node.original) { cells.push(node.original); return }
+                    if (node.layer === displayLayer) {
+                        fields.push(summary.toField(nodeBounds(this.layer(node.layer), node.x, node.y, this.origin))!)
+                    } else if (node.jump) {
+                        if (node.jump.layer >= displayLayer) visit(node.jump)
+                        else {
+                            const b = nodeBounds(this.layer(node.jump.layer), node.jump.x, node.jump.y, this.origin)
+                            const [cx, cy] = this.locate(displayLayer, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+                            visit(this.nodes[displayLayer].get(tileKey(cx, cy))!)
+                        }
+                    } else for (const child of node.children) visit(child)
+                }
+                const root = this.nodes[i].get(tileKey(x, y))
+                if (root) visit(root)
+                return { key, bounds, cells, fields }
+            }, `${i}:${x}:${y}`)
+            if (chunk.cells.length || chunk.fields.length) chunks.push(chunk)
         }
         this.trimCache(chunks)
         return { chunks, cellCount: this.cells.size }
@@ -301,232 +258,157 @@ export default class DisplayIndex {
         return [...selected].sort((a, b) => a - b)
     }
 
-    getChunkRevision(key: string): number {
-        return this.chunks.get(key)?.revision ?? 0
+    getChunkRevision(key: string): number { return this.chunks.get(key)?.revision ?? 0 }
+
+    private checkedCell(input: DisplayCell): DisplayCell {
+        const layerIndex = this.nativeLayers.get(input.level)
+        if (!validBounds(input.bounds) || !Number.isSafeInteger(input.id) || input.id < 0 || layerIndex === undefined || !Number.isFinite(input.elevation) || !Number.isSafeInteger(input.landClass) || input.landClass < 0) throw new Error('Invalid display cell')
+        const layer = this.displayLayers[layerIndex]
+        const b = input.bounds
+        const ix = Math.round((b[0] - this.originX) / layer.width)
+        const iy = Math.round((b[1] - this.originY) / layer.height)
+        const expected = nodeBounds(layer, ix, iy, this.origin)
+        if (b.some((v, i) => Math.abs(v - expected[i]) > Math.max(1, Math.abs(v)) * 1e-10) || b[0] < this.bounds[0] - 1e-7 || b[1] < this.bounds[1] - 1e-7 || b[2] > this.bounds[2] + 1e-7 || b[3] > this.bounds[3] + 1e-7) throw new Error('Display cell does not match its schema level')
+        return { ...input, bounds: [...input.bounds] }
     }
 
-    private initializeLattice(): void {
-        if (!(this.unitX > 0) || !(this.unitY > 0) ||
-            !Number.isFinite(this.unitX) || !Number.isFinite(this.unitY)) {
-            throw new Error('Invalid display schema cell sizes')
-        }
-        this.rootX = axisRange(this.bounds, 0, this.originX, this.unitX)
-        this.rootY = axisRange(this.bounds, 1, this.originY, this.unitY)
+    private locate(i: number, x: number, y: number): [number, number] {
+        const layer = this.layer(i)
+        return [axisIndex(x - this.originX, layer.width, layer.xLayout), axisIndex(y - this.originY, layer.height, layer.yLayout)]
     }
 
-    private getLevel(cell: DisplayCell): LevelStore {
-        let store = this.levels.get(cell.level)
-        if (store) return store
-        const gridSize = this.schema.grid_info?.[cell.level]
-        const levelCounts = this.schema.level_info?.[cell.level]
-        const width = gridSize?.[0] ?? (levelCounts
-            ? (this.bounds[2] - this.bounds[0]) / levelCounts.width
-            : cell.bounds[2] - cell.bounds[0])
-        const height = gridSize?.[1] ?? (levelCounts
-            ? (this.bounds[3] - this.bounds[1]) / levelCounts.height
-            : cell.bounds[3] - cell.bounds[1])
-        if (!(width > 0) || !(height > 0)) throw new Error('Invalid display level geometry')
-        const widthUnits = Math.round(width / this.unitX)
-        const heightUnits = Math.round(height / this.unitY)
-        if (widthUnits < 1 || heightUnits < 1 ||
-            Math.abs(width / this.unitX - widthUnits) > 1e-6 ||
-            Math.abs(height / this.unitY - heightUnits) > 1e-6) {
-            throw new Error('Display level does not align to the finest schema lattice')
+    private node(layer: number, x: number, y: number): SummaryNode {
+        const key = tileKey(x, y)
+        let node = this.nodes[layer].get(key)
+        if (!node) {
+            const all = new AreaSummary(false)
+            node = { x, y, layer, all, live: all, children: [], hasDeleted: false }
+            this.nodes[layer].set(key, node)
         }
-        store = {
-            level: cell.level, width, height, widthUnits, heightUnits,
-            root: { lo: this.rootX[0], hi: this.rootX[1] },
-            tiles: new Map(),
-        }
-        this.levels.set(cell.level, store)
-        return store
+        return node
     }
 
-    private updateX(node: XNode, cell: DisplayCell, x0: number, x1: number,
-        y0: number, y1: number, sign: 1 | -1): void {
-        const overlap = Math.min(node.hi, x1) - Math.max(node.lo, x0)
-        if (overlap <= 0) return
-        node.total ??= makeY(this.rootY[0], this.rootY[1], cell)
-        this.updateY(node.total, cell, y0, y1, overlap * this.unitX, sign)
-        if (x0 <= node.lo && node.hi <= x1) {
-            if (node.hi - node.lo === 1) {
-                node.direct = node.total
-                return
+    private parentCoordinates(node: SummaryNode): [number, number] {
+        if (node.layer >= this.displayLayers.length - 1) return [Math.floor(node.x / 2), Math.floor(node.y / 2)]
+        const b = nodeBounds(this.layer(node.layer), node.x, node.y, this.origin)
+        return this.locate(node.layer + 1, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+    }
+
+    private layer(index: number): DisplayLayer { return displayLayer(this.displayLayers, index) }
+
+    /** Extend only the at-most-four storage roots; never rebuild the fine tree. */
+    private ensureLayer(index: number): void {
+        for (let i = this.nodes.length; i <= index; i++) {
+            this.nodes.push(new Map())
+            for (const child of this.nodes[i - 1].values()) {
+                const [x, y] = this.parentCoordinates(child)
+                const parent = this.node(i, x, y)
+                parent.children.push(child)
+                if (child.live !== child.all && parent.live === parent.all) parent.live = parent.all.clone()
+                parent.all.addSummary(child.all)
+                if (parent.live !== parent.all) parent.live.addSummary(child.live)
             }
-            node.direct ??= makeY(this.rootY[0], this.rootY[1], cell)
-            this.updateY(node.direct, cell, y0, y1, (node.hi - node.lo) * this.unitX, sign)
-            return
-        }
-        const mid = (node.lo + node.hi) / 2
-        if (x0 < mid) {
-            node.left ??= { lo: node.lo, hi: mid }
-            this.updateX(node.left, cell, x0, x1, y0, y1, sign)
-            if (!node.left.total?.all.occupiedArea) node.left = undefined
-        }
-        if (x1 > mid) {
-            node.right ??= { lo: mid, hi: node.hi }
-            this.updateX(node.right, cell, x0, x1, y0, y1, sign)
-            if (!node.right.total?.all.occupiedArea) node.right = undefined
+            for (const parent of this.nodes[i].values()) this.refreshSummary(parent)
         }
     }
 
-    private updateY(node: YNode, cell: DisplayCell, y0: number, y1: number,
-        xWidth: number, sign: 1 | -1): void {
-        const overlap = Math.min(node.hi, y1) - Math.max(node.lo, y0)
-        if (overlap <= 0) return
-        const area = xWidth * overlap * this.unitY
-        if (cell.deleted && node.live === node.all) node.live = node.all.clone()
-        node.all.addCell(cell, area, sign)
-        if (!cell.deleted && node.live !== node.all) node.live.addCell(cell, area, sign)
-        if (y0 <= node.lo && node.hi <= y1) {
-            if (!node.directAll) {
-                node.directAll = new AreaSummary(cellSide(cell), cell.level)
-                node.directLive = node.directAll
+    private storeCell(cell: DisplayCell, add: boolean): void {
+        const store = this.levels.get(cell.level)!
+        const x = Math.floor(Math.round((cell.bounds[0] - this.originX) / store.width) / CHUNK_SIZE)
+        const y = Math.floor(Math.round((cell.bounds[1] - this.originY) / store.height) / CHUNK_SIZE)
+        const key = tileKey(x, y)
+        if (add) {
+            this.cells.set(cell.id, cell)
+            let tile = store.tiles.get(key)
+            if (!tile) { tile = { x, y, ids: new Set() }; store.tiles.set(key, tile) }
+            tile.ids.add(cell.id)
+        } else {
+            this.cells.delete(cell.id)
+            const tile = store.tiles.get(key)!
+            tile.ids.delete(cell.id)
+            if (!tile.ids.size) store.tiles.delete(key)
+        }
+    }
+
+    private change(cell: DisplayCell, sign: 1 | -1): void {
+        const first = this.nativeLayers.get(cell.level)!
+        let [x, y] = this.locate(first, (cell.bounds[0] + cell.bounds[2]) / 2, (cell.bounds[1] + cell.bounds[3]) / 2)
+        let child: SummaryNode | undefined
+        const signedUnits = this.classUnits.get(cell.level)! * BigInt(sign)
+        for (let i = first; i < this.nodes.length; i++) {
+            const node = sign === 1 ? this.node(i, x, y) : this.nodes[i].get(tileKey(x, y))!
+            this.updateVisits++
+            if (i === first) node.original = sign === 1 ? cell : undefined
+            if (child) {
+                const found = node.children.indexOf(child)
+                if (child.all.occupiedArea > 0 && found < 0) node.children.push(child)
+                if (child.all.occupiedArea <= 0 && found >= 0) node.children.splice(found, 1)
             }
-            if (cell.deleted && node.directLive === node.directAll) {
-                node.directLive = node.directAll.clone()
-            }
-            node.directAll.addCell(cell, area, sign)
-            if (!cell.deleted && node.directLive !== node.directAll) {
-                node.directLive!.addCell(cell, area, sign)
-            }
-            if (node.directAll.occupiedArea === node.directLive!.occupiedArea) {
-                node.directLive = node.directAll
-            }
-            if (node.all.occupiedArea === node.live.occupiedArea) node.live = node.all
-            return
+            if (cell.deleted && node.live === node.all) node.live = node.all.clone()
+            node.all.updateClass(cell.landClass, signedUnits)
+            if (!cell.deleted && node.live !== node.all) node.live.updateClass(cell.landClass, signedUnits)
+            this.refreshSummary(node)
+            if (!node.hasDeleted) node.live = node.all
+            const cacheKey = `${i}:${x}:${y}`
+            for (const key of this.blockCaches.get(cacheKey) ?? []) this.uncache(key)
+            if (node.all.occupiedArea === 0) this.nodes[i].delete(tileKey(x, y))
+            child = node
+            if (i + 1 < this.nodes.length) [x, y] = this.parentCoordinates(node)
         }
-        const mid = (node.lo + node.hi) / 2
-        if (y0 < mid) {
-            node.left ??= makeY(node.lo, mid, cell)
-            this.updateY(node.left, cell, y0, y1, xWidth, sign)
-            if (!node.left.all.occupiedArea) node.left = undefined
-        }
-        if (y1 > mid) {
-            node.right ??= makeY(mid, node.hi, cell)
-            this.updateY(node.right, cell, y0, y1, xWidth, sign)
-            if (!node.right.all.occupiedArea) node.right = undefined
-        }
-        if (node.all.occupiedArea === node.live.occupiedArea) node.live = node.all
+        this.uncache(`original:${cell.id}`)
+        this.storeCell(cell, sign === 1)
     }
 
-    private queryX(node: XNode | undefined, x0: number, x1: number,
-        y0: number, y1: number, showDeleted: boolean, out: AreaSummary): void {
-        if (!node || x1 <= node.lo || x0 >= node.hi ||
-            !node.total || summary(node.total, showDeleted, false).occupiedArea <= 0) return
-        this.queryVisits++
-        if (x0 <= node.lo && node.hi <= x1) {
-            this.queryY(node.total, y0, y1, showDeleted, out)
-            return
-        }
-        const overlap = Math.min(x1, node.hi) - Math.max(x0, node.lo)
-        if (node.direct && overlap > 0) {
-            const local = new AreaSummary()
-            this.queryY(node.direct, y0, y1, showDeleted, local)
-            out.addSummary(local, overlap / (node.hi - node.lo))
-        }
-        this.queryX(node.left, x0, x1, y0, y1, showDeleted, out)
-        this.queryX(node.right, x0, x1, y0, y1, showDeleted, out)
-    }
-
-    private queryY(node: YNode | undefined, y0: number, y1: number,
-        showDeleted: boolean, out: AreaSummary): void {
-        if (!node || y1 <= node.lo || y0 >= node.hi ||
-            summary(node, showDeleted, false).occupiedArea <= 0) return
-        this.queryVisits++
-        if (y0 <= node.lo && node.hi <= y1) {
-            out.addSummary(summary(node, showDeleted, false))
-            return
-        }
-        const overlap = Math.min(y1, node.hi) - Math.max(y0, node.lo)
-        if (overlap > 0) out.addSummary(summary(node, showDeleted, true), overlap / (node.hi - node.lo))
-        this.queryY(node.left, y0, y1, showDeleted, out)
-        this.queryY(node.right, y0, y1, showDeleted, out)
-    }
-
-    private rangeSummary(bounds: Bounds, levels: number[], showDeleted: boolean): AreaSummary {
-        const out = new AreaSummary()
-        const x0 = (bounds[0] - this.originX) / this.unitX
-        const x1 = (bounds[2] - this.originX) / this.unitX
-        const y0 = (bounds[1] - this.originY) / this.unitY
-        const y1 = (bounds[3] - this.originY) / this.unitY
-        for (const level of levels) {
-            this.queryX(this.levels.get(level)?.root, x0, x1, y0, y1, showDeleted, out)
-        }
-        return out
-    }
-
-    private fieldChunk(key: string, bounds: Bounds, cx: number, cy: number,
-        stepX: number, stepY: number, levels: number[], showDeleted: boolean): DisplayChunk {
-        const fields: DisplayChunk['fields'] = []
-        if (this.rangeSummary(bounds, levels, showDeleted).occupiedArea > 0) {
-            for (let iy = 0; iy < CHUNK_SIZE; iy++) {
-                for (let ix = 0; ix < CHUNK_SIZE; ix++) {
-                    const sample: Bounds = [
-                        this.originX + (cx * CHUNK_SIZE + ix) * stepX,
-                        this.originY + (cy * CHUNK_SIZE + iy) * stepY,
-                        this.originX + (cx * CHUNK_SIZE + ix + 1) * stepX,
-                        this.originY + (cy * CHUNK_SIZE + iy + 1) * stepY,
-                    ]
-                    const field = this.rangeSummary(sample, levels, showDeleted).toField(sample)
-                    if (field) fields.push(field)
-                }
+    private refreshSummary(node: SummaryNode): void {
+        for (const summary of node.live === node.all ? [node.all] : [node.all, node.live]) {
+            const live = summary === node.live && summary !== node.all
+            const original = node.original && (!live || !node.original.deleted) ? node.original : undefined
+            summary.occupiedArea = original ? (original.bounds[2] - original.bounds[0]) * (original.bounds[3] - original.bounds[1]) : 0
+            summary.elevationArea = original ? original.elevation * summary.occupiedArea : 0
+            summary.minCellSize = node.original && (!live || !node.original.deleted) ? cellSide(node.original) : Infinity
+            summary.finestLevel = node.original && (!live || !node.original.deleted) ? node.original.level : -Infinity
+            for (const child of node.children) {
+                const value = live ? child.live : child.all
+                summary.occupiedArea += value.occupiedArea
+                summary.elevationArea += value.elevationArea
+                summary.minCellSize = Math.min(summary.minCellSize, value.minCellSize)
+                summary.finestLevel = Math.max(summary.finestLevel, value.finestLevel)
             }
         }
-        return { key, bounds, cells: [], fields }
+        node.hasDeleted = !!node.original?.deleted || node.children.some(child => child.hasDeleted)
+        node.jump = node.children.length === 1 ? node.children[0].jump ?? node.children[0] : undefined
     }
 
-    private cellChunk(store: LevelStore, tile: CellTile, showDeleted: boolean): () => DisplayChunk {
-        return () => {
-            const bounds: Bounds = [
-                this.originX + tile.x * CHUNK_SIZE * store.width,
-                this.originY + tile.y * CHUNK_SIZE * store.height,
-                this.originX + (tile.x + 1) * CHUNK_SIZE * store.width,
-                this.originY + (tile.y + 1) * CHUNK_SIZE * store.height,
-            ]
-            return {
-                key: `cell:${store.level}:${tile.x}:${tile.y}:1`, bounds,
-                cells: [...tile.ids].sort((a, b) => a - b).map(id => this.cells.get(id)!)
-                    .filter(cell => showDeleted || !cell.deleted),
-                fields: [],
-            }
-        }
-    }
-
-    private cached(key: string, build: () => DisplayChunk, level?: number,
-        fineLevels?: number[], bounds?: Bounds): DisplayChunk {
-        let entry = this.chunks.get(key)
-        if (entry) {
-            this.chunks.delete(key)
-            this.chunks.set(key, entry)
-            return entry.chunk
-        }
+    private cached(key: string, build: () => DisplayChunk, block?: string): DisplayChunk {
+        const old = this.chunks.get(key)
+        if (old) { this.chunks.delete(key); this.chunks.set(key, old); return old.chunk }
         const chunk = build()
         chunk.key = key
-        entry = {
-            chunk, bounds: bounds ?? chunk.bounds, level, fineLevels,
-            revision: this.nextRevision++,
+        this.chunks.set(key, { chunk, revision: this.nextRevision++, block })
+        if (block) {
+            const keys = this.blockCaches.get(block) ?? new Set<string>()
+            keys.add(key)
+            this.blockCaches.set(block, keys)
         }
-        this.chunks.set(key, entry)
         return chunk
     }
 
-    private trimCache(visibleChunks: DisplayChunk[]): void {
-        const visibleKeys = new Set(visibleChunks.map(chunk => chunk.key))
-        for (const [key, entry] of this.chunks) {
-            if (!entry.chunk.cells.length && !entry.chunk.fields.length) this.chunks.delete(key)
-        }
-        const budget = Math.max(MAX_CACHED_CHUNKS, visibleKeys.size)
-        for (const key of this.chunks.keys()) {
-            if (this.chunks.size <= budget) break
-            if (!visibleKeys.has(key)) this.chunks.delete(key)
+    private uncache(key: string): void {
+        const entry = this.chunks.get(key)
+        this.chunks.delete(key)
+        if (entry?.block) {
+            const keys = this.blockCaches.get(entry.block)!
+            keys.delete(key)
+            if (!keys.size) this.blockCaches.delete(entry.block)
         }
     }
 
-    private invalidate(cell: DisplayCell): void {
-        for (const [key, entry] of this.chunks) {
-            if ((entry.level === cell.level || entry.fineLevels !== undefined) &&
-                intersects(entry.bounds, cell.bounds)) this.chunks.delete(key)
+    private trimCache(visible: DisplayChunk[]): void {
+        const keys = new Set(visible.map(chunk => chunk.key))
+        const budget = Math.max(MAX_CACHED_CHUNKS, keys.size)
+        for (const key of this.chunks.keys()) {
+            if (this.chunks.size <= budget) break
+            if (!keys.has(key)) this.uncache(key)
         }
     }
 
