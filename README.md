@@ -35,6 +35,8 @@ Camera-independent summaries retain occupied area, area-weighted elevation, ever
 
 The first view builds reusable summaries from the assembled files with batch validation, recording each file's size, modification time, and SHA256. Later opens compare size and modification time; a change rebuilds the summaries. Each completed generation is published atomically, so existing readers can finish using their original generation.
 
+A dedicated browser worker selects Mercator display blocks, decodes their responses, and prepares projected geometry. Each block is acknowledged before the next input is sent; obsolete zoom or edit work stops at that boundary. Geometry and decoded-block caches retain the candidate, displayed view, and two most recent completed stopped views. GPU buffers retain only the currently visible chunks.
+
 The assembled-grid viewer offers level, elevation, and land-class fields. Elevation and land class reflect the final scenario attributes in `ne.txt`, including vector interventions. Click the map in **Check**, or enable the patch editor's checking tool, to inspect the original cell and its neighbors at any scale. The inspector includes every segmented edge at coarse/fine boundaries; field samples are never reported as computational cells.
 
 ## Quick start
