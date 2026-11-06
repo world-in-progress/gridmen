@@ -87,8 +87,11 @@ export class DisplayGeometryEngine {
             const sample = field ? chunk.fields[index - chunk.cells.length] : chunk.cells[index]
             const [x0, y0, x1, y1] = sample.bounds
             const offset = index * 16
-            const tl = this.worldPoint(x0, y1), tr = this.worldPoint(x1, y1)
-            const bl = this.worldPoint(x0, y0), br = this.worldPoint(x1, y0)
+            const left = this.column(x0)
+            const tl = this.projectVertex(this.vertexInColumn(left, x0, y1))
+            const right = this.column(x1)
+            const tr = this.projectVertex(this.vertexInColumn(right, x1, y1))
+            const bl = this.projectVertex(this.vertexInColumn(left, x0, y0)), br = this.projectVertex(this.vertexInColumn(right, x1, y0))
             data[offset] = tl[0] - origin[0]; data[offset + 1] = tl[1] - origin[1]
             data[offset + 2] = tr[0] - origin[0]; data[offset + 3] = tr[1] - origin[1]
             data[offset + 4] = bl[0] - origin[0]; data[offset + 5] = bl[1] - origin[1]
@@ -108,18 +111,29 @@ export class DisplayGeometryEngine {
     }
 
     private worldPoint(x: number, y: number): [number, number] {
-        const vertex = this.vertex(x, y)
+        return this.projectVertex(this.vertex(x, y))
+    }
+
+    private projectVertex(vertex: DisplayVertex): [number, number] {
         if (!vertex.world) {
-            const world = MercatorCoordinate.fromLonLat(this.projection.forward([x, y] as [number, number]))
+            const world = MercatorCoordinate.fromLonLat(this.projection.forward([vertex.x, vertex.y] as [number, number]))
             if (!world.every(Number.isFinite)) throw new Error('Nonfinite display geometry')
             vertex.world = world
         }
         return vertex.world
     }
 
-    private vertex(x: number, y: number): DisplayVertex {
+    private column(x: number): VertexColumn {
         let column = this.points.get(x)
         if (!column) { column = { points: new Map() }; this.points.set(x, column) }
+        return column
+    }
+
+    private vertex(x: number, y: number): DisplayVertex {
+        return this.vertexInColumn(this.column(x), x, y)
+    }
+
+    private vertexInColumn(column: VertexColumn, x: number, y: number): DisplayVertex {
         let vertex = column.points.get(y)
         if (!vertex) {
             vertex = { x, y, references: 0 }
@@ -135,8 +149,10 @@ export class DisplayGeometryEngine {
         // share exact values across a canonical partition change.
         for (const [key, footprint] of live) if (!this.geometryGroups.has(key)) {
             const vertices: DisplayVertex[] = []
+            let columnX = NaN, column: VertexColumn | undefined
             visitDisplayGeometry(footprint, (x, y) => {
-                const vertex = this.vertex(x, y)
+                if (!column || x !== columnX) { columnX = x; column = this.column(x) }
+                const vertex = this.vertexInColumn(column, x, y)
                 vertex.references++
                 vertices.push(vertex)
             })
