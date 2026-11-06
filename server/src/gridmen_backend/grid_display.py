@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, contextmanager
 from itertools import pairwise
 from pathlib import Path
 
@@ -32,6 +32,9 @@ TILE = 64
 CELL = struct.Struct('!QdddddBBBBB')
 EDGE = struct.Struct('!IQBddddQQdi')
 DISPLAY_RECORD = struct.Struct('<Q7dII')
+DISPLAY_DTYPE = np.dtype([('id', '<u8'), ('bounds', '<f8', (4,)),
+                          ('area', '<f8'), ('z', '<f8'), ('min', '<f8'),
+                          ('level', '<u4'), ('land', '<u4')])
 NODE = np.dtype([('id', '<u8'), ('area', '<f8'), ('z', '<f8'),
                  ('min', '<f8'), ('level', '<u2'), ('land', 'u1')])
 _LOCK = threading.Lock()
@@ -944,6 +947,8 @@ class GridDisplayIndex:
         self.layers = [Layer(directory,i,spec,tiles=tiles) for i,(spec,tiles) in enumerate(zip(self.manifest['layers'],self.manifest['layerTiles']))]
         self.offsets = self.cells = self.edges = None
         self._cell_file = self._edge_file = None
+        self._directory_db = None
+        self._query_lock = threading.Lock()
         try:
             self.offsets = np.memmap(directory / 'offsets.bin',dtype='<u8',mode='r')
             self._cell_file = (self.source / 'cell_topo.bin').open('rb')
@@ -956,6 +961,9 @@ class GridDisplayIndex:
             raise
 
     def close(self):
+        if self._directory_db is not None:
+            self._directory_db.close()
+            self._directory_db = None
         for mapping in (self.cells,self.edges):
             if mapping is not None:
                 mapping.close()
@@ -1071,6 +1079,36 @@ class GridDisplayIndex:
         self.validate_nodes(block_layer, x, y, display_layer)
         return self._nodes(block_layer, x, y, display_layer)
 
+    @contextmanager
+    def _directory(self):
+        # Reuse this immutable generation's read-only connection and prepared
+        # statements. Serialize its use across FastAPI worker threads; opening
+        # an existing index still does stat-only validation and no SQL scan.
+        with self._query_lock:
+            if self._directory_db is None:
+                path = self.directory/'tile-rtree.sqlite'
+                self._directory_db = sqlite3.connect(f'file:{path}?mode=ro', uri=True,
+                                                     check_same_thread=False)
+            yield self._directory_db
+
+    def _records(self, nodes, bounds, box):
+        """Pack selected nodes together, retaining original binary geometry."""
+        records = np.empty(len(nodes), dtype=DISPLAY_DTYPE)
+        for field in ('id', 'area', 'z', 'min', 'level', 'land'):
+            records[field] = nodes[field]
+        records['bounds'] = bounds
+        originals = nodes['id'] != 0
+        ids = nodes['id'][originals]
+        if len(ids):
+            offsets = np.asarray(self.offsets[ids-1], dtype=np.intp)
+            records['bounds'][originals] = _at(self.cells, CELL_HEADER, offsets)['bounds']
+        exact = records['bounds']
+        intersects = ((exact[:,0] < box[2]) & (exact[:,2] > box[0])
+                      & (exact[:,1] < box[3]) & (exact[:,3] > box[1]))
+        # Only originals need this exact half-open test. Summary ownership was
+        # already selected by the clipped lattice's midpoint rule.
+        return records[~originals | intersects].tobytes()
+
     def _nodes(self, block_layer, x, y, display_layer):
         block = self._layer(block_layer)
         box = block.bounds(x, y, self.origin)
@@ -1080,10 +1118,9 @@ class GridDisplayIndex:
         visited = 0
         tile_scans = 0
         directory_queries = 0
-        path = self.directory/'tile-rtree.sqlite'
         search = _rectangle_ranges(box)
         max_native = max(i for i, layer in enumerate(self.layers) if layer.level > 0)
-        with closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as db:
+        with self._directory() as db:
             directory_queries += 1
             tiles = _directory_query(db, 'tile', 'c.tx, c.ty', search,
                                      display_layer, display_layer)
@@ -1107,44 +1144,39 @@ class GridDisplayIndex:
                 # Midpoint ownership follows the clipped-dyadic hierarchy.
                 bx, by = block.locate((bounds[0]+bounds[2])/2,
                                        (bounds[1]+bounds[3])/2, self.origin)
-                for pos in np.flatnonzero((bx == x) & (by == y)):
-                    node = tile[sy[pos], sx[pos]]
-                    cid = int(node['id'])
-                    if cid:
-                        original = CELL.unpack_from(self.cells, int(self.offsets[cid-1])+4)
-                        chosen = original[1:5]
-                        if not (chosen[0] < box[2] and chosen[2] > box[0]
-                                and chosen[1] < box[3] and chosen[3] > box[1]):
-                            continue
-                    else:
-                        chosen = tuple(float(axis[pos]) for axis in bounds)
-                    records.append(DISPLAY_RECORD.pack(
-                        cid, *chosen, float(node['area']), float(node['z']),
-                        float(node['min']), int(node['level']), int(node['land'])))
+                selected = (bx == x) & (by == y)
+                if np.any(selected):
+                    records.append(self._records(tile[sy[selected], sx[selected]],
+                                                 np.column_stack(bounds)[selected], box))
 
             if display_layer < max_native:
                 directory_queries += 1
-                originals = _directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
-                                             search, display_layer+1, max_native)
-                seen_originals = set()
-                for cid, i, gx, gy in originals:
-                    if cid in seen_originals:
-                        continue
-                    seen_originals.add(cid)
-                    visited += 1
-                    exact = CELL.unpack_from(self.cells, int(self.offsets[cid-1])+4)[1:5]
-                    if not (exact[0] < box[2] and exact[2] > box[0]
-                            and exact[1] < box[3] and exact[3] > box[1]):
-                        continue
-                    node = self.layers[i].get(gx, gy)
-                    records.append(DISPLAY_RECORD.pack(
-                        cid, *exact, float(node['area']), float(node['z']),
-                        float(node['min']), int(node['level']), int(node['land'])))
+                originals = list(_directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
+                                                  search, display_layer+1, max_native))
+                if originals:
+                    # Rtree fragments can repeat a cell. Preserve the cursor's
+                    # first-occurrence order so the wire output stays stable.
+                    unique, groups, seen = [], defaultdict(list), set()
+                    for cid, i, gx, gy in originals:
+                        if cid not in seen:
+                            seen.add(cid)
+                            groups[(i, gx//TILE, gy//TILE)].append(len(unique))
+                            unique.append((gx, gy))
+                    entries = np.array(unique, dtype=np.int64)
+                    visited += len(entries)
+                    nodes = np.empty(len(entries), dtype=NODE)
+                    for (i, tx, ty), positions in groups.items():
+                        selected = np.asarray(positions, dtype=np.intp)
+                        tile = self.layers[i].tile(tx, ty)
+                        tile_scans += 1
+                        nodes[selected] = tile[entries[selected,1]%TILE, entries[selected,0]%TILE]
+                    records.append(self._records(nodes, np.zeros((len(nodes),4)), box))
         self.last_query_nodes = visited
         self.last_query_tiles = tile_scans
         self.last_query_directory_queries = directory_queries
-        require(len(records) <= 0xffffffff, 'Display block has too many records')
-        return b'GDN4' + struct.pack('<I', len(records)) + b''.join(records)
+        count = sum(len(part)//DISPLAY_RECORD.size for part in records)
+        require(count <= 0xffffffff, 'Display block has too many records')
+        return b'GDN4' + struct.pack('<I', count) + b''.join(records)
 
     def _ancestor_nodes(self, block_layer, x, y, display_layer):
         layer = self._layer(display_layer)

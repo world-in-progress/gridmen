@@ -127,9 +127,9 @@ def create_empty_grid(node_key: str):
 
 
 def _display_source(node_key: str) -> Path:
-    if not noodle._has_node(node_key):
-        raise HTTPException(status_code=404, detail=f'Grid node {node_key} not found')
     record = noodle._load_node_record(node_key, is_cascade=False)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f'Grid node {node_key} not found')
     params = json.loads(record.launch_params)
     return Path(params['resource_space']).resolve()
 
@@ -153,11 +153,16 @@ async def _display_lifespan(app):
 
 @contextmanager
 def _display(node_key: str):
-    # Hold ownership through the request so invalidation/eviction cannot unmap
-    # an index being queried by another thread. Each worker has its own cache.
+    # Node lookup/path resolution does not use live index mappings. Let that
+    # I/O overlap a different request's query before taking index ownership.
+    try:
+        source = _display_source(node_key)
+    except (OSError,ValueError,KeyError) as exc:
+        raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
+    # Hold ownership while the index is in use so invalidation/eviction cannot
+    # unmap another thread's query. Each worker has its own cache.
     with _DISPLAY_LOCK:
         try:
-            source = _display_source(node_key)
             key = (source,tuple(fingerprint(source)))
             for old in list(_DISPLAY_CACHE):
                 if old[0] == source and old != key:

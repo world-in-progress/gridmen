@@ -68,7 +68,8 @@ def test_same_size_stat_changes_rebuild_and_preserve_source(tmp_path, damage):
 def measured_nodes(index, selection, monkeypatch):
     """Observe real source unpacking, mapped tile access, and SQLite VM work."""
     counts = dict(cells=0, tiles=0, sql_steps=0)
-    original_cell, original_tile, original_connect = display.CELL, display.Layer.tile, sqlite3.connect
+    original_cell, original_at = display.CELL, display._at
+    original_tile, original_connect = display.Layer.tile, sqlite3.connect
 
     def unpack(*args):
         counts['cells'] += 1
@@ -77,6 +78,11 @@ def measured_nodes(index, selection, monkeypatch):
     def tile(*args, **kwargs):
         counts['tiles'] += 1
         return original_tile(*args, **kwargs)
+
+    def gather(data, dtype, offsets):
+        if data is index.cells:
+            counts['cells'] += len(offsets)
+        return original_at(data, dtype, offsets)
 
     def step():
         counts['sql_steps'] += 1
@@ -89,9 +95,16 @@ def measured_nodes(index, selection, monkeypatch):
 
     with monkeypatch.context() as patch:
         patch.setattr(display, 'CELL', SimpleNamespace(unpack_from=unpack))
+        patch.setattr(display, '_at', gather)
         patch.setattr(display.Layer, 'tile', tile)
         patch.setattr(sqlite3, 'connect', connect)
-        records = decode_nodes(index.nodes(*selection))
+        if index._directory_db is not None:
+            index._directory_db.set_progress_handler(step, 1)
+        try:
+            records = decode_nodes(index.nodes(*selection))
+        finally:
+            if index._directory_db is not None:
+                index._directory_db.set_progress_handler(None, 0)
     return records, counts
 
 
@@ -224,7 +237,16 @@ def test_cached_open_and_queries_do_not_hash_or_scan(tmp_path, monkeypatch):
         raise AssertionError('Cached open/query scanned validated files')
 
     monkeypatch.setattr(display, '_checksum', no_scan)
-    monkeypatch.setattr(display, '_at', no_scan)
+    original_at = display._at
+    gathers = []
+
+    def selected_original(data, dtype, offsets):
+        assert data is reopened.cells and dtype == display.CELL_HEADER
+        assert offsets.tolist() == [0]
+        gathers.append(len(offsets))
+        return original_at(data, dtype, offsets)
+
+    monkeypatch.setattr(display, '_at', selected_original)
     monkeypatch.setattr(display, 'checked_meta', no_scan)
     monkeypatch.setattr(display, '_validate_spatial_directory', no_scan)
     with monkeypatch.context() as context:
@@ -234,6 +256,7 @@ def test_cached_open_and_queries_do_not_hash_or_scan(tmp_path, monkeypatch):
         for _ in range(3):
             assert decode_nodes(reopened.nodes(0, 0, 0, 0))[0][0] == 1
             assert reopened.inspect(1, 1)['cell']['id'] == 1
+        assert gathers == [1, 1, 1]
     finally:
         reopened.close()
     assert snapshot(source) == before
