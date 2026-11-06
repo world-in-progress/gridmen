@@ -6,7 +6,6 @@ built once per source revision; viewport queries only visit intersecting nodes.
 """
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import math
@@ -18,7 +17,9 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing
 from itertools import pairwise
 from pathlib import Path
@@ -26,7 +27,7 @@ from pathlib import Path
 import numpy as np
 
 FILES = ('grid.meta.json', 'cell_topo.bin', 'edge_topo.bin', 'ne.txt', 'ns.txt')
-VERSION = 7
+VERSION = 10
 TILE = 64
 CELL = struct.Struct('!QdddddBBBBB')
 EDGE = struct.Struct('!IQBddddQQdi')
@@ -44,6 +45,41 @@ def require(ok, message):
 def fingerprint(source: Path):
     return [(name, (source / name).stat().st_size, (source / name).stat().st_mtime_ns)
             for name in FILES]
+
+
+def _file_stat(path):
+    stat = path.stat()
+    return [stat.st_size, stat.st_mtime_ns]
+
+
+def _cache_reusable(directory, source, revision):
+    """Validated build artifacts are immutable; opening compares stat only."""
+    if directory is None:
+        return False
+    try:
+        identity = json.loads((directory/'identity.json').read_text())
+        files = identity['files']
+        if (identity['version'] != VERSION or identity['source'] != str(source)
+                or identity['fingerprint'] != [list(entry) for entry in revision]
+                or not isinstance(files, dict) or 'manifest.json' not in files):
+            return False
+        return all(isinstance(name,str) and Path(name).name == name
+                   and name not in ('.','..') and _file_stat(directory/name) == expected
+                   for name,expected in files.items())
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _current_directory(cache, key):
+    try:
+        pointer = json.loads((cache/f'{key}.current.json').read_text())
+        name = pointer['directory']
+        if (pointer['version'] == VERSION and isinstance(name,str) and len(name) == 24
+                and all(value in '0123456789abcdef' for value in name)):
+            return cache/name
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        pass
+    return None
 
 
 def checked_meta(source):
@@ -103,15 +139,6 @@ class Layer(Lattice):
         self.tile_bytes = TILE*TILE*self.dtype.itemsize
         size = self.path.stat().st_size if self.path.exists() else 0
         self.capacity = size//self.tile_bytes
-        if mode == 'r':
-            require(all(type(value) is int for tile in tiles for value in tile), 'Invalid display tile coordinates/slots')
-            require(len(self.tiles) == len(tiles) and sorted(self.tiles.values()) == list(range(len(tiles))),
-                    'Invalid display tile slots')
-            require(size % self.tile_bytes == 0 and self.capacity >= len(self.tiles),
-                    'Truncated display layer')
-            require(all(self.x0//TILE <= x <= (self.x0+self.nx-1)//TILE
-                        and self.y0//TILE <= y <= (self.y0+self.ny-1)//TILE for x,y in self.tiles),
-                    'Display tile outside layer bounds')
 
     def tile(self, tx, ty, create=False):
         key = (int(tx),int(ty))
@@ -201,11 +228,17 @@ def _rollup(child,parent):
         for ux,uy,dy,dx,sy,sx in _groups(child,parent,tx,ty,source['area'] > 0):
             target = parent.tile(ux,uy,True)
             require(not np.any(target['id'][dy,dx]), 'Overlapping coarse/fine cells')
+            keys = dy*TILE+dx
+            order = np.argsort(keys, kind='stable')
+            starts = np.r_[0, np.flatnonzero(np.diff(keys[order]))+1]
+            dy, dx = np.divmod(keys[order][starts], TILE)
             for field in ('area','z'):
-                np.add.at(target[field],(dy,dx),source[field][sy,sx])
-            target['min'][dy,dx] = np.where(target['min'][dy,dx] > 0,target['min'][dy,dx],np.inf)
-            np.minimum.at(target['min'],(dy,dx),source['min'][sy,sx])
-            np.maximum.at(target['level'],(dy,dx),source['level'][sy,sx])
+                target[field][dy,dx] += np.add.reduceat(source[field][sy,sx][order], starts)
+            target['min'][dy,dx] = np.minimum(
+                np.where(target['min'][dy,dx] > 0,target['min'][dy,dx],np.inf),
+                np.minimum.reduceat(source['min'][sy,sx][order], starts))
+            target['level'][dy,dx] = np.maximum(target['level'][dy,dx],
+                np.maximum.reduceat(source['level'][sy,sx][order], starts))
             b = parent.bounds(dx+ux*TILE,dy+uy*TILE,(0,0))
             width = np.asarray(b[2], dtype='<f8')-np.asarray(b[0], dtype='<f8')
             height = np.asarray(b[3], dtype='<f8')-np.asarray(b[1], dtype='<f8')
@@ -244,19 +277,16 @@ def _histograms(directory, layers):
                 node = parent.tile(ux, uy)
                 areas = {}
 
-                def add(land, y, x, count, areas=areas):
-                    key = int(y), int(x), int(land)
-                    areas[key] = areas.get(key, 0) + int(count)
-
                 for tx, ty in sorted(child_tiles):
                     child_node = child.tile(tx, ty)
                     if child.level > 0:
                         for gx, gy, dy, dx, sy, sx in _groups(
                                 child, parent, tx, ty, child_node['id'] > 0):
                             if (gx, gy) == (ux, uy):
-                                for yy, xx, land in zip(
-                                        dy, dx, child_node['land'][sy, sx]):
-                                    add(land, yy, xx, units[child.level])
+                                keys = (dy*TILE+dx)*256+child_node['land'][sy, sx]
+                                keys, counts = np.unique(keys, return_counts=True)
+                                for key, count in zip(keys.tolist(), counts.tolist()):
+                                    areas[key] = areas.get(key, 0)+count*units[child.level]
                     if (tx, ty) not in previous:
                         continue
                     start, length = previous[(tx, ty)]
@@ -266,31 +296,41 @@ def _histograms(directory, layers):
                     bounds = child.bounds(x, y, (0, 0))
                     px, py = parent.locate((bounds[0]+bounds[2])/2,
                                            (bounds[1]+bounds[3])/2, (0, 0))
-                    for entry, xx, yy in zip(entries, px, py):
+                    keys = ((py%TILE)*TILE+px%TILE)*256
+                    for entry, xx, yy, key in zip(entries, px, py, keys.tolist()):
                         if xx//TILE == ux and yy//TILE == uy:
-                            add(entry[2], yy%TILE, xx%TILE, int(entry[3], 16))
+                            key += entry[2]
+                            areas[key] = areas.get(key, 0)+int(entry[3], 16)
 
-                summary = (node['area'] > 0) & (node['id'] == 0)
-                totals, winners = {}, {}
-                records = []
-                for (y, x, category), count in sorted(areas.items()):
-                    if not summary[y, x]:
-                        continue
-                    key = y, x
-                    totals[key] = totals.get(key, 0) + count
-                    current = winners.get(key)
-                    if current is None or count > current[0] or (
-                            count == current[0] and category < current[1]):
-                        winners[key] = count, category
-                    records.append([x, y, category, format(count, 'x')])
-                ys, xs = np.nonzero(summary)
-                for y, x in zip(ys, xs):
-                    key = int(y), int(x)
-                    require(key in totals and math.isclose(
-                        totals[key]*unit_area, float(node['area'][y, x]),
-                        rel_tol=1e-12, abs_tol=1e-7),
+                summary = ((node['area'] > 0) & (node['id'] == 0)).ravel()
+                keys = np.fromiter(areas, dtype=np.int64)
+                # Object reductions retain Python integers of arbitrary size.
+                # Never convert class weights to floating point or fixed-width
+                # integers to choose winners, even for a one-unit difference.
+                weights = np.fromiter(areas.values(), dtype=object)
+                order = np.argsort(keys)
+                order = order[summary[keys[order]//256]]
+                keys, weights = keys[order], weights[order]
+                slots = keys//256
+                starts = np.r_[0, np.flatnonzero(np.diff(slots))+1] if len(slots) else np.array([], dtype=np.intp)
+                occupied = slots[starts]
+                require(np.array_equal(occupied, np.flatnonzero(summary)),
                         'Display histogram differs from occupied area')
-                    node['land'][y, x] = winners[key][1]
+                records = []
+                if len(slots):
+                    totals = np.add.reduceat(weights, starts)
+                    maxima = np.maximum.reduceat(weights, starts)
+                    repeats = np.diff(np.r_[starts, len(slots)])
+                    candidates = np.where(weights == np.repeat(maxima, repeats), keys%256, 256)
+                    winners = np.minimum.reduceat(candidates, starts)
+                    physical = np.fromiter((total*unit_area for total in totals), dtype=np.float64)
+                    expected = node.reshape(-1)['area'][occupied]
+                    require(np.all(np.abs(physical-expected) <= np.maximum(
+                        1e-7, 1e-12*np.maximum(np.abs(physical),np.abs(expected)))),
+                        'Display histogram differs from occupied area')
+                    node.reshape(-1)['land'][occupied] = winners
+                    records = [[key//256%TILE, key//256//TILE, key%256, format(count,'x')]
+                               for key,count in zip(keys.tolist(),weights.tolist())]
                 if records:
                     payload = json.dumps(records, separators=(',', ':')).encode()
                     output.write(payload)
@@ -319,10 +359,18 @@ def _coordinate_ranges(lo, hi):
     if first_hi == last_hi:
         ranges = [(first_hi, last_hi, first_lo, last_lo)]
     else:
-        ranges = [(first_hi, first_hi, first_lo, 0xffffffff),
-                  (last_hi, last_hi, 0, last_lo)]
-        if first_hi+1 < last_hi:
-            ranges.append((first_hi+1, last_hi-1, 0, 0xffffffff))
+        ranges = []
+        # Full low-word ranges also include the endpoint's high word. Merge
+        # those exact adjacent boxes instead of indexing nine fragments for
+        # a rectangle whose four float64 low words are all zero.
+        if first_lo:
+            ranges.append((first_hi, first_hi, first_lo, 0xffffffff))
+            first_hi += 1
+        if last_lo != 0xffffffff:
+            ranges.append((last_hi, last_hi, 0, last_lo))
+            last_hi -= 1
+        if first_hi <= last_hi:
+            ranges.append((first_hi, last_hi, 0, 0xffffffff))
     return [tuple(word-(1 << 31) for word in interval) for interval in ranges]
 
 
@@ -394,10 +442,10 @@ def _tile_rtree(directory, layers, origin, source):
                         for tx, ty in sorted(layer.tiles):
                             tile = layer.tile(tx, ty)
                             sy, sx = np.nonzero(tile['id'])
-                            for local_y, local_x in zip(sy, sx):
-                                cid = int(tile['id'][local_y, local_x])
-                                original = CELL.unpack_from(cells, int(offsets[cid-1])+4)
-                                x0,y0,x1,y1 = original[1:5]
+                            ids = tile['id'][sy, sx].astype(np.int64)
+                            originals = _at(cells, CELL_HEADER, np.asarray(offsets[ids-1], dtype=np.intp))
+                            for local_y, local_x, cid, bounds in zip(sy, sx, ids.tolist(), originals['bounds']):
+                                x0,y0,x1,y1 = bounds
                                 insert('original', cid, number, (x0, y0, x1, y1))
                                 db.execute('INSERT INTO original_coords VALUES (?, ?, ?, ?)',
                                            (cid, number, int(local_x)+tx*TILE, int(local_y)+ty*TILE))
@@ -422,6 +470,46 @@ def _content_files(layers):
     return ['offsets.bin', 'tile-rtree.sqlite'] + [
         layer.path.name for layer in layers if layer.tiles
     ] + [f'hist-{i}.bin' for i in range(1, len(layers))]
+
+
+def _validate_spatial_directory(directory, layers, manifest):
+    # Relational/integrity checks belong exclusively to construction. Opens
+    # trust these invariants while source and artifact stats remain unchanged.
+    with closing(sqlite3.connect(f'file:{directory}/tile-rtree.sqlite?mode=ro', uri=True)) as db:
+        require(db.execute('SELECT count(*) FROM tile_bounds').fetchone()[0]
+                    == manifest['directoryFragments']['tile']
+                and db.execute('SELECT count(*) FROM original_bounds').fetchone()[0]
+                    == manifest['directoryFragments']['original']
+                and db.execute('SELECT count(*) FROM tile_coords').fetchone()[0]
+                    == sum(len(layer.tiles) for layer in layers)
+                and db.execute('SELECT count(*) FROM original_coords').fetchone()[0]
+                    == manifest['originalDirectoryCount']
+                and db.execute('PRAGMA quick_check').fetchone()[0] == 'ok',
+                'Invalid display tile directory')
+        cursor = db.execute('SELECT id, layer, x, y FROM original_coords')
+        while rows := cursor.fetchmany(65536):
+            records = np.asarray(rows, dtype=np.int64)
+            require(np.all((records[:,0] >= 1) & (records[:,0] <= manifest['meta']['cellCount']))
+                    and np.all((records[:,1] > 0) & (records[:,1] < len(layers))),
+                    'Invalid original display directory')
+            for number in np.unique(records[:,1]):
+                layer = layers[number]
+                require(layer.level > 0, 'Invalid original display directory')
+                selected = records[records[:,1] == number]
+                ids,x,y = selected[:,[0,2,3]].T
+                require(np.all((x >= layer.x0) & (x < layer.x0+layer.nx)
+                               & (y >= layer.y0) & (y < layer.y0+layer.ny)),
+                        'Invalid original display directory')
+                tx,ty = x//TILE,y//TILE
+                order = np.lexsort((tx,ty))
+                breaks = np.r_[0,np.flatnonzero((np.diff(tx[order]) != 0)
+                                                | (np.diff(ty[order]) != 0))+1,len(order)]
+                for start,end in pairwise(breaks):
+                    indices = order[start:end]
+                    tile = layer.tile(int(tx[indices[0]]),int(ty[indices[0]]))
+                    require(tile is not None and np.array_equal(
+                        tile['id'][y[indices]%TILE,x[indices]%TILE],ids[indices]),
+                        'Invalid original display directory')
 
 
 def layer_specs(meta):
@@ -466,31 +554,260 @@ def edge_at(data, eid):
     return EDGE.unpack_from(data, (eid - 1) * EDGE.size)
 
 
-def validate_cell_edges(data, cid, bounds, counts, ids, edge_count, seen):
-    x0, y0, x1, y1 = bounds
-    cursor = 0
-    for side, n in enumerate(counts):
-        require(n > 0, f'Cell {cid}: missing side topology')
-        segments = []
-        for eid in ids[cursor:cursor+n]:
-            require(1 <= eid <= edge_count, f'Cell {cid}: invalid edge ID')
-            _, idx, direction, ex0, ey0, ex1, ey1, a, b, _, _ = edge_at(data, eid)
-            require(idx == eid and (b if side in (0, 3) else a) == cid,
-                    f'Cell {cid}: nonreciprocal edge {eid}')
-            require(direction == (0 if side < 2 else 1), f'Cell {cid}: wrong edge direction')
-            coord = (x0, x1, y0, y1)[side]
-            require(math.isclose(ex0 if side < 2 else ey0, coord, rel_tol=0, abs_tol=1e-7),
-                    f'Cell {cid}: edge outside side')
-            segments.append((ey0, ey1) if side < 2 else (ex0, ex1))
-            seen[eid - 1] += 1
-        segments.sort()
-        start, end = (y0, y1) if side < 2 else (x0, x1)
-        for lo, hi in segments:
-            require(math.isclose(lo, start, rel_tol=0, abs_tol=1e-7) and hi > lo,
-                    f'Cell {cid}: gap/overlap in hanging side')
-            start = hi
-        require(math.isclose(start, end, rel_tol=0, abs_tol=1e-7), f'Cell {cid}: incomplete side')
-        cursor += n
+CELL_HEADER = np.dtype([('length','>u4'),('id','>u8'),('bounds','>f8',(4,)),
+                        ('z','>f8'),('land','u1'),('counts','u1',(4,))])
+EDGE_RECORD = np.dtype([('length','>u4'),('id','>u8'),('direction','u1'),
+                        ('bounds','>f8',(4,)),('a','>u8'),('b','>u8'),
+                        ('z','>f8'),('land','>i4')])
+
+
+def _at(data, dtype, offsets):
+    """Gather unaligned variable records without unpacking them in Python."""
+    dtype = np.dtype(dtype)
+    return np.ndarray((len(data)-dtype.itemsize+1,), dtype=dtype,
+                      buffer=data, strides=(1,))[offsets]
+
+
+def _text_chunks(source, digest):
+    """Finish records within bounded reads, with universal newline handling."""
+    tail = b''
+    while True:
+        chunk = source.read(4*1024*1024)
+        digest.update(chunk)
+        if not chunk:
+            if tail:
+                yield tail
+            return
+        data = tail+chunk
+        # Keep a final CR until the next read so a split CRLF remains one
+        # delimiter. CR-only files otherwise finish records just like LF files.
+        end = len(data)-int(data.endswith(b'\r'))
+        stop = max(data.rfind(b'\n',0,end), data.rfind(b'\r',0,end))+1
+        if stop:
+            yield data[:stop]
+            tail = data[stop:]
+        else:
+            tail = data
+
+
+def _text_batches(path, trailing_floats, digest=None):
+    """One CSV reader for both topology files, including variable-length ne rows.
+
+    Flatten only within bounded IO batches. Row delimiters retain the exact
+    column counts; Arrow's C tokenizer rejects incomplete/malformed numbers.
+    Topology and class tokens must still have integer syntax, independently
+    of their exactly representable, subsequently checked numeric values.
+    """
+    import pyarrow as pa
+    import pyarrow.csv as csv
+
+    digest = hashlib.sha256() if digest is None else digest
+    with path.open('rb') as source:
+        for data in _text_chunks(source, digest):
+            data = data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+            raw = np.frombuffer(data, dtype='u1')
+            delimiters = np.flatnonzero((raw == 44) | (raw == 10))
+            rows = np.flatnonzero(raw[delimiters] == 10)
+            if not data.endswith(b'\n'):
+                rows = np.r_[rows, len(delimiters)]
+                delimiters = np.r_[delimiters, len(data)]
+            starts = np.r_[0, rows[:-1]+1]
+            widths = rows-starts+1
+            require(np.all(widths >= trailing_floats+2), f'{path.name}: wrong column count')
+            # One numeric column gives both files the same C parser, even
+            # when hanging sides change the number of fields in each row.
+            # Quote handling stays disabled, as in the assembled text format.
+            table = csv.read_csv(pa.py_buffer(data.replace(b',', b'\n')),
+                read_options=csv.ReadOptions(column_names=['value'], use_threads=True),
+                parse_options=csv.ParseOptions(quote_char=False, ignore_empty_lines=False),
+                convert_options=csv.ConvertOptions(column_types={'value':pa.float64()}))
+            column = table.column(0)
+            require(column.null_count == 0, f'Invalid {path.name} attributes/columns')
+            values = column.combine_chunks().to_numpy(zero_copy_only=True)
+            require(values.size == len(delimiters) and np.all(np.isfinite(values)),
+                    f'Invalid {path.name} attributes/columns')
+            # Decimal points and exponents are legal only in floating fields.
+            # Alternating spans cover integer and floating fields. A linear
+            # C reduction checks integer syntax without a binary search for
+            # every decimal point in these multi-gigabyte text sources.
+            spans = np.empty(2*len(rows)+1, dtype=np.intp)
+            spans[0] = 0
+            spans[1::2] = delimiters[rows-trailing_floats-1]+1
+            spans[2::2] = delimiters[rows-1]
+            decimal = (raw == 46) | (raw == 101) | (raw == 69)
+            require(not np.logical_or.reduceat(decimal, spans)[::2].any(),
+                    f'{path.name}: invalid integer token')
+            # Float decoding must never round a uint64 topology identifier
+            # into a different valid ID. Recover large integer tokens exactly;
+            # floating geometry/attributes keep their float64 interpretation.
+            if values.max() >= 1 << 53 or values.min() <= -(1 << 53):
+                large = np.flatnonzero((values >= 1 << 53) | (values <= -(1 << 53)))
+                row = np.searchsorted(rows, large)
+                exact = large[(large <= rows[row]-trailing_floats-1) | (large == rows[row])]
+                if len(exact):
+                    values = values.astype(object)
+                    for index in exact:
+                        start = delimiters[index-1]+1 if index else 0
+                        values[index] = int(data[start:delimiters[index]])
+            yield values, starts, widths
+
+
+def _validate_cell_edges(edges, headers, ids, owners, sides, seen):
+    require(np.all((ids >= 1) & (ids <= len(edges))), 'Cell: invalid edge ID')
+    indices = ids-1
+    vertical = sides < 2
+    # Global edge IDs are checked once by _read_edges before publication.
+    require(np.all(np.where((sides == 0) | (sides == 3), edges['b'][indices], edges['a'][indices])
+                       == headers['id'][owners]), 'Cell: nonreciprocal edge')
+    require(np.all(edges['direction'][indices] == np.where(vertical, 0, 1)),
+            'Cell: wrong edge direction')
+    coord = headers['bounds'][owners, np.asarray([0,2,1,3])[sides]]
+    require(np.all(np.abs(edges['bounds'][indices, np.where(vertical,0,1)]-coord) <= 1e-7),
+            'Cell: edge outside side')
+    lo = edges['bounds'][indices, np.where(vertical,1,0)]
+    hi = edges['bounds'][indices, np.where(vertical,3,2)]
+    group = owners*4+sides
+    # Most sides have one segment. Only hanging sides need sorting; preserve
+    # the file's group order and validate every segment, including duplicates.
+    multiple = np.repeat(headers['counts'].ravel() > 1, headers['counts'].ravel())
+    if np.any(multiple):
+        order = np.lexsort((hi[multiple], lo[multiple], group[multiple]))
+        lo[multiple], hi[multiple] = lo[multiple][order], hi[multiple][order]
+    first = np.r_[True, group[1:] != group[:-1]]
+    last = np.r_[group[1:] != group[:-1], True]
+    expected_lo = headers['bounds'][owners[first], np.where(vertical[first],1,0)]
+    expected_hi = headers['bounds'][owners[last], np.where(vertical[last],3,2)]
+    require(np.all(hi > lo)
+            and np.all(np.abs(lo[first]-expected_lo) <= 1e-7)
+            and np.all(np.abs(lo[1:][~first[1:]]-hi[:-1][~first[1:]]) <= 1e-7),
+            'Cell: gap/overlap in hanging side')
+    require(np.all(np.abs(hi[last]-expected_hi) <= 1e-7), 'Cell: incomplete side')
+    np.add.at(seen, ids-1, 1)
+
+
+def _put_originals(layer, x, y, values):
+    tx, ty = x//TILE, y//TILE
+    order = np.lexsort((tx, ty))
+    breaks = np.r_[0, np.flatnonzero((tx[order][1:] != tx[order][:-1])
+                                    | (ty[order][1:] != ty[order][:-1]))+1, len(order)]
+    for start, end in pairwise(breaks):
+        indices = order[start:end]
+        target = layer.tile(int(tx[indices[0]]), int(ty[indices[0]]), True).reshape(-1)
+        slots = y[indices]%TILE*TILE+x[indices]%TILE
+        require(len(np.unique(slots)) == len(slots) and not np.any(target['id'][slots]),
+                'Duplicate cell geometry')
+        target[slots] = values[indices]
+
+
+def _read_cells(source, directory, meta, native, edges, seen):
+    count, offset, zmin, zmax, categories = 0, 0, math.inf, -math.inf, set()
+    binary_digest, text_digest = hashlib.sha256(), hashlib.sha256()
+    with (source/'cell_topo.bin').open('rb') as cell_file, (directory/'offsets.bin').open('wb') as output:
+        require(os.fstat(cell_file.fileno()).st_size > 0, 'Empty cell_topo.bin')
+        with mmap.mmap(cell_file.fileno(), 0, access=mmap.ACCESS_READ) as cells:
+            for values, starts, widths in _text_batches(source/'ne.txt', 3, text_digest):
+                lengths = CELL_HEADER.itemsize+8*(widths-9)
+                offsets = offset+np.r_[0, np.cumsum(lengths[:-1])]
+                require(np.all(widths >= 13) and np.all(offsets+CELL_HEADER.itemsize <= len(cells))
+                        and offsets[-1]+lengths[-1] <= len(cells), 'Truncated cell header/record')
+                headers = _at(cells, CELL_HEADER, offsets)
+                counts = headers['counts'].astype(np.int64)
+                totals = counts.sum(axis=1)
+                require(np.all(headers['length']+4 == lengths)
+                        and np.all(totals == widths-9), 'Invalid cell record length')
+                require(np.all(counts > 0), 'Cell: missing side topology')
+                ids = np.arange(count+1, count+len(starts)+1, dtype=np.uint64)
+                require(ids[-1] <= (1 << 53)-1, 'Cell ID exceeds JavaScript safe integer range')
+                require(np.array_equal(headers['id'], ids), 'Cell IDs must be sequential and 1-based')
+                require(np.array_equal(values[starts], ids)
+                        and np.array_equal(values[starts[:,None]+np.arange(1,5)], counts),
+                        'ne.txt: topology mismatch')
+                owners = np.repeat(np.arange(len(starts)), totals)
+                sides = np.repeat(np.tile(np.arange(4), len(starts)), counts.ravel())
+                local = np.arange(len(owners))-np.repeat(np.r_[0,np.cumsum(totals[:-1])], totals)
+                refs = _at(cells, '>u8', offsets[owners]+CELL_HEADER.itemsize+local*8)
+                require(np.array_equal(values[starts[owners]+5+local], refs), 'ne.txt: topology mismatch')
+                b = headers['bounds'].astype(np.float64)
+                require(np.all(np.isfinite(b)) and np.all(np.isfinite(headers['z'])),
+                        'Nonfinite cell geometry/attribute')
+                attrs = values[starts[:,None]+widths[:,None]-np.arange(4,0,-1)]
+                require(np.all((attrs[:,3] >= 0) & (attrs[:,3] <= 255)), 'Invalid ne.txt attributes')
+                require(np.all(np.abs(attrs[:,:2]-(b[:,:2]+b[:,2:])/2) <= 1e-6), 'ne.txt centre mismatch')
+                level = np.zeros(len(starts), dtype=np.uint16)
+                matches = np.zeros(len(starts), dtype=np.uint32)
+                for number, layer in native.items():
+                    selected = (np.abs(b[:,2]-b[:,0]-layer.w) <= 1e-7) & (np.abs(b[:,3]-b[:,1]-layer.h) <= 1e-7)
+                    level[selected] = number
+                    matches += selected
+                require(np.all(matches == 1), 'Cell: bounds do not match grid_info')
+                require(np.all(b[:,:2] >= np.asarray(meta['bounds'][:2])-1e-7)
+                        and np.all(b[:,2:] <= np.asarray(meta['bounds'][2:])+1e-7), 'Cell outside metadata bounds')
+                _validate_cell_edges(edges, headers, refs, owners, sides, seen)
+                for number, layer in native.items():
+                    selected = level == number
+                    if not np.any(selected):
+                        continue
+                    position = (b[selected,:2]-meta['alignment_origin'])/[layer.w,layer.h]
+                    rounded = np.rint(position)
+                    require(np.all(np.abs(position-rounded) < 1e-7), 'Cell: off schema lattice')
+                    x, y = rounded.astype(np.int64).T
+                    require(np.all((x >= layer.x0) & (x < layer.x0+layer.nx)
+                                   & (y >= layer.y0) & (y < layer.y0+layer.ny)), 'Cell outside display lattice')
+                    nodes = np.empty(np.count_nonzero(selected), dtype=NODE)
+                    area = layer.w*layer.h
+                    nodes['id'], nodes['area'], nodes['z'] = ids[selected], area, attrs[selected,2]*area
+                    nodes['min'], nodes['level'], nodes['land'] = min(layer.w,layer.h), number, attrs[selected,3]
+                    _put_originals(layer, x, y, nodes)
+                np.asarray(offsets, dtype='<u8').tofile(output)
+                count += len(starts)
+                end = int(offsets[-1]+lengths[-1])
+                binary_digest.update(memoryview(cells)[offset:end])
+                offset = end
+                zmin, zmax = min(zmin, float(attrs[:,2].min())), max(zmax, float(attrs[:,2].max()))
+                categories.update(map(int, np.unique(attrs[:,3])))
+            require(offset == len(cells) and count > 0, 'ne.txt: missing cell records')
+    return count, zmin, zmax, categories, binary_digest.hexdigest(), text_digest.hexdigest()
+
+
+def _read_edges(source, edges):
+    start, greatest_cell = 0, 0
+    binary_digest, text_digest = hashlib.sha256(), hashlib.sha256()
+    for values, starts, widths in _text_batches(source/'ns.txt', 4, text_digest):
+        require(np.all(widths == 11) and start+len(starts) <= len(edges), 'ns.txt: wrong record/column count')
+        e = edges[start:start+len(starts)]
+        binary_digest.update(e)
+        ids = np.arange(start+1, start+len(e)+1, dtype=np.uint64)
+        direction, a, b = e['direction'], e['a'], e['b']
+        require(np.all(e['length'] == EDGE.size-4) and np.array_equal(e['id'], ids)
+                and np.all(direction <= 1), 'Invalid edge record')
+        require(np.all(((a > 0) | (b > 0)) & (a != b)), 'Invalid edge adjacency')
+        greatest_cell = max(greatest_cell, int(a.max()), int(b.max()))
+        box = e['bounds']
+        require(np.all(np.isfinite(box)) and np.all(np.isfinite(e['z']))
+                and np.all((e['land'] >= 0) & (e['land'] <= 255)), 'Invalid edge attributes')
+        require(np.all(np.where(direction == 0,
+                    (box[:,0] == box[:,2]) & (box[:,3] > box[:,1]),
+                    (box[:,1] == box[:,3]) & (box[:,2] > box[:,0]))), 'Invalid edge geometry')
+        row = values.reshape(-1,11)
+        expected = np.column_stack((ids, np.where(direction,1,2).astype(np.uint64), np.where(direction,0,a),
+                                   np.where(direction,0,b), np.where(direction,b,0), np.where(direction,a,0)))
+        require(np.array_equal(row[:,:6], expected), 'ns.txt: topology mismatch')
+        require(np.all((row[:,10] >= 0) & (row[:,10] <= 255)), 'Invalid ns.txt attributes')
+        geometry = np.column_stack((np.where(direction,box[:,2]-box[:,0],box[:,3]-box[:,1]),
+                                    (box[:,0]+box[:,2])/2, (box[:,1]+box[:,3])/2))
+        require(np.all(np.abs(row[:,6:9]-geometry) <= 1e-6), 'ns.txt geometry mismatch')
+        start += len(e)
+    require(start == len(edges), 'ns.txt: missing edge records')
+    return greatest_cell, binary_digest.hexdigest(), text_digest.hexdigest()
+
+
+def _check_edge_references(edges, seen, count, greatest_cell):
+    require(greatest_cell <= count, 'Invalid edge adjacency')
+    for start in range(0, len(edges), 65536):
+        e = edges[start:start+65536]
+        require(np.array_equal(seen[start:start+len(e)],
+                               (e['a'] > 0).astype(np.uint8)+(e['b'] > 0)),
+                'Edge: missing reciprocal cell reference')
 
 
 
@@ -510,65 +827,20 @@ def _build_into(source, directory, initial_fingerprint, resources):
     edges_size = (source / 'edge_topo.bin').stat().st_size
     require(edges_size and edges_size % EDGE.size == 0, 'Truncated edge_topo.bin')
     edge_count = edges_size // EDGE.size
-    seen = np.memmap(directory / 'edge-seen.tmp', mode='w+', dtype='u1', shape=(edge_count,))
+    seen = np.memmap(directory / 'edge-seen.tmp', mode='w+', dtype='<u4', shape=(edge_count,))
     resources.callback(seen._mmap.close)
-    count, offset, zmin, zmax, categories = 0, 0, math.inf, -math.inf, set()
-    with (source / 'cell_topo.bin').open('rb') as cf, (source / 'edge_topo.bin').open('rb') as ef, (source / 'ne.txt').open() as ne, (directory / 'offsets.bin').open('wb') as offsets:
-        require(os.fstat(cf.fileno()).st_size > 0, 'Empty cell_topo.bin')
-        with mmap.mmap(cf.fileno(), 0, access=mmap.ACCESS_READ) as cells, mmap.mmap(ef.fileno(), 0, access=mmap.ACCESS_READ) as edges:
-            while offset < len(cells):
-                require(offset + 4 + CELL.size <= len(cells), 'Truncated cell header')
-                length = struct.unpack_from('!I', cells, offset)[0]
-                header = CELL.unpack_from(cells, offset + 4)
-                cid, x0, y0, x1, y1, base_z, _, *counts = header
-                count += 1
-                require(count <= (1 << 53) - 1, 'Cell ID exceeds JavaScript safe integer range')
-                require(cid == count, 'Cell IDs must be sequential and 1-based')
-                require(length == CELL.size + 8 * sum(counts) and offset + 4 + length <= len(cells), 'Invalid cell record length')
-                require(all(math.isfinite(v) for v in (x0, y0, x1, y1, base_z)), 'Nonfinite cell geometry/attribute')
-                ids = struct.unpack_from(f'!{sum(counts)}Q', cells, offset + 4 + CELL.size)
-                line = ne.readline().strip().split(',')
-                require(len(line) == 9 + sum(counts), f'ne.txt: wrong column count at cell {cid}')
-                ints = list(map(int, line[:5+sum(counts)]))
-                require(ints == [cid, *counts, *ids], f'ne.txt: topology mismatch at cell {cid}')
-                cx, cy, z = map(float, line[-4:-1])
-                land = int(line[-1])
-                require(all(math.isfinite(v) for v in (cx, cy, z)) and 0 <= land <= 255, 'Invalid ne.txt attributes')
-                require(math.isclose(cx, (x0+x1)/2, rel_tol=0, abs_tol=1e-6) and math.isclose(cy, (y0+y1)/2, rel_tol=0, abs_tol=1e-6), 'ne.txt centre mismatch')
-                matches = [i+1 for i, (w, h) in enumerate(meta['grid_info']) if math.isclose(x1-x0, w, rel_tol=0, abs_tol=1e-7) and math.isclose(y1-y0, h, rel_tol=0, abs_tol=1e-7)]
-                require(len(matches) == 1, f'Cell {cid}: bounds do not match grid_info')
-                level = matches[0]
-                layer = native[level]
-                ix, iy = (x0-meta['alignment_origin'][0])/layer.w, (y0-meta['alignment_origin'][1])/layer.h
-                require(abs(ix-round(ix)) < 1e-7 and abs(iy-round(iy)) < 1e-7, f'Cell {cid}: off schema lattice')
-                ix, iy = round(ix), round(iy)
-                require(x0 >= meta['bounds'][0]-1e-7 and y0 >= meta['bounds'][1]-1e-7 and x1 <= meta['bounds'][2]+1e-7 and y1 <= meta['bounds'][3]+1e-7, 'Cell outside metadata bounds')
-                node = layer.get(ix, iy)
-                require(node is None or node['id'] == 0, 'Duplicate cell geometry')
-                validate_cell_edges(edges, cid, (x0, y0, x1, y1), counts, ids, edge_count, seen)
-                area = layer.w * layer.h
-                layer.put(ix,iy,(cid, area, z*area, min(layer.w,layer.h), level, land))
-                offsets.write(struct.pack('<Q', offset))
-                zmin, zmax = min(zmin, z), max(zmax, z)
-                categories.add(land)
-                offset += length + 4
-            require(ne.read() == '', 'Extra ne.txt records')
-            with (source / 'ns.txt').open() as ns:
-                for eid in range(1, edge_count + 1):
-                    length, idx, direction, x0, y0, x1, y1, a, b, z, land = edge_at(edges, eid)
-                    require(length == EDGE.size-4 and idx == eid and direction in (0,1), 'Invalid edge record')
-                    require(0 <= a <= count and 0 <= b <= count and a != b, 'Invalid edge adjacency')
-                    require(all(math.isfinite(v) for v in (x0,y0,x1,y1,z)) and 0 <= land <= 255, 'Invalid edge attributes')
-                    require((x0 == x1 and y1 > y0) if direction == 0 else (y0 == y1 and x1 > x0), 'Invalid edge geometry')
-                    require(seen[eid-1] == int(a > 0)+int(b > 0), f'Edge {eid}: missing reciprocal cell reference')
-                    row = ns.readline().strip().split(',')
-                    require(len(row) == 11, f'ns.txt: wrong column count at edge {eid}')
-                    expected = [eid, 1 if direction else 2, 0 if direction else a, 0 if direction else b, b if direction else 0, a if direction else 0]
-                    require(list(map(int, row[:6])) == expected, f'ns.txt: topology mismatch at edge {eid}')
-                    values = list(map(float, row[6:10]))
-                    require(all(math.isfinite(v) for v in values) and 0 <= int(row[10]) <= 255, 'Invalid ns.txt attributes')
-                    require(all(math.isclose(v, target, rel_tol=0, abs_tol=1e-6) for v,target in zip(values[:3], [x1-x0 if direction else y1-y0,(x0+x1)/2,(y0+y1)/2])), 'ns.txt geometry mismatch')
-                require(ns.read() == '', 'Extra ns.txt records')
+    edges = np.memmap(source/'edge_topo.bin', dtype=EDGE_RECORD, mode='r')
+    resources.callback(edges._mmap.close)
+    # The two text sources and immutable binary edges are independent inputs.
+    # One background reader overlaps C tokenization with batch validation;
+    # only the cell reader writes layers and reference counts. Join before
+    # checking all reciprocal counts or publishing any derived artifact.
+    with ThreadPoolExecutor(max_workers=1) as readers:
+        edge_validation = readers.submit(_read_edges, source, edges)
+        count, zmin, zmax, categories, cell_hash, ne_hash = _read_cells(source, directory, meta, native, edges, seen)
+        greatest_cell, edge_hash, ns_hash = edge_validation.result()
+    _check_edge_references(edges, seen, count, greatest_cell)
+    edges._mmap.close()
     seen._mmap.close()
     (directory / 'edge-seen.tmp').unlink()
     for child,parent in pairwise(layers):
@@ -576,10 +848,6 @@ def _build_into(source, directory, initial_fingerprint, resources):
     histogram_tiles = _histograms(directory,layers)
     original_count, fragments = _tile_rtree(directory,layers,meta['alignment_origin'],source)
     layer_tiles = [[[x,y,slot] for (x,y),slot in sorted(layer.tiles.items())] for layer in layers]
-    for layer in layers:
-        layer.close()
-    checksums = {name:_checksum(directory/name) for name in _content_files(layers)}
-    require(fingerprint(source) == initial_fingerprint, 'Grid changed during display index construction')
     meta.update(cellCount=count, landClasses=sorted(categories), attributes=['level','elevation','landClass'], elevationRange=[zmin,zmax])
     manifest = {'version':VERSION,'meta':meta,'layers':specs,'layerTiles':layer_tiles,
                 'tileDirectory':'float64-i32-v1','originalDirectoryCount':original_count,
@@ -587,9 +855,25 @@ def _build_into(source, directory, initial_fingerprint, resources):
                 'histogramFormat':'exact-unit-json-v1',
                 'histogramTiles':histogram_tiles,'source':str(source),
                 'fingerprint':initial_fingerprint, 'edgeCount':edge_count,
-                'buildSeconds':time.perf_counter()-started,
-                'peakRssBytes':_peak_rss(), 'checksums':checksums}
+                'peakRssBytes':_peak_rss()}
+    _validate_spatial_directory(directory, layers, manifest)
+    for layer in layers:
+        layer.close()
+    hashes = {'grid.meta.json':_checksum(source/'grid.meta.json'),
+              'cell_topo.bin':cell_hash, 'edge_topo.bin':edge_hash,
+              'ne.txt':ne_hash, 'ns.txt':ns_hash}
+    manifest['sourceIdentity'] = {name:{'size':size,'mtimeNs':mtime,'sha256':hashes[name]}
+                                  for name,size,mtime in initial_fingerprint}
+    require(fingerprint(source) == initial_fingerprint, 'Grid changed during display index construction')
+    manifest['buildSeconds'] = time.perf_counter()-started
+    manifest['peakRssBytes'] = _peak_rss()
     (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2))
+    # Publish the manifest's own identity only after every immutable artifact
+    # is closed. No checksum or record/SQLite scan is needed on later opens.
+    identity = {'version':VERSION,'source':str(source),'fingerprint':initial_fingerprint,
+                'files':{name:_file_stat(directory/name)
+                         for name in ['manifest.json',*_content_files(layers)]}}
+    (directory/'identity.json').write_text(json.dumps(identity))
     return manifest
 
 
@@ -619,42 +903,38 @@ class GridDisplayIndex:
         self.source = Path(source).resolve()
         cache = Path(cache).resolve()
         revision = fingerprint(self.source)
-        meta = checked_meta(self.source)
-        specs = layer_specs(meta)
         identity = [VERSION,str(self.source),revision]
-        if any(len(spec) == 8 for spec in specs):
-            identity.append('clipped-dyadic-1')
         key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
-        directory = cache / key
         with _LOCK:
-            if not directory.exists():
+            directory = _current_directory(cache,key)
+            if not _cache_reusable(directory, self.source, revision):
                 cache.mkdir(parents=True, exist_ok=True)
-                # SQLite supplies a process-safe cold-build lock. No custom
-                # polling or stale lock files; a crashed owner releases it.
-                with closing(sqlite3.connect(cache / 'build-lock.sqlite',timeout=3600)) as connection, connection:
+                # SQLite serializes cold construction and stat-triggered
+                # replacement across processes. Existing readers retain their
+                # immutable files while a replacement is built and validated.
+                with closing(sqlite3.connect(cache/'build-lock.sqlite',timeout=3600)) as connection, connection:
                     connection.execute('BEGIN IMMEDIATE')
-                    if not directory.exists():
+                    directory = _current_directory(cache,key)
+                    if not _cache_reusable(directory, self.source, revision):
                         with tempfile.TemporaryDirectory(prefix='building-', dir=cache) as temp:
                             staging = Path(temp)
                             _build(self.source, staging, revision)
-                            try:
-                                staging.rename(directory)
-                            except OSError as exc:
-                                if exc.errno not in (errno.EEXIST,errno.ENOTEMPTY):
-                                    raise
-                                existing = json.loads((directory / 'manifest.json').read_text())
-                                require(existing['fingerprint'] == json.loads(json.dumps(revision))
-                                        and existing['version'] == VERSION, 'Conflicting display index')
-            self.manifest = json.loads((directory / 'manifest.json').read_text())
+                            directory = cache/uuid.uuid4().hex[:24]
+                            staging.rename(directory)
+                            # Publish a new immutable generation atomically;
+                            # live readers keep their existing directory paths.
+                            pointer = directory/'publish.json'
+                            pointer.write_text(json.dumps({'version':VERSION,'directory':directory.name}))
+                            pointer.replace(cache/f'{key}.current.json')
+            self.manifest = json.loads((directory/'manifest.json').read_text())
         require(self.manifest['version'] == VERSION
                 and self.manifest['source'] == str(self.source)
-                and self.manifest['fingerprint'] == json.loads(json.dumps(revision)), 'Invalid display manifest')
-        require(self.manifest['layers'] == specs
-                and len(self.manifest['layerTiles']) == len(specs), 'Invalid display layer layout')
-        require(all(self.manifest['meta'][key] == value for key,value in meta.items()), 'Display metadata mismatch')
+                and self.manifest['fingerprint'] == [list(entry) for entry in revision],
+                'Invalid display manifest')
+        specs = self.manifest['layers']
         self.directory = directory
-        self.revision = key
-        self.meta = dict(self.manifest['meta'], revision=key, displayLayers=[{
+        self.revision = directory.name
+        self.meta = dict(self.manifest['meta'], revision=self.revision, displayLayers=[{
             'width':spec[0], 'height':spec[1], 'x0':spec[2], 'y0':spec[3],
             'nx':spec[4], 'ny':spec[5], 'nativeLevel':spec[6] if spec[6] > 0 else None,
             'xLayout':spec[7][0] if len(spec) == 8 else None,
@@ -665,92 +945,15 @@ class GridDisplayIndex:
         self.offsets = self.cells = self.edges = None
         self._cell_file = self._edge_file = None
         try:
-            count = self.meta['cellCount']
-            require(isinstance(count,int) and count > 0
-                    and (directory/'offsets.bin').stat().st_size == count*8, 'Invalid display offsets length')
             self.offsets = np.memmap(directory / 'offsets.bin',dtype='<u8',mode='r')
             self._cell_file = (self.source / 'cell_topo.bin').open('rb')
             self._edge_file = (self.source / 'edge_topo.bin').open('rb')
             self.cells = mmap.mmap(self._cell_file.fileno(),0,access=mmap.ACCESS_READ)
             self.edges = mmap.mmap(self._edge_file.fileno(),0,access=mmap.ACCESS_READ)
-            require(len(self.edges) == self.manifest['edgeCount']*EDGE.size, 'Invalid display edge count')
-            self._check_offsets()
-            self._check_directories()
-            self._check_contents()
             self._roots = self._root_summaries()
-        except sqlite3.DatabaseError as exc:
-            self.close()
-            raise ValueError('Invalid display tile directory') from exc
         except Exception:
             self.close()
             raise
-
-    def _check_offsets(self):
-        # Validate derived pointers once, at index opening. Queries and inspect
-        # trust these invariants; they never rescan original cell records.
-        require(self.offsets[0] == 0, 'Invalid first display offset')
-        raw = np.frombuffer(self.cells,dtype='u1')
-        try:
-            for start in range(0,len(self.offsets),65536):
-                offsets = np.asarray(self.offsets[start:start+65536])
-                require(np.all(offsets <= len(self.cells)-4-CELL.size), 'Display offset outside cell file')
-                indices = offsets.astype(np.intp)
-                lengths = raw[indices[:,None]+np.arange(4)].copy().view('>u4').ravel()
-                ends = offsets+4+lengths
-                following = np.r_[self.offsets[start+1:start+len(offsets)],
-                                  self.offsets[start+len(offsets)] if start+len(offsets) < len(self.offsets) else len(self.cells)]
-                require(np.all(lengths >= CELL.size) and np.all(ends == following), 'Invalid display record offsets')
-                ids = raw[indices[:,None]+4+np.arange(8)].copy().view('>u8').ravel()
-                require(np.array_equal(ids,np.arange(start+1,start+len(offsets)+1)), 'Display offset cell ID mismatch')
-        finally:
-            del raw
-
-    def _check_directories(self):
-        require(self.manifest.get('tileDirectory') == 'float64-i32-v1',
-                'Invalid display tile directory version')
-        require(self.manifest.get('histogramFormat') == 'exact-unit-json-v1',
-                'Invalid display histogram version')
-        indexes = self.manifest['histogramTiles']
-        require(len(indexes) == len(self.layers) and not indexes[0], 'Invalid display histogram layout')
-        for i, tiles in enumerate(indexes[1:], 1):
-            cursor = 0
-            for tx, ty, offset, count in tiles:
-                require(all(type(v) is int for v in (tx,ty,offset,count))
-                        and count > 0 and offset == cursor and (tx,ty) in self.layers[i].tiles,
-                        'Invalid display histogram tile')
-                cursor += count
-            require((self.directory/f'hist-{i}.bin').stat().st_size == cursor,
-                    'Invalid display histogram length')
-        path = self.directory/'tile-rtree.sqlite'
-        require(path.is_file(), 'Missing display tile directory')
-        with closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as db:
-            count = db.execute('SELECT count(*) FROM tile_bounds').fetchone()[0]
-            originals = db.execute('SELECT count(*) FROM original_bounds').fetchone()[0]
-            require(count == self.manifest['directoryFragments']['tile']
-                    and originals == self.manifest['directoryFragments']['original']
-                    and db.execute('SELECT count(*) FROM tile_coords').fetchone()[0]
-                        == sum(len(layer.tiles) for layer in self.layers)
-                    and db.execute('SELECT count(*) FROM original_coords').fetchone()[0]
-                        == self.manifest['originalDirectoryCount']
-                    and db.execute('PRAGMA quick_check').fetchone()[0] == 'ok',
-                    'Invalid display tile directory')
-            for cid, i, x, y in db.execute('SELECT id, layer, x, y FROM original_coords'):
-                require(1 <= cid <= self.meta['cellCount']
-                        and 0 < i < len(self.layers) and self.layers[i].level > 0,
-                        'Invalid original display directory')
-                node = self.layers[i].get(x, y)
-                require(node is not None and int(node['id']) == cid,
-                        'Invalid original display directory')
-
-    def _check_contents(self):
-        # Check every persisted derived byte once at opening. Requests trust
-        # this boundary and never hash or repair a damaged cache on demand.
-        checksums = self.manifest.get('checksums')
-        require(isinstance(checksums, dict) and set(checksums) == set(_content_files(self.layers)),
-                'Invalid display content checksums')
-        for name, expected in checksums.items():
-            require(_checksum(self.directory/name) == expected,
-                    f'Invalid display contents: {name} checksum mismatch')
 
     def close(self):
         for mapping in (self.cells,self.edges):

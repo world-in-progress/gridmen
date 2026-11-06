@@ -22,7 +22,7 @@ def snapshot(directory):
 @pytest.mark.parametrize('damage', [
     'duplicate-id', 'zero-summary', 'histogram', 'sqlite', 'sqlite-coords', 'sqlite-header'
 ])
-def test_same_size_corruption_fails_at_open_and_preserves_files(tmp_path, damage):
+def test_same_size_stat_changes_rebuild_and_preserve_source(tmp_path, damage):
     source = write_grid(tmp_path/'source', [
         ((0, 0, 8, 8), 1, 3), ((8, 0, 16, 8), 2, 4)
     ], sizes=((8, 8),), bounds=(0, 0, 16, 8))
@@ -55,10 +55,13 @@ def test_same_size_corruption_fails_at_open_and_preserves_files(tmp_path, damage
         else:
             data[0] ^= 1
         path.write_bytes(data)
-    before = snapshot(cache)
-    with pytest.raises(ValueError, match='[Dd]isplay'):
-        display.GridDisplayIndex(source, cache)
-    assert snapshot(cache) == before
+    rebuilt = display.GridDisplayIndex(source, cache)
+    try:
+        assert rebuilt.inspect(1,1)['cell']['id'] == 1
+        assert rebuilt.inspect(9,1)['cell']['id'] == 2
+        assert decode_nodes(rebuilt.nodes(len(rebuilt.layers)-1,0,0,len(rebuilt.layers)-1))[0][5] == 128
+    finally:
+        rebuilt.close()
     assert snapshot(source) == original_source
 
 
@@ -210,27 +213,27 @@ def test_distant_positive_and_negative_clusters_keep_holes_empty(tmp_path, monke
         index.close()
 
 
-def test_checksums_run_once_at_open_and_never_during_queries(tmp_path, monkeypatch):
+def test_cached_open_and_queries_do_not_hash_or_scan(tmp_path, monkeypatch):
     source = write_grid(tmp_path/'source', [((0, 0, 8, 8), 1, 3)])
     before = snapshot(source)
     cache = tmp_path/'cache'
     index = display.GridDisplayIndex(source, cache)
     index.close()
-    original_checksum, calls = display._checksum, []
 
-    def checksum(path):
-        calls.append(path.name)
-        return original_checksum(path)
+    def no_scan(*args, **kwargs):
+        raise AssertionError('Cached open/query scanned validated files')
 
-    monkeypatch.setattr(display, '_checksum', checksum)
-    reopened = display.GridDisplayIndex(source, cache)
+    monkeypatch.setattr(display, '_checksum', no_scan)
+    monkeypatch.setattr(display, '_at', no_scan)
+    monkeypatch.setattr(display, 'checked_meta', no_scan)
+    monkeypatch.setattr(display, '_validate_spatial_directory', no_scan)
+    with monkeypatch.context() as context:
+        context.setattr(sqlite3, 'connect', no_scan)
+        reopened = display.GridDisplayIndex(source, cache)
     try:
-        assert sorted(calls) == sorted(reopened.manifest['checksums'])
-        calls.clear()
         for _ in range(3):
             assert decode_nodes(reopened.nodes(0, 0, 0, 0))[0][0] == 1
             assert reopened.inspect(1, 1)['cell']['id'] == 1
-        assert calls == []
     finally:
         reopened.close()
     assert snapshot(source) == before

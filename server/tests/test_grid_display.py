@@ -166,7 +166,7 @@ index.close()
 
 @pytest.mark.parametrize('damage',['truncate-layer','truncate-offsets','truncate-hist',
                                    'missing-rtree','bad-slot','fractional-tile','bad-offset'])
-def test_corrupt_derived_index_fails_without_writing(tmp_path,damage):
+def test_changed_derived_index_rebuilds(tmp_path,damage):
     import numpy as np
     cells = [((0,0,8,8),1,3),((8,0,16,8),2,4)]
     source = write_grid(tmp_path/'source',cells,sizes=((8,8),),bounds=(0,0,16,8))
@@ -191,11 +191,13 @@ def test_corrupt_derived_index_fails_without_writing(tmp_path,damage):
         manifest = json.loads(path.read_text())
         manifest['layerTiles'][0][0][0 if damage == 'fractional-tile' else 2] = .5 if damage == 'fractional-tile' else 9000
         path.write_text(json.dumps(manifest))
-    before = {p.name:(p.stat().st_size,p.stat().st_mtime_ns,p.read_bytes()) for p in cache.rglob('*') if p.is_file()}
-    with pytest.raises(ValueError,match='display|Display'):
-        GridDisplayIndex(source,cache)
-    after = {p.name:(p.stat().st_size,p.stat().st_mtime_ns,p.read_bytes()) for p in cache.rglob('*') if p.is_file()}
-    assert before == after
+    rebuilt = GridDisplayIndex(source,cache)
+    try:
+        assert rebuilt.inspect(1,1)['cell']['id'] == 1
+        assert rebuilt.inspect(9,1)['cell']['id'] == 2
+        assert rebuilt.meta['cellCount'] == 2
+    finally:
+        rebuilt.close()
 
 
 def test_inspect_decimal_gridline_uses_original_half_open_bounds(tmp_path):
@@ -576,8 +578,8 @@ def test_decimal_schema_class_tie_uses_exact_lattice_area(tmp_path):
         index.close()
 
 
-def test_large_class_counts_remain_exact_above_float_integer_precision(tmp_path):
-    side = 1 << 30
+@pytest.mark.parametrize('side', [1 << 30, 1 << 40])
+def test_large_class_counts_remain_exact_above_float_integer_precision(tmp_path, side):
     coarse = [((0,0,side,side),10,2),
               ((side,0,2*side,side),20,9)]
     fine = ((2*side,0,2*side+1,1),20,9)
@@ -604,7 +606,7 @@ def test_large_class_counts_remain_exact_above_float_integer_precision(tmp_path)
             index.close()
 
 
-def test_corrupt_original_directory_fails_at_open_without_writing(tmp_path):
+def test_changed_original_directory_is_rebuilt(tmp_path):
     import sqlite3
     source = write_grid(tmp_path/'source',[
         ((0,0,8,8),1,2),((8,0,12,4),2,9)
@@ -615,10 +617,9 @@ def test_corrupt_original_directory_fails_at_open_without_writing(tmp_path):
     index.close()
     with sqlite3.connect(directory/'tile-rtree.sqlite') as db:
         db.execute('UPDATE original_coords SET x=x+1 WHERE id=1')
-    before = {path.name:(path.stat().st_size,path.stat().st_mtime_ns,path.read_bytes())
-              for path in directory.iterdir() if path.is_file()}
-    with pytest.raises(ValueError,match='Invalid original display directory'):
-        GridDisplayIndex(source,cache)
-    after = {path.name:(path.stat().st_size,path.stat().st_mtime_ns,path.read_bytes())
-             for path in directory.iterdir() if path.is_file()}
-    assert before == after
+    rebuilt = GridDisplayIndex(source,cache)
+    try:
+        assert rebuilt.inspect(1,1)['cell']['id'] == 1
+        assert rebuilt.inspect(9,1)['cell']['id'] == 2
+    finally:
+        rebuilt.close()
