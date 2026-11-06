@@ -5,13 +5,17 @@ import { Worker as ThreadWorker } from 'node:worker_threads'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import proj4 from 'proj4'
+import type { Converter } from 'proj4/dist/lib/core'
+import DisplayIndex from '../src/core/grid/displayIndex'
+import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
+import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
 import { displayLayers } from '../src/core/grid/displayHierarchy'
 import { DisplayGeometryClient } from '../src/core/worker/displayGeometryClient'
-import type { DisplayGeometryConfig, DisplayGeometryTask, DisplayGeometryEngine } from '../src/core/grid/displayGeometryEngine'
-import type { DisplayBlock, DisplayChunk, GridDisplayMeta } from '../src/core/grid/displayTypes'
+import type { DisplayGeometryConfig, DisplayGeometryTask, DisplayGeometryEngine, PreparedDisplayChunk } from '../src/core/grid/displayGeometryEngine'
+import type { DisplayBlock, DisplayCell, DisplayChunk, GridDisplayMeta, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
 
 const root = process.cwd()
-const output = resolve(root, '../../.verification/resume-rpc')
+const output = process.env.GRID_TEST_EVIDENCE ? resolve(process.env.GRID_TEST_EVIDENCE, 'production-worker') : resolve(root, '../../.verification/resume-rpc')
 const modulePath = resolve(output, 'displayGeometry.worker.mjs')
 const shimPath = resolve(output, 'worker-shim.mjs')
 let buildPromise: Promise<void> | undefined
@@ -39,12 +43,14 @@ class ProductionWorker {
     readonly sent: { id: number; config?: DisplayGeometryConfig; task: DisplayGeometryTask; transfers: number }[] = []
     readonly received: WorkerReply[] = []
     readonly heldDone: WorkerReply[] = []
+    holdDone = true
+    terminated = false
     private readonly thread = new ThreadWorker(shimPath, { type: 'module' })
     constructor() {
         ProductionWorker.instances.push(this)
         this.thread.on('message', (data: WorkerReply) => {
             this.received.push(data)
-            if (data.done) this.heldDone.push(data)
+            if (data.done && this.holdDone) this.heldDone.push(data)
             else this.onmessage?.({ data })
         })
         this.thread.on('error', error => this.onerror?.({ message: error.message }))
@@ -55,7 +61,7 @@ class ProductionWorker {
         this.thread.postMessage(message, transfer)
     }
     releaseDone() { const data = this.heldDone.shift(); assert.ok(data, 'expected a block acknowledgment'); this.onmessage?.({ data }) }
-    terminate() { void this.thread.terminate() }
+    terminate() { this.terminated = true; void this.thread.terminate() }
     close() { return this.thread.terminate() }
 }
 
@@ -234,4 +240,225 @@ test('disposal between blocks drops late replies; recreated workers keep source 
     otherWorker.releaseDone()
     const bBounds = (await b).prepared![0].worldBounds
     assert.ok(aBounds[2] - aBounds[0] > (bBounds[2] - bBounds[0]) * 1000)
+})
+
+class LayerCamera {
+    zoom = 10
+    canvas = Object.assign(new EventTarget(), { width: 256, height: 256, clientWidth: 256, clientHeight: 256 })
+    getCanvas() { return this.canvas }
+    triggerRepaint() {}
+    isMoving() { return false }
+    getProjection() { return { name: 'mercator' } }
+    getPitch() { return 0 }
+    getBearing() { return 0 }
+    getZoom() { return this.zoom }
+    off() {}
+    unproject([x, y]: [number, number]) {
+        const scale = 2 ** (this.zoom - 10)
+        return { lng: x / scale / 128, lat: MercatorCoordinate.latFromMercatorY(0.5 + y / scale / 46080) }
+    }
+    project([lng, lat]: [number, number]) {
+        const scale = 2 ** (this.zoom - 10)
+        return { x: lng * 128 * scale, y: (MercatorCoordinate.mercatorYfromLat(lat) - 0.5) * 46080 * scale }
+    }
+}
+
+// Only DOM and the public camera are stubbed. The index, layer, client, worker
+// entry point, structured cloning and returned geometry all run unchanged.
+interface LayerState {
+    _index: DisplayIndex
+    _projection: Converter
+    _projectionDefinition: string
+    _dataReady: boolean
+    _editVersion: number
+    _lastSettledCamera?: string
+    _view: GridDisplayView
+    _blocks: DisplayBlock[]
+    _prepared: Map<DisplayChunk, PreparedDisplayChunk>
+    _geometry?: DisplayGeometryClient
+    _viewPromise?: Promise<void>
+    _pendingView: boolean
+    requestView(): void
+    refreshView(): Promise<void>
+    _cameraChanged(): void
+}
+
+async function layerFixture(t: { after(fn: () => void | Promise<void>): void }, readonly = false) {
+    await fixture(t)
+    class AutomaticWorker extends ProductionWorker { constructor() { super(); this.holdDone = false } }
+    Object.defineProperty(globalThis, 'Worker', { value: AutomaticWorker, configurable: true })
+    const frames = new Map<number, FrameRequestCallback>()
+    let nextFrame = 0
+    const globals = {
+        window: new EventTarget(),
+        requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame },
+        cancelAnimationFrame: (id: number) => { frames.delete(id) },
+    }
+    const originals = Object.getOwnPropertyDescriptors(globalThis)
+    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
+    const camera = new LayerCamera(), layer = new TopologyLayer(camera as never), state = layer as unknown as LayerState
+    const meta: GridDisplayMeta = {
+        revision: 'layer-prepare', epsg: 4326, bounds: [-8, -8, 16, 8], alignment_origin: [0, 0],
+        grid_info: [[1, 1], [0.25, 0.25]], displayLayers: displayLayers([-8, -8, 16, 8], [[1, 1], [0.25, 0.25]], [0, 0]),
+        level_info: [{ width: 24, height: 16 }, { width: 96, height: 64 }], subdivide_rules: [[4, 4]],
+        cellCount: 24, attributes: ['level', 'elevation', 'landClass'], elevationRange: [0, 1000], landClasses: [5],
+    }
+    const cells: DisplayCell[] = Array.from({ length: 24 }, (_, id) => ({ id, level: 1, elevation: id, landClass: 5,
+        bounds: [(id % 6) * 0.25, -Math.floor(id / 6) * 0.25 - 0.25, (id % 6 + 1) * 0.25, -Math.floor(id / 6) * 0.25] }))
+    const index = new DisplayIndex(meta.bounds, meta)
+    index.load(cells)
+    const errors: unknown[] = []
+    // An immutable readonly canonical view can need prepare after original
+    // deduplication. Supplying it here exercises that layer call site directly.
+    const source = (revision = meta.revision): ReadOnlyGridSource => ({
+        meta: { ...meta, revision },
+        loadBlocks: async blocks => index.queryBlocks(blocks, true),
+        inspect: async () => ({ cell: null, neighbors: [] }),
+        reportError: error => { errors.push(error) },
+    })
+    t.after(() => {
+        layer.remove(camera as never, undefined as never)
+        for (const key of Object.keys(globals)) {
+            if (originals[key]) Object.defineProperty(globalThis, key, originals[key])
+            else Reflect.deleteProperty(globalThis, key)
+        }
+    })
+    layer.initialized = true
+    if (readonly) await layer.setReadOnlySource(source())
+    else {
+        state._index = index
+        state._projection = proj4('EPSG:4326', 'EPSG:4326')
+        state._projectionDefinition = JSON.stringify(proj4.defs('EPSG:4326'))
+        state._dataReady = true
+        state.requestView()
+        await until(() => layer.isReady)
+    }
+    const worker = (state._geometry as unknown as { worker: ProductionWorker }).worker
+    const revise = (elevation: number, all = false) => {
+        for (const cell of all ? cells : cells.slice(0, 1)) index.upsert({ ...cell, elevation })
+        if (!readonly) state._editVersion++
+        state._lastSettledCamera = undefined
+        state.requestView()
+    }
+    const holdFirstPrepare = async () => {
+        worker.holdDone = true
+        revise(901, true)
+        const missing = index.queryBlocks(state._blocks, true).chunks.filter(chunk => !state._prepared.has(chunk)).length
+        assert.equal(missing, 6, 'all six changed original chunks must require preparation')
+        await until(() => worker.heldDone.length === 1)
+        const id = worker.heldDone[0].id
+        assert.equal(worker.sent.filter(message => message.id === id).length, 1)
+        return { id, missing }
+    }
+    const zoom = () => {
+        camera.zoom = 11
+        state._cameraChanged()
+        const callbacks = [...frames.values()]
+        frames.clear()
+        callbacks.forEach(callback => callback(performance.now()))
+    }
+    const assertComplete = (firstElevation: number) => {
+        assert.equal(layer.isReady, true)
+        assert.equal(state._dataReady, true)
+        assert.deepEqual(errors, [])
+        const final = state._view.chunks.flatMap(chunk => chunk.cells).sort((a, b) => a.id - b.id)
+        const expected = index.queryBlocks(state._blocks, true).chunks.flatMap(chunk => chunk.cells).sort((a, b) => a.id - b.id)
+        assert.ok(final.length > 0)
+        assert.deepEqual(final.map(cell => cell.id), expected.map(cell => cell.id), 'no visible original may disappear while draining the latest view')
+        for (const cell of final) assert.equal(cell.elevation, cell.id === 0 ? firstElevation : 901)
+        for (const chunk of state._view.chunks) {
+            const prepared = state._prepared.get(chunk)
+            assert.ok(prepared)
+            chunk.cells.forEach((cell, row) => assert.equal(prepared.data[row * 16 + 9], cell.elevation))
+        }
+    }
+    return { camera, layer, state, index, cells, worker, source, revise, holdFirstPrepare, zoom, assertComplete }
+}
+
+function trace(worker: ProductionWorker) {
+    return {
+        sent: worker.sent.map(({ id, task, config, transfers }) => ({ id, type: task.type, config: !!config, transfers,
+            keys: task.type === 'prepare' ? task.chunks.map(chunk => chunk.key) : [] })),
+        received: worker.received.map(reply => ({ id: reply.id, done: !!reply.done, error: reply.error,
+            preparedBytes: reply.part?.prepared?.reduce((sum, chunk) => sum + chunk.data.byteLength, 0) ?? 0 })),
+        terminated: worker.terminated,
+    }
+}
+
+for (const change of ['zoom', 'edit'] as const) test(`production layer stops obsolete prepare blocks after only ${change} changes at the first ACK`, async t => {
+    const f = await layerFixture(t)
+    const { id, missing } = await f.holdFirstPrepare()
+    const sentAtChange = f.worker.sent.length
+    const editVersion = f.state._editVersion
+    if (change === 'zoom') f.zoom()
+    else f.revise(902)
+    f.worker.holdDone = false
+    f.worker.releaseDone()
+    await until(() => f.layer.isReady)
+    const obsolete = f.worker.sent.filter(message => message.id === id)
+    const staleAfterChange = f.worker.sent.slice(sentAtChange).filter(message => message.id === id).length
+    const finalCells = f.state._view.chunks.flatMap(chunk => chunk.cells)
+    await writeFile(resolve(output, `layer-prepare-${change}.json`), JSON.stringify({ change, initialMissing: missing, obsoleteSent: obsolete.length,
+        staleSentAfterChange: staleAfterChange, skipped: missing - obsolete.length, finalReady: f.layer.isReady, originalCount: finalCells.length,
+        firstElevation: finalCells.find(cell => cell.id === 0)?.elevation, ...trace(f.worker) }, null, 2) + '\n')
+    assert.equal(obsolete.length, 1, 'the remaining five blocks of the obsolete snapshot must stay unsent')
+    assert.equal(staleAfterChange, 0)
+    assert.equal(f.camera.zoom, change === 'zoom' ? 11 : 10)
+    assert.equal(f.state._editVersion, editVersion + (change === 'edit' ? 1 : 0))
+    assert.equal((f.state._geometry as unknown as { worker: ProductionWorker }).worker, f.worker)
+    assert.equal(f.worker.terminated, false)
+    assert.equal(f.worker.sent.filter(message => message.config).length, 1, 'normal supersession must preserve worker selector state')
+    f.assertComplete(change === 'edit' ? 902 : 901)
+})
+
+test('readonly canonical originals stop obsolete prepare at the camera ACK boundary', async t => {
+    const f = await layerFixture(t, true)
+    const { id, missing } = await f.holdFirstPrepare()
+    f.zoom()
+    f.worker.holdDone = false
+    f.worker.releaseDone()
+    await until(() => f.layer.isReady)
+    const obsoleteSent = f.worker.sent.filter(message => message.id === id).length
+    await writeFile(resolve(output, 'layer-prepare-readonly.json'), JSON.stringify({ initialMissing: missing, obsoleteSent, skipped: missing - obsoleteSent,
+        finalReady: f.layer.isReady, ...trace(f.worker) }, null, 2) + '\n')
+    assert.equal(obsoleteSent, 1)
+    assert.equal(f.worker.terminated, false)
+    f.assertComplete(901)
+})
+
+test('removing the layer during a prepare ACK drops the late result and remaining inputs', async t => {
+    const f = await layerFixture(t)
+    const { id } = await f.holdFirstPrepare()
+    const active = f.state.refreshView()
+    f.layer.remove(f.camera as never, undefined as never)
+    f.worker.releaseDone()
+    await active
+    assert.equal(f.worker.sent.filter(message => message.id === id).length, 1)
+    assert.equal(f.worker.terminated, true)
+    assert.equal(f.state._prepared.size, 0)
+    assert.equal(f.state._view.chunks.length, 0)
+    assert.equal(f.state._viewPromise, undefined)
+    assert.equal(f.state._pendingView, false)
+    assert.equal(f.layer.isReady, false)
+    await writeFile(resolve(output, 'layer-prepare-remove.json'), JSON.stringify({ obsoleteSent: f.worker.sent.filter(message => message.id === id).length,
+        finalReady: f.layer.isReady, ...trace(f.worker) }, null, 2) + '\n')
+})
+
+test('replacing a source during a prepare ACK isolates the new worker and complete view', async t => {
+    const f = await layerFixture(t, true)
+    const { id } = await f.holdFirstPrepare()
+    const previous = f.state.refreshView()
+    f.index.upsert({ ...f.cells[0], elevation: 902 })
+    const replaced = f.layer.setReadOnlySource(f.source('layer-replacement'))
+    f.worker.releaseDone()
+    await Promise.all([previous, replaced])
+    await until(() => f.layer.isReady)
+    const nextWorker = (f.state._geometry as unknown as { worker: ProductionWorker }).worker
+    assert.notEqual(nextWorker, f.worker)
+    assert.equal(f.worker.terminated, true)
+    assert.equal(f.worker.sent.filter(message => message.id === id).length, 1)
+    assert.ok(nextWorker.sent[0].config)
+    f.assertComplete(902)
+    await writeFile(resolve(output, 'layer-prepare-replace.json'), JSON.stringify({ obsoleteSent: f.worker.sent.filter(message => message.id === id).length, finalReady: f.layer.isReady,
+        old: trace(f.worker), current: trace(nextWorker) }, null, 2) + '\n')
 })

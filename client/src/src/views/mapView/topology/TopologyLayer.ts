@@ -403,28 +403,21 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     if (request.signal.aborted || generation !== this._generation || this._removed) return
                     if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
                     const editVersion = this._editVersion
+                    const continueAfterBlock = () => {
+                        if (request.signal.aborted || this._request !== request || generation !== this._generation || this._removed) return false
+                        if (this.usableCamera(camera) && (source || editVersion === this._editVersion)) return true
+                        superseded = true
+                        this._pendingView = true
+                        this._forceView = true
+                        request.abort()
+                        return false
+                    }
                     const view = source
                         ? await source.loadBlocks(blocks, request.signal, async buffers => {
-                            request.signal.throwIfAborted()
-                            if (generation !== this._generation) throw new DOMException('Grid source replaced', 'AbortError')
                             // HTTP may finish after a different zoom has won.
                             // Do not decode/project an obsolete viewport first.
-                            if (!this.usableCamera(camera)) {
-                                superseded = true
-                                this._pendingView = true
-                                this._forceView = true
-                                request.abort()
-                                request.signal.throwIfAborted()
-                            }
-                            const result = await geometry.run({ type: 'decode', blocks: buffers, meta: source.meta }, () => {
-                                if (request.signal.aborted || generation !== this._generation) return false
-                                if (this.usableCamera(camera)) return true
-                                superseded = true
-                                this._pendingView = true
-                                this._forceView = true
-                                request.abort()
-                                return false
-                            })
+                            if (!continueAfterBlock()) throw new DOMException('Grid display cancelled', 'AbortError')
+                            const result = await geometry.run({ type: 'decode', blocks: buffers, meta: source.meta }, continueAfterBlock)
                             if (request.signal.aborted || generation !== this._generation) throw new DOMException('Grid display cancelled', 'AbortError')
                             if (!result.chunks || !result.prepared) throw new Error('Missing decoded display geometry')
                             result.chunks.forEach((chunk, index) => this._prepared.set(chunk, result.prepared![index]))
@@ -440,7 +433,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
                     const missing = next.chunks.filter(chunk => !this._prepared.has(chunk))
                     if (missing.length) {
-                        const result = await geometry.run({ type: 'prepare', chunks: missing })
+                        const result = await geometry.run({ type: 'prepare', chunks: missing }, continueAfterBlock)
                         if (request.signal.aborted || generation !== this._generation || this._removed) return
                         if (!result.prepared) throw new Error('Missing prepared display geometry')
                         missing.forEach((chunk, index) => this._prepared.set(chunk, result.prepared![index]))
