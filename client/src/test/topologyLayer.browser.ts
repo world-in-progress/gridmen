@@ -271,6 +271,24 @@ async function main() {
     draw(editLayer, camera)
     const uneditedVaos = drawnVaos
     drawnVaos = new Set()
+    // Hold a real worker reply across a second edit, so the older snapshot must
+    // never upload after the authoritative index has already changed again.
+    const editingWorker = (Reflect.get(editLayer, '_geometry') as { worker: Worker }).worker
+    const workerMessage = editingWorker.onmessage!
+    const heldMessages: MessageEvent[] = []
+    editingWorker.onmessage = event => { heldMessages.push(event) }
+    const interleavedBufferData = gl.bufferData.bind(gl)
+    let interleavedUploads = 0
+    gl.bufferData = ((...args: Parameters<typeof gl.bufferData>) => { interleavedUploads++; interleavedBufferData(...args) }) as typeof gl.bufferData
+    core.markCellsAsDeleted([0])
+    await until(() => heldMessages.some(event => event.data.done))
+    core.restoreCells([0])
+    editingWorker.onmessage = workerMessage
+    for (const event of heldMessages) workerMessage.call(editingWorker, event)
+    await until(() => editLayer.isReady)
+    gl.bufferData = interleavedBufferData
+    check('an edit superseded during preparation never uploads its obsolete geometry',
+        !core.isDeleted(0) && interleavedUploads === 1, { interleavedUploads })
     const editBufferData = gl.bufferData.bind(gl)
     const editUploadBytes: number[] = []
     gl.bufferData = ((...args: Parameters<typeof gl.bufferData>) => {

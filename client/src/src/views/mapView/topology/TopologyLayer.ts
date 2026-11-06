@@ -86,6 +86,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _forceView = false
     private _lastCamera?: string
     private _generation = 0
+    private _editVersion = 0
     private _scheduled?: object
     private _cameraFrame?: number
     private _contextUnavailable = false
@@ -313,6 +314,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         }
     }
     private patchChanged(change: PatchCellChange): void {
+        this._editVersion++
         if (change.reset) this.rebuildPatchIndex()
         else {
             const selectedGeometry = new Set<string>()
@@ -391,6 +393,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     }
                     if (request.signal.aborted || generation !== this._generation || this._removed) return
                     if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
+                    const editVersion = this._editVersion
                     const view = source
                         ? await source.loadBlocks(blocks, request.signal, async buffers => {
                             request.signal.throwIfAborted()
@@ -416,6 +419,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                         if (!result.prepared) throw new Error('Missing prepared display geometry')
                         missing.forEach((chunk, index) => this._prepared.set(chunk, result.prepared![index]))
                     }
+                    // The authoritative editable index may change while the
+                    // worker prepares its snapshot. Only its latest edit wins.
+                    if (!source && editVersion !== this._editVersion) { this._pendingView = true; this._forceView = true; continue }
                     if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
                     // Immutable nodes from a pan at the same Mercator scale stay
                     // valid. Cull them against the current camera, keep loading
