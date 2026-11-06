@@ -38,18 +38,22 @@ test('a feasible circle short circuit still solves a skew node when its center c
     assert.ok(Math.abs(projectedRadius([0, 0, 1, 1], unit) * 1e8 - exact) < 1e-7)
 })
 
-test('repeat views do no raw transforms; long pans retain only two viewport working sets', () => {
+test('repeat views do no raw transforms; long stopped pans retain only two completed viewport working sets', () => {
     const layers = displayLayers([0, 0, 100000, 256], [[64, 64], [1, 1]], [0, 0])
     let transforms = 0
     const selector = new DisplayGeometrySelector(layers, [0, 0], ([x, y]) => { transforms++; return [x * 1e-5, y * 1e-5] })
     const bounds: Bounds = [0, 0, 256, 128]
     selector.select(bounds, 1e5)
+    selector.publish(selector.selectionId, true)
     assert.ok(transforms > 0)
     transforms = 0
     selector.select(bounds, 1e5)
     assert.equal(transforms, 0)
     const working = selector as unknown as { nodes: Map<string, unknown>; minima: Map<string, unknown> }
-    for (let x = 4096; x < 65536; x += 4096) selector.select([x, 0, x + 256, 128], 1e5)
+    for (let x = 4096; x < 65536; x += 4096) {
+        selector.select([x, 0, x + 256, 128], 1e5)
+        selector.publish(selector.selectionId, true)
+    }
     const lastTwo = [57344, 61440].map(x => {
         const isolated = new DisplayGeometrySelector(layers, [0, 0], ([a, b]) => [a * 1e-5, b * 1e-5])
         isolated.select([x, 0, x + 256, 128], 1e5)
@@ -61,6 +65,44 @@ test('repeat views do no raw transforms; long pans retain only two viewport work
     // it eligible; its first invalid sample alone can never prove acceptance.
     const zoomed = selector.select(bounds, 2e5)
     assert.deepEqual(zoomed, selectDisplayBlocks(layers, [0, 0], bounds, ([x, y]) => [x * 2, y * 2]))
+})
+
+test('zoom motion preserves both completed endpoints and retains accepted evidence after a later rejection', () => {
+    const layers = displayLayers([0, 0, 4096, 4096], [[64, 64], [1, 1]], [0, 0])
+    let transforms = 0
+    const selector = new DisplayGeometrySelector(layers, [0, 0], ([x, y]) => { transforms++; return [x, y] })
+    const view = (scale: number) => [1280 - 128 / scale, 1280 - 96 / scale, 1280 + 128 / scale, 1280 + 96 / scale] as Bounds
+    const coarse = selector.select(view(0.25), 0.25)
+    selector.publish(selector.selectionId, true)
+    for (const scale of [0.28, 0.32, 0.36, 0.4, 0.45]) {
+        selector.select(view(scale), scale); selector.publish(selector.selectionId, false)
+    }
+    const fine = selector.select(view(0.5), 0.5)
+    selector.publish(selector.selectionId, true)
+    for (const scale of [0.45, 0.4, 0.36, 0.32, 0.28]) {
+        selector.select(view(scale), scale); selector.publish(selector.selectionId, false)
+    }
+    transforms = 0
+    assert.deepEqual(selector.select(view(0.25), 0.25), coarse)
+    assert.equal(transforms, 0)
+    selector.publish(selector.selectionId, true)
+    transforms = 0
+    assert.deepEqual(selector.select(view(0.5), 0.5), fine)
+    assert.equal(transforms, 0)
+})
+
+test('an exact coarse rejection never overwrites an earlier complete acceptance proof', () => {
+    const layers = displayLayers([0, 0, 64, 64], [[64, 64], [1, 1]], [0, 0])
+    let transforms = 0
+    const selector = new DisplayGeometrySelector(layers, [0, 0], p => { transforms++; return p })
+    const viewport: Bounds = [0, 0, 64, 64]
+    const fine = selector.select(viewport, 1.6)
+    selector.publish(selector.selectionId, true)
+    selector.select(viewport, 1.4)
+    selector.publish(selector.selectionId, true)
+    transforms = 0
+    assert.deepEqual(selector.select(viewport, 1.6), fine)
+    assert.equal(transforms, 0)
 })
 
 const definition = '+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs'

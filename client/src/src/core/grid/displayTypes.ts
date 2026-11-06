@@ -83,6 +83,7 @@ export interface ReadOnlyGridSource {
     meta: GridDisplayMeta
     loadBlocks(blocks: DisplayBlock[], signal: AbortSignal, decode?: DisplayBlockDecoder): Promise<GridDisplayView>
     clearCache?(): void
+    retainBlocks?(blocks: DisplayBlock[], stopped: boolean): void
     reportError?(error: unknown): void
     inspect(x: number, y: number): Promise<GridInspection>
 }

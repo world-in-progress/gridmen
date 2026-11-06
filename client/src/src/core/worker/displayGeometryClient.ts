@@ -2,6 +2,7 @@ import type { DisplayGeometryConfig, DisplayGeometryTask, DisplayGeometryEngine,
 import type { DisplayChunk } from '../grid/displayTypes'
 
 type Result = ReturnType<DisplayGeometryEngine['run']>
+type StreamTask = Extract<DisplayGeometryTask, { type: 'prepare' | 'decode' }>
 
 /** Dedicated projection worker: one active RPC, no pending camera/job queue. A
  * cancellation terminates its computation and all source-bound cached geometry.
@@ -9,11 +10,11 @@ type Result = ReturnType<DisplayGeometryEngine['run']>
 export class DisplayGeometryClient {
     private worker?: Worker
     private sequence = 0
-    private pending?: { id: number; resolve: (value: Result) => void; reject: (error: Error) => void; chunks: DisplayChunk[]; prepared: PreparedDisplayChunk[]; input?: DisplayChunk[]; next: number }
+    private pending?: { id: number; resolve: (value: Result) => void; reject: (error: Error) => void; chunks: DisplayChunk[]; prepared: PreparedDisplayChunk[]; input?: StreamTask; next: number; continueAfterBlock?: () => boolean }
 
     constructor(private readonly config: DisplayGeometryConfig) {}
 
-    run(task: DisplayGeometryTask): Promise<Result> {
+    run(task: DisplayGeometryTask, continueAfterBlock?: () => boolean): Promise<Result> {
         if (this.pending) throw new Error('Concurrent display geometry task')
         let config: DisplayGeometryConfig | undefined
         if (!this.worker) {
@@ -25,14 +26,22 @@ export class DisplayGeometryClient {
                 if (event.data.part) {
                     if (event.data.part.chunks) pending.chunks.push(...event.data.part.chunks)
                     if (event.data.part.prepared) pending.prepared.push(...event.data.part.prepared)
-                    return
+                    if (!event.data.done) return
                 }
-                if (event.data.done && pending.input && pending.next < pending.input.length) {
-                    // The next block is cloned in this message event, after the
-                    // previous block finished. Both directions stay bounded by
-                    // one block; the single RPC owns just this viewport's list.
+                if (event.data.done && pending.continueAfterBlock) {
                     try {
-                        this.worker!.postMessage({ id: pending.id, task: { type: 'prepare', chunks: [pending.input[pending.next++]] } })
+                        if (!pending.continueAfterBlock()) {
+                            this.pending = undefined
+                            pending.reject(new DOMException('Display geometry superseded', 'AbortError'))
+                            return
+                        }
+                    } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); return }
+                }
+                if (event.data.done && pending.input && pending.next < (pending.input.type === 'decode' ? pending.input.blocks.length : pending.input.chunks.length)) {
+                    // The receiver has finished this block before the next
+                    // input is cloned or transferred under the same RPC ID.
+                    try {
+                        this.postNext(pending)
                     } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))) }
                     return
                 }
@@ -46,13 +55,23 @@ export class DisplayGeometryClient {
         }
         return new Promise((resolve, reject) => {
             const id = ++this.sequence
-            const input = task.type === 'prepare' ? task.chunks : undefined
-            this.pending = { id, resolve, reject, chunks: [], prepared: [], input, next: input?.length ? 1 : 0 }
+            const input = task.type === 'prepare' || task.type === 'decode' ? task : undefined
+            this.pending = { id, resolve, reject, chunks: [], prepared: [], input, next: 0, continueAfterBlock }
             try {
-                const first = input?.length ? { type: 'prepare' as const, chunks: [input[0]] } : task
-                this.worker!.postMessage({ id, config, task: first }, task.type === 'decode' ? task.blocks.map(block => block.buffer) : [])
+                if (input && (input.type === 'decode' ? input.blocks.length : input.chunks.length)) this.postNext(this.pending, config)
+                else this.worker!.postMessage({ id, config, task })
             } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))) }
         })
+    }
+
+    private postNext(pending: NonNullable<DisplayGeometryClient['pending']>, config?: DisplayGeometryConfig): void {
+        const input = pending.input!
+        if (input.type === 'decode') {
+            const block = input.blocks[pending.next++]
+            this.worker!.postMessage({ id: pending.id, config, task: { type: 'decode', blocks: [block], meta: input.meta } }, [block.buffer])
+        } else {
+            this.worker!.postMessage({ id: pending.id, config, task: { type: 'prepare', chunks: [input.chunks[pending.next++]] } })
+        }
     }
 
     dispose(): void { this.fail(new DOMException('Display geometry cancelled', 'AbortError')) }

@@ -4,16 +4,19 @@ import proj4 from 'proj4'
 import { DisplayGeometryClient } from '../src/core/worker/displayGeometryClient'
 import { displayLayers } from '../src/core/grid/displayHierarchy'
 import type { DisplayGeometryTask } from '../src/core/grid/displayGeometryEngine'
+import type { GridDisplayMeta } from '../src/core/grid/displayTypes'
 
 class ManualWorker {
     static instances: ManualWorker[] = []
     onmessage?: (event: { data: unknown }) => void
     onerror?: (event: { message: string }) => void
     onmessageerror?: () => void
-    sent: { id: number; config?: unknown; task: DisplayGeometryTask }[] = []
+    sent: { id: number; config?: unknown; task: DisplayGeometryTask; transfers: number }[] = []
     terminated = false
     constructor() { ManualWorker.instances.push(this) }
-    postMessage(message: { id: number; config?: unknown; task: DisplayGeometryTask }) { this.sent.push(message) }
+    postMessage(message: { id: number; config?: unknown; task: DisplayGeometryTask }, transfer: Transferable[] = []) {
+        this.sent.push({ ...structuredClone(message, { transfer }), transfers: transfer.length })
+    }
     terminate() { this.terminated = true }
     reply(data: unknown) { this.onmessage?.({ data }) }
 }
@@ -60,4 +63,34 @@ test('one projection RPC accumulates a finite block stream; cancellation drops p
     replacement.onerror?.({ message: 'projection failed' })
     await assert.rejects(failed, /projection failed/)
     assert.equal(replacement.terminated, true)
+})
+
+test('decode transfers one buffer after each block acknowledgment and keeps empty batches finite', async t => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'Worker')
+    Object.defineProperty(globalThis, 'Worker', { value: ManualWorker, configurable: true })
+    t.after(() => { if (original) Object.defineProperty(globalThis, 'Worker', original); else Reflect.deleteProperty(globalThis, 'Worker') })
+    const client = new DisplayGeometryClient({ layers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), origin: [0, 0], definition: JSON.stringify(proj4.defs('EPSG:4326')) })
+    const blocks = [0, 1, 2].map(x => ({ block: { blockLayer: 0, x, y: 0, displayLayer: 0 }, buffer: new ArrayBuffer(8) }))
+    const meta = { revision: 'rpc', displayLayers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), alignment_origin: [0, 0], grid_info: [[1, 1]], cellCount: 3 } as GridDisplayMeta
+    const decoding = client.run({ type: 'decode', blocks, meta })
+    const worker = ManualWorker.instances.at(-1)!
+    const id = worker.sent[0].id
+    assert.equal(worker.sent.length, 1)
+    assert.equal(worker.sent[0].transfers, 1)
+    assert.deepEqual(blocks.map(item => item.buffer.byteLength), [0, 8, 8])
+    assert.throws(() => client.run({ type: 'decode', blocks: [], meta }), /Concurrent/)
+    for (let i = 0; i < 3; i++) {
+        worker.reply({ id, part: { chunks: [{ key: String(i), bounds: [i, 0, i + 1, 1], cells: [], fields: [] }], prepared: [] } })
+        assert.equal(worker.sent.length, i + 1)
+        worker.reply({ id, done: true })
+        assert.equal(worker.sent.length, Math.min(i + 2, 3))
+        assert.deepEqual(blocks.map(item => item.buffer.byteLength), blocks.map((_, index) => index <= i + 1 ? 0 : 8))
+        if (i < 2) assert.equal(worker.sent[i + 1].id, id)
+    }
+    assert.deepEqual((await decoding).chunks?.map(chunk => chunk.key), ['0', '1', '2'])
+    const empty = client.run({ type: 'decode', blocks: [], meta })
+    assert.equal(worker.sent.at(-1)?.transfers, 0)
+    worker.reply({ id: worker.sent.at(-1)?.id, done: true })
+    assert.deepEqual(await empty, { chunks: [], prepared: [] })
+    client.dispose()
 })

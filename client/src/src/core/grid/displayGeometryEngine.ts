@@ -21,6 +21,7 @@ export interface PreparedDisplayChunk {
 export type DisplayGeometryTask =
     | { type: 'reset' }
     | { type: 'select'; bounds: Bounds; scale: number }
+    | { type: 'publish'; selection: number; stopped: boolean }
     | { type: 'prepare'; chunks: DisplayChunk[] }
     | { type: 'decode'; blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]; meta: GridDisplayMeta }
 
@@ -41,11 +42,13 @@ export class DisplayGeometryEngine {
 
     run(task: DisplayGeometryTask) {
         if (task.type === 'reset') { this.points.clear(); return {} }
+        if (task.type === 'publish') { this.selector.publish(task.selection, task.stopped); return {} }
         if (task.type === 'select') {
             // Selection and preparation share this view's exact grid vertices.
             // The next camera starts a new set; no visited-region history grows.
             this.points.clear()
-            return { blocks: this.selector.select(task.bounds, task.scale) }
+            const blocks = this.selector.select(task.bounds, task.scale)
+            return { blocks, selection: this.selector.selectionId }
         }
         if (task.type === 'prepare') return { prepared: this.prepare(task.chunks) }
         const chunks = task.blocks.map(({ buffer, block }) => decodeDisplayBlock(buffer, block, task.meta))

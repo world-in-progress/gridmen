@@ -13,17 +13,47 @@ test('immutable decoded blocks, including empty responses, survive overlapping v
     const cache = new DisplayBlockCache(meta, async blocks => { reads.push(blocks.map(b => b.x)); return blocks.map(chunk) })
     const signal = new AbortController().signal
     const first = await cache.query([block(0), block(1), block(2)], signal)
+    cache.retain([block(0), block(1), block(2)], true)
     const second = await cache.query([block(0), block(1), block(2)], signal)
     assert.equal(first.chunks[0], second.chunks[0])
     const pan = await cache.query([block(2), block(3), block(4)], signal)
+    cache.retain([block(2), block(3), block(4)], true)
     assert.equal(first.chunks[1], pan.chunks[0])
     await cache.query([block(0), block(1), block(2)], signal)
     assert.deepEqual(reads, [[0, 1, 2], [3, 4]])
-    for (let x = 10; x < 100; x += 2) await cache.query([block(x), block(x + 1)], signal)
+    for (let x = 10; x < 100; x += 2) {
+        const blocks = [block(x), block(x + 1)]
+        await cache.query(blocks, signal)
+        cache.retain(blocks, true)
+    }
     const stored = cache as unknown as { chunks: Map<string, DisplayChunk> }
     assert.ok(stored.chunks.size <= 4)
     await cache.query([block(0), block(1)], signal)
     assert.deepEqual(reads.at(-1), [0, 1])
+})
+
+test('intermediate requests cannot evict either completed zoom endpoint; retention stays within four view footprints', async () => {
+    let reads = 0
+    const cache = new DisplayBlockCache(meta, async blocks => { reads += blocks.length; return blocks.map(chunk) })
+    const signal = new AbortController().signal
+    const a = [block(0), block(1), block(2)], b = [block(30), block(31), block(32)]
+    await cache.query(a, signal); cache.retain(a, true)
+    for (let x = 4; x < 24; x += 2) {
+        const moving = [block(x), block(x + 1)]
+        await cache.query(moving, signal); cache.retain(moving, false)
+    }
+    await cache.query(b, signal); cache.retain(b, true)
+    for (let x = 40; x < 60; x += 2) {
+        const moving = [block(x), block(x + 1)]
+        await cache.query(moving, signal); cache.retain(moving, false)
+        assert.ok((cache as unknown as { chunks: Map<string, DisplayChunk> }).chunks.size <= a.length + b.length + moving.length)
+    }
+    const before = reads
+    await cache.query(a, signal); cache.retain(a, true)
+    await cache.query(b, signal); cache.retain(b, true)
+    assert.equal(reads, before)
+    cache.clear()
+    assert.equal((cache as unknown as { chunks: Map<string, DisplayChunk> }).chunks.size, 0)
 })
 
 test('clearing a source or aborting cannot repopulate it from a late decoded response', async () => {

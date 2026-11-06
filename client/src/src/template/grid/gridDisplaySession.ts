@@ -20,6 +20,7 @@ async function createGridDisplay(node: ResourceNode, map: MapboxMap, signal: Abo
     const source: ReadOnlyGridSource = {
         meta,
         clearCache: () => cache.clear(),
+        retainBlocks: (blocks, stopped) => cache.retain(blocks, stopped),
         reportError: error => reportError(errorMessage(error)),
         loadBlocks: async (blocks, requestSignal, decode) => {
             const combined = AbortSignal.any([signal, requestSignal])

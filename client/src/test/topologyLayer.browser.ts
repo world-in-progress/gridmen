@@ -45,8 +45,9 @@ class PublicCamera {
     centerX = 0
     centerY = 0
     moving = false
+    repaints = 0
     listeners = new Map<string, Set<() => void>>()
-    triggerRepaint() {}
+    triggerRepaint() { this.repaints++ }
     isMoving() { return this.moving }
     getProjection() { return { name: 'mercator' } }
     getPitch() { return 0 }
@@ -600,7 +601,7 @@ async function main() {
         return chunks
     })
     let wireView!: GridDisplayView
-    await wireLayer.setReadOnlySource({ ...source, clearCache: () => cache.clear(),
+    await wireLayer.setReadOnlySource({ ...source, clearCache: () => cache.clear(), retainBlocks: (blocks, stopped) => cache.retain(blocks, stopped),
         async loadBlocks(blocks, signal, decode) { wireView = await cache.query(blocks, signal, decode); return wireView } })
     check('real module worker decodes transferred GDN4 buffers in a finite block stream', transferred && reads > 0 && wireView.chunks.length > 0)
     check('worker-decoded summaries retain exact minc, occupancy and attributes', wireView.chunks.every(chunk => chunk.fields.every(field =>
@@ -614,6 +615,68 @@ async function main() {
     gl.bufferData = originalBufferData
     check('warm immutable wire view performs no reads, decodes, geometry uploads or identity replacement',
         wireView === cachedView && reads === coldReads && warmUploads === 0, { reads, coldReads, warmUploads })
+    const anchoredPrepared = new Map(Reflect.get(wireLayer, '_prepared') as Map<unknown, { data: Float32Array }>)
+    const wireWorker = (Reflect.get(wireLayer, '_geometry') as { worker: Worker }).worker
+    const postWireMessage = wireWorker.postMessage.bind(wireWorker)
+    const sentWireTasks: string[] = []
+    wireWorker.postMessage = ((message: { task: { type: string } }, transfer: Transferable[]) => {
+        sentWireTasks.push(message.task.type)
+        postWireMessage(message, transfer)
+    }) as typeof wireWorker.postMessage
+    const zoomWire = async (span: number, moving: boolean) => {
+        camera.span = span; camera.moving = moving
+        camera.emit('zoom')
+        if (!moving) camera.emit('moveend')
+        await frame()
+        await until(() => wireLayer.isReady)
+    }
+    for (const span of [7200, 6400, 5600, 4800]) await zoomWire(span, true)
+    await zoomWire(4000, false)
+    for (const span of [4800, 5600, 6400, 7200]) await zoomWire(span, true)
+    const beforeReturnReads = reads, beforeReturnMessages = sentWireTasks.length
+    await zoomWire(SPAN, false)
+    const returnedPrepared = Reflect.get(wireLayer, '_prepared') as Map<unknown, { data: Float32Array }>
+    const returnTasks = sentWireTasks.slice(beforeReturnMessages)
+    check('continuous zoom round trip reuses completed decoded and prepared endpoints', reads === beforeReturnReads
+        && !returnTasks.some(type => type === 'decode' || type === 'prepare')
+        && wireView.chunks.every(chunk => returnedPrepared.get(chunk)?.data === anchoredPrepared.get(chunk)?.data),
+        { reads, beforeReturnReads, returnTasks })
+    const wireStats = wireLayer.getDisplayStats()
+    check('zoom anchors keep CPU data while GPU allocations still contain only visible instances',
+        wireStats.gpuBytes === 64 * (wireStats.visibleCells + wireStats.fieldSamples) + 768, wireStats)
+    await zoomWire(7200, true)
+    const publishMessages = new Set<number>(), heldPublish: MessageEvent[] = []
+    const receiveWireMessage = wireWorker.onmessage!
+    const beforePublishPost = wireWorker.postMessage.bind(wireWorker)
+    wireWorker.postMessage = ((message: { id: number; task: { type: string } }, transfer: Transferable[]) => {
+        if (message.task.type === 'publish') publishMessages.add(message.id)
+        beforePublishPost(message, transfer)
+    }) as typeof wireWorker.postMessage
+    let holdPublish = true
+    wireWorker.onmessage = event => {
+        if (holdPublish && publishMessages.has(event.data.id)) heldPublish.push(event)
+        else receiveWireMessage.call(wireWorker, event)
+    }
+    camera.span = 6400; camera.emit('zoom')
+    await frame()
+    await until(() => heldPublish.length > 0)
+    camera.span = 7200; camera.emit('zoom')
+    await frame()
+    holdPublish = false
+    for (const event of heldPublish) receiveWireMessage.call(wireWorker, event)
+    await until(() => wireLayer.isReady || !Reflect.get(wireLayer, '_dataReady'))
+    check('a camera change during publish acknowledgment cannot expire the displayed selection', wireLayer.isReady)
+    heldPublish.length = 0
+    holdPublish = true
+    wireLayer.updateGPUCell()
+    await until(() => heldPublish.length > 0)
+    const repaintsBeforeAcknowledgment = camera.repaints
+    draw(wireLayer, camera)
+    holdPublish = false
+    for (const event of heldPublish) receiveWireMessage.call(wireWorker, event)
+    await until(() => wireLayer.isReady)
+    check('a delayed publish acknowledgment requests a new frame after ready', camera.repaints > repaintsBeforeAcknowledgment)
+    camera.moving = false
     wireLayer.remove(camera as never, gl)
 }
 

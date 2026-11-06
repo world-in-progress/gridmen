@@ -11,11 +11,11 @@ self.onmessage = (event: MessageEvent<{ id: number; config?: DisplayGeometryConf
         // This is one RPC's finite output, not a queue of camera requests.
         if (task.type === 'decode' || task.type === 'prepare') {
             const count = task.type === 'decode' ? task.blocks.length : task.chunks.length
-            for (let i = 0; i < count; i++) {
-                const part = engine.run(task.type === 'decode' ? { ...task, blocks: [task.blocks[i]] } : { ...task, chunks: [task.chunks[i]] })
-                self.postMessage({ id, part }, part.prepared!.map(chunk => chunk.data.buffer))
-            }
-            self.postMessage({ id, done: true })
+            if (count > 1) throw new Error('Expected one display geometry block per message')
+            if (count) {
+                const part = engine.run(task)
+                self.postMessage({ id, part, done: true }, part.prepared!.map(chunk => chunk.data.buffer))
+            } else self.postMessage({ id, done: true })
             return
         }
         const result = engine.run(task)

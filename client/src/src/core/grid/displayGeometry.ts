@@ -1,8 +1,9 @@
 import type { Bounds, DisplayLayer } from './displayTypes'
 import { displayLayer, nodeBounds, nodeRange, NODE_RADIUS, projectedCorners, projectedRadius, selectDisplayBlocks, type ProjectPoint } from './displayHierarchy'
 
-interface Minimum { radius: number; complete: boolean; rejectedRadius: number }
+interface Minimum { acceptedRadius: number; rejectedRadius: number }
 interface NodeMeasure { radius: number; size: number }
+interface SelectionFootprint { id: number; nodes: Set<string>; minima: Set<string> }
 
 /** One source/lattice/projection instance. Pan translates Mercator; zoom uniformly
  * scales it at zero pitch/bearing. Cache geometric lengths, never camera choices.
@@ -12,8 +13,10 @@ interface NodeMeasure { radius: number; size: number }
 export class DisplayGeometrySelector {
     private nodes = new Map<string, NodeMeasure>()
     private minima = new Map<string, Minimum>()
-    private previousNodes = new Set<string>()
-    private previousMinima = new Set<string>()
+    private sequence = 0
+    private current?: SelectionFootprint
+    private published?: SelectionFootprint
+    private settled: SelectionFootprint[] = []
 
     constructor(private readonly layers: DisplayLayer[], private readonly origin: [number, number], private readonly project: ProjectPoint) {}
 
@@ -52,7 +55,7 @@ export class DisplayGeometrySelector {
                 const key = `${index}:${bounds.join(',')}`
                 usedMinima.add(key)
                 const old = this.minima.get(key)
-                if (old?.complete && fits(old.radius)) return true
+                if (old && fits(old.acceptedRadius)) return true
                 if (old && !fits(old.rejectedRadius)) return false
                 const layer = displayLayer(this.layers, index)
                 const [x0, y0, x1, y1] = nodeRange(layer, bounds, this.origin)
@@ -60,20 +63,39 @@ export class DisplayGeometrySelector {
                 for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
                     radius = Math.min(radius, projectedRadius(nodeBounds(layer, x, y, this.origin), project, (NODE_RADIUS - 1e-9) / pixelsPerUnit))
                     if (!fits(radius)) {
-                        this.minima.set(key, { radius, complete: false, rejectedRadius: radius })
+                        this.minima.set(key, { acceptedRadius: old?.acceptedRadius ?? 0, rejectedRadius: Math.min(old?.rejectedRadius ?? Infinity, radius) })
                         return false
                     }
                 }
-                this.minima.set(key, { radius, complete: true, rejectedRadius: old?.rejectedRadius ?? Infinity })
+                this.minima.set(key, { acceptedRadius: Math.max(old?.acceptedRadius ?? 0, radius), rejectedRadius: old?.rejectedRadius ?? Infinity })
                 return true
             },
         })
-        // Keep two actual selections' working sets. No accumulated pan history,
-        // prefetch area, fixed capacity, or whole-grid traversal is retained.
-        for (const key of this.nodes.keys()) if (!usedNodes.has(key) && !this.previousNodes.has(key)) this.nodes.delete(key)
-        for (const key of this.minima.keys()) if (!usedMinima.has(key) && !this.previousMinima.has(key)) this.minima.delete(key)
-        this.previousNodes = usedNodes
-        this.previousMinima = usedMinima
+        this.current = { id: ++this.sequence, nodes: usedNodes, minima: usedMinima }
+        this.prune()
         return result
+    }
+
+    get selectionId(): number { return this.current!.id }
+
+    /** Intermediate zoom cameras must not evict the two stopped, complete views
+     * that a zoom round trip revisits. One candidate and the published view may
+     * additionally be live. These are finite viewport footprints, not history.
+     */
+    publish(id: number, stopped: boolean): void {
+        const view = [this.current, this.published, ...this.settled].find(view => view?.id === id)
+        if (!view) throw new Error('Expired display geometry selection')
+        this.published = view
+        if (stopped) {
+            const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(key => b.has(key))
+            this.settled = [view, ...this.settled.filter(old => !same(old.nodes, view.nodes) || !same(old.minima, view.minima))].slice(0, 2)
+        }
+        this.prune()
+    }
+
+    private prune(): void {
+        const live = [this.current, this.published, ...this.settled]
+        for (const key of this.nodes.keys()) if (!live.some(view => view?.nodes.has(key))) this.nodes.delete(key)
+        for (const key of this.minima.keys()) if (!live.some(view => view?.minima.has(key))) this.minima.delete(key)
     }
 }

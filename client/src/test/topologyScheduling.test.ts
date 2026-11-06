@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
 import { displayLayers } from '../src/core/grid/displayHierarchy'
-import type { DisplayBlock, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
+import type { DisplayBlock, DisplayBlockDecoder, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
 import { GeometryWorker } from './displayGeometryWorker'
 import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
 
@@ -58,17 +58,17 @@ function fixture(t: { after(fn: () => void): void }) {
     const layer = new TopologyLayer(camera as never)
     layer.initDOM()
     layer.initialized = true
-    const calls: { blocks: DisplayBlock[]; center: number; signal: AbortSignal; resolve: (data: GridDisplayView) => void }[] = []
+    const calls: { blocks: DisplayBlock[]; center: number; signal: AbortSignal; resolve: (data: GridDisplayView) => void; reject: (error: unknown) => void; decode?: DisplayBlockDecoder }[] = []
     let active = 0, maxActive = 0
     const source: ReadOnlyGridSource = {
         meta: { revision: 'scheduling-fixture', displayLayers: displayLayers([-10, -10, 10, 10], [[1, 1]], [0, 0]),
             epsg: 4326, bounds: [-10, -10, 10, 10], grid_info: [[1, 1]],
             alignment_origin: [0, 0], level_info: [{ width: 20, height: 20 }], subdivide_rules: [],
             cellCount: 1, attributes: ['level'], elevationRange: [0, 0], landClasses: [0] },
-        loadBlocks(blocks, signal) {
+        loadBlocks(blocks, signal, decode) {
             active++
             maxActive = Math.max(active, maxActive)
-            return new Promise<GridDisplayView>(resolve => calls.push({ blocks, center: camera.center, signal, resolve }))
+            return new Promise<GridDisplayView>((resolve, reject) => calls.push({ blocks, center: camera.center, signal, resolve, reject, decode }))
                 .finally(() => { active-- })
         },
         inspect: async () => ({ cell: null, neighbors: [] }),
@@ -211,6 +211,34 @@ test('a superseded zoom response cannot commit geometry or mark the latest view 
     assert.equal(Reflect.get(f.layer, '_view'), before)
     assert.equal(f.calls.length, 3)
     assert.equal(f.layer.isReady, false)
+    f.calls[2].resolve(view)
+    await tick()
+    assert.equal(f.layer.isReady, true)
+    assert.equal(f.maxActive(), 1)
+})
+
+test('HTTP completed for an obsolete zoom skips decode and still drains the latest view in the same load', async t => {
+    const f = fixture(t)
+    await f.ready()
+    f.camera.zoom = 9
+    f.camera.emit('zoom')
+    await f.frame()
+    const old = f.calls[1]
+    f.camera.zoom = 11
+    f.camera.emit('zoom')
+    await f.frame()
+    // Invalid bytes make an accidental decoder call fail as GDN4, rather than
+    // silently looking like an aborted obsolete camera.
+    let aborted: unknown
+    try { await old.decode!([{ block: old.blocks[0], buffer: new ArrayBuffer(1) }]) }
+    catch (error) { aborted = error }
+    assert.equal((aborted as Error).name, 'AbortError')
+    assert.equal(old.signal.aborted, true)
+    old.reject(aborted)
+    await tick()
+    assert.equal(f.calls.length, 3)
+    assert.equal(f.layer.isReady, false)
+    assert.equal(f.calls[2].signal.aborted, false)
     f.calls[2].resolve(view)
     await tick()
     assert.equal(f.layer.isReady, true)
