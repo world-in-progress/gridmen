@@ -25,6 +25,14 @@ A typical workflow is:
 
 Source DEM, LULC, and vector data must be supplied with appropriate usage rights.
 
+## Viewing grid resolution and attributes
+
+Choose **Check** on an assembled grid to browse it read-only. The patch editor and assembled-grid viewer share a renderer that loads and draws visible display chunks aligned to the schema lattice. Display chunks are independent of patches; editing rebuilds the chunks containing changed cells, and GPU buffers are allocated for the visible chunks rather than a fixed total-cell capacity.
+
+Cells at least 4 CSS pixels wide show their actual fills and outlines. Smaller cells appear as an attribute field without grid lines, with outline density indicating resolution: darker areas contain finer cells. Density uses `coverage = min(1, 2s/c)`, where `s` is meters per pixel and `c` is the smallest contributing real cell side. The legend identifies field mode and explains the density scale; zooming continuously transitions to actual outlines. Subpixel holes contribute their occupied-area fraction to the field opacity.
+
+The assembled-grid viewer offers level, elevation, and land-class fields. Elevation and land class reflect the final scenario attributes in `ne.txt`, including vector interventions. Click the map in **Check**, or enable the patch editor's checking tool, to inspect the original cell and its neighbors at any scale. The inspector includes every segmented edge at coarse/fine boundaries; field samples are never reported as computational cells.
+
 ## Quick start
 
 Use Node.js 22.12 or newer and npm, Python 3.12 (the version selected by `server/.python-version`), and `uv`. The backend manifest allows Python 3.10 or newer, subject to the locked dependencies. Native GDAL libraries and Python bindings must match; on macOS the manifest pins GDAL 3.13.1. See the manifests for the complete dependency lists.
@@ -88,7 +96,7 @@ npx tsc -b
 npm run build
 ```
 
-The renderer build writes to the repository-root `templates/` directory. Benchmark instructions are in [docs/benchmark/patch-render-benchmark.md](docs/benchmark/patch-render-benchmark.md).
+The renderer build writes to the repository-root `templates/` directory. Benchmark instructions are in [docs/benchmark/patch-render-benchmark.md](docs/benchmark/patch-render-benchmark.md). The display API and field aggregation rules are documented in [docs/viewport-grid-contract.md](docs/viewport-grid-contract.md).
 
 ## Vector elevation interventions
 

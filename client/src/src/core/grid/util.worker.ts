@@ -1,58 +1,30 @@
-import GridManager from './gridManager'
-import PatchManager from './patchManager'
 import * as api from '@/template/api/apis'
 import { setRuntimeApiBaseUrlOverride } from '@/utils/apiBaseUrl'
-import { Callback, WorkerSelf } from '../types'
-import { PatchContext, GridContext, MultiCellBaseInfo } from './types'
+import type { Callback } from '../types'
+import type { MultiCellBaseInfo, PatchSaveInfo } from './types'
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
 
-type WorkerContext = WorkerSelf & Record<'patchManager', PatchManager> & Record<'gridManager', GridManager>
-
 export function setApiBaseUrlForWorker(
     apiBaseUrl: string | null,
-    callback: Callback<any>
+    callback: Callback<void>
 ) {
     setRuntimeApiBaseUrlOverride(apiBaseUrl)
     callback()
 }
 
-export function setPatchManager(
-    this: WorkerContext,
-    context: PatchContext,
-    callback: Callback<any>
-) {
-    this.patchManager = new PatchManager(context)
-    this.patchManager.init().then(_ => {
-        callback()
-    })
-}
-
-export function setGridManager(
-    this: WorkerContext,
-    context: GridContext,
-    callback: Callback<any>
-) {
-    this.gridManager = new GridManager(context)
-    this.gridManager.init().then(_ => {
-        callback()
-    })
-}
-
 export async function subdivideCells(
-    this: WorkerContext,
     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
-    callback: Callback<any>
+    callback: Callback<MultiCellBaseInfo>
 ) {
     const renderInfo = await api.patch.subdivideCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback(null, renderInfo)
 }
 
 export async function mergeCells(
-    this: WorkerContext,
     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
-    callback: Callback<any>
+    callback: Callback<MultiCellBaseInfo>
 ) {
     const renderInfo = await api.patch.mergeCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback(null, renderInfo)
@@ -60,7 +32,7 @@ export async function mergeCells(
 
 export async function deleteCells(
     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
-    callback: Callback<any>
+    callback: Callback<void>
 ) {
     await api.patch.deleteCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback()
@@ -68,7 +40,7 @@ export async function deleteCells(
 
 export async function restoreCells(
     gridInfo: { levels: Uint8Array, globalIds: Uint32Array, nodeInfo: string, lockId: string },
-    callback: Callback<any>
+    callback: Callback<void>
 ) {
     await api.patch.restoreCells(gridInfo, gridInfo.nodeInfo, gridInfo.lockId)
     callback()
@@ -76,7 +48,7 @@ export async function restoreCells(
 
 export async function getCellInfoByFeature(
     pickInfo: { path: string, nodeInfo: string, lockId: string },
-    callback: Callback<any>
+    callback: Callback<Pick<MultiCellBaseInfo, 'levels' | 'globalIds'>>
 ) {
     const result = await api.patch.pickByFeature(pickInfo.path, pickInfo.nodeInfo, pickInfo.lockId)
     callback(null, {
@@ -87,7 +59,7 @@ export async function getCellInfoByFeature(
 
 export async function getCellInfoByVectorNode(
     pickInfo: { nodeInfo: string, lockId: string, vectorNodeInfo: string, vectorNodeLockId: string | null },
-    callback: Callback<any>
+    callback: Callback<Pick<MultiCellBaseInfo, 'levels' | 'globalIds'>>
 ) {
     const result = await api.patch.pickByVectorNode(
         pickInfo.nodeInfo,
@@ -101,22 +73,12 @@ export async function getCellInfoByVectorNode(
     })
 }
 
-export async function getMultiCellRenderVertices(
-    this: WorkerSelf & Record<'patchManager', PatchManager>,
-    gridInfo: MultiCellBaseInfo,
-    callback: Callback<any>
-) {
-    const result = this.patchManager.createStructuredCellRenderVertices(gridInfo.levels, gridInfo.globalIds)
-    callback(null, result)
-}
-
 export async function getPatchInfo(
-    this: WorkerSelf & Record<'patchManager', PatchManager>,
     data: {
         nodeInfo: string
         lockId: string
     },
-    callback: Callback<any>
+    callback: Callback<MultiCellBaseInfo>
 ) {
     const [activateInfoResponse, deletedInfoResponse] = await Promise.all([
         api.patch.activateCellInfo(data.nodeInfo, data.lockId),
@@ -146,32 +108,12 @@ export async function getPatchInfo(
     callback(null, renderInfo)
 }
 
-export async function getGridBlockMeta(
-    this: WorkerContext,
-    nodeToken: {
-        nodeInfo: string
-        lockId: string
-    },
-    callback: Callback<any>
-) {
-
-}
-
-export async function getGridBlockInfo(
-    this: WorkerSelf & Record<'patchManager', PatchManager>,
-    blockInfo: number,
-    callback: Callback<any>
-) {
-    
-}
-
 export async function savePatch(
-    this: WorkerSelf & Record<'patchManager', PatchManager>,
     data: {
         nodeInfo: string
         lockId: string
     },
-    callback: Callback<any>
+    callback: Callback<PatchSaveInfo>
 ) {
     const result = await api.patch.savePatch(data.nodeInfo, data.lockId)
     callback(null, result)

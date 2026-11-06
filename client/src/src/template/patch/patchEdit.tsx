@@ -27,27 +27,23 @@ import {
     AlertDialogContent,
     AlertDialogDescription,
 } from '@/components/ui/alert-dialog'
-import { linkNode } from '../api/node'
 import { PatchMeta } from '../api/types'
 import * as api from '@/template/api/apis'
 import { ResourceNode } from '../scene/scene'
 import PatchCore from '@/core/grid/patchCore'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { PatchContext } from '@/core/grid/types'
 import { IResourceNode } from '../scene/iscene'
 import { useSettingStore } from '@/store/storeSet'
 import { IViewContext } from '@/views/IViewContext'
-import CapacityBar from '@/components/ui/capacityBar'
+import GridDisplayPanel from '@/components/gridDisplay/GridDisplayPanel'
+import { getPatchDisplay } from '@/components/gridDisplay/patchDisplaySession'
+import { errorMessage, useGridDisplayTranslation } from '@/i18n/gridDisplay'
 import { Separator } from '@/components/ui/separator'
 import { MapViewContext } from '@/views/mapView/mapView'
-import { boundingBox2D } from '@/core/util/boundingBox2D'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
-import { convertBoundsCoordinates, waitForDrawInstanceLoad, waitForMapLoad } from '@/utils/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { ensureTopologyLayerInitialized, getOrCreatePerPatchTopology } from '@/views/mapView/topology/topologyLayerManager'
-import { layerOrderCoordinator } from '@/views/mapView/layerOrderCoordinator'
 import { startPatchRenderBenchmark } from './benchmark/renderBenchmarkRunner'
 import { startPatchEditLatencyBenchmark } from './benchmark/editLatencyBenchmarkRunner'
 
@@ -66,19 +62,11 @@ interface PageContext {
         select: 'brush' | 'box',
     }
     vectorLockId: string | null
-    vectorData: Record<string, any> | null
+    vectorData: Record<string, unknown> | null
     selectedVectorFeatureIds: Set<string>
     featuePickResource: FeaturePickResource | null
     perPatchCLGId: string | null
     benchmarkCleanup: (() => void) | null
-}
-
-interface GridCheckingInfo {
-    storageId: number
-    level: number
-    globalId: number
-    localId: number
-    deleted: boolean
 }
 
 interface FeaturePickResource {
@@ -188,7 +176,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     const pageContext = useRef<PageContext>(createInitialPageContext())
 
-    const gridInfo = useRef<GridCheckingInfo | null>(null)
+    const { t } = useGridDisplayTranslation()
+    const [loadError, setLoadError] = useState<string | null>(null)
+    const [loadRevision, setLoadRevision] = useState(0)
+    const [displayReady, setDisplayReady] = useState(false)
 
     const highSpeedMode = useSettingStore(state => state.highSpeedMode)
 
@@ -235,7 +226,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         pageContext.current.topologyLayer?.setCheckMode(mode)
     }, [])
 
-    const clearUploadedFeaturePreview = (options: { repaint?: boolean } = {}) => {
+    const clearUploadedFeaturePreview = useCallback((options: { repaint?: boolean } = {}) => {
         pageContext.current.featuePickResource = null
 
         try {
@@ -254,152 +245,86 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (options.repaint ?? true) {
             triggerRepaint()
         }
-    }
+    }, [drawInstance])
 
-    useEffect(() => {
-        loadContext()
+    const loadContext = useCallback(async (isActive: () => boolean) => {
+        const resource = node as ResourceNode
+        const storedContext = { ...resource.context }
+        const activeEditingState = { ...getEditingState() }
+        delete storedContext.__cleanup
+        delete storedContext.topologyLayerId
+        pageContext.current = normalizePageContext(storedContext)
+        if (userChangedEditingStateRef.current) pageContext.current.editingState = activeEditingState
+        setPickingTab(pageContext.current.editingState.pick)
+        setSelectTab(pageContext.current.editingState.select)
 
-        return () => {
-            unloadContext()
-        }
-    }, [])
-
-    const loadContext = async () => {
-
-        if (!(node as ResourceNode).lockId) {
-            store.get<{ on: Function, off: Function }>('isLoading')!.on()
-            const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'w');
-            (node as ResourceNode).lockId = linkResponse.lock_id
-            store.get<{ on: Function, off: Function }>('isLoading')!.off()
-        }
-
-        if ((node as ResourceNode).context !== undefined) {
-            const storedContext = { ...((node as ResourceNode).context ?? {}) }
-            const activeEditingState = { ...getEditingState() }
-            delete (storedContext as any).__cleanup
-            delete (storedContext as any).topologyLayerId
-            pageContext.current = normalizePageContext(storedContext)
-            if (userChangedEditingStateRef.current) {
-                pageContext.current.editingState = activeEditingState
-            }
-            setPickingTab(pageContext.current.editingState.pick)
-            setSelectTab(pageContext.current.editingState.select)
-        }
-
-        if ((node as ResourceNode).mountParams === undefined) {
-            const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
-            (node as ResourceNode).mountParams = patchInfo
-            pageContext.current.patch = patchInfo
-        } else {
-            pageContext.current.patch = (node as ResourceNode).mountParams
-        }
-
-        const gridContext: PatchContext = {
-            nodeInfo: node.nodeInfo,
-            lockId: (node as ResourceNode).lockId!,
-            srcCS: `EPSG:${pageContext.current.patch?.epsg}`,
-            targetCS: 'EPSG:4326',
-            bBox: boundingBox2D(...pageContext.current.patch!.bounds as [number, number, number, number]),
-            rules: pageContext.current.patch!.subdivide_rules
-        }
-
-        const { clgId, topologyLayer: gridLayer } = getOrCreatePerPatchTopology(
-            map, node.nodeInfo, topologyLayerId,
-        )
-        pageContext.current.perPatchCLGId = clgId
-        layerOrderCoordinator.register(node.nodeInfo, [clgId])
-
-        const patchCore: PatchCore = new PatchCore(gridContext)
-        await ensureTopologyLayerInitialized(gridLayer, map)
-
-        pageContext.current.topologyLayer = gridLayer
-        gridLayer.patchCore = patchCore
+        const { patch, patchCore, topologyLayer: gridLayer, boundsOn4326, clgId } = await getPatchDisplay(resource, map, 'w')
+        if (!isActive()) return
+        pageContext.current.patch = patch
         pageContext.current.patchCore = patchCore
+        pageContext.current.topologyLayer = gridLayer
+        pageContext.current.perPatchCLGId = clgId
         bumpTopologyLayerReadyRevision()
-
         setPatchCheckMode(pageContext.current.isChecking)
 
         pageContext.current.benchmarkCleanup?.()
-        pageContext.current.benchmarkCleanup = null
         const renderBenchmarkHandle = startPatchRenderBenchmark({
-            map,
-            topologyLayer: gridLayer,
-            patchId: node.nodeInfo,
-            cellCount: () => patchCore.cellNum,
+            map, topologyLayer: gridLayer, patchId: node.nodeInfo, cellCount: () => patchCore.cellNum,
         })
         const editLatencyBenchmarkHandle = startPatchEditLatencyBenchmark({
-            map,
-            topologyLayer: gridLayer,
-            patchId: node.nodeInfo,
-            cellCount: () => patchCore.cellNum,
+            map, topologyLayer: gridLayer, patchId: node.nodeInfo, cellCount: () => patchCore.cellNum,
         })
-        pageContext.current.benchmarkCleanup = editLatencyBenchmarkHandle?.stop ?? renderBenchmarkHandle?.stop ?? null;
-
-        // store.get<{ on: Function, off: Function }>('isLoading')!.off()
-        const boundsOn4326 = await convertBoundsCoordinates(pageContext.current.patch!.bounds, pageContext.current.patch!.epsg, 4326)
-        map.fitBounds(boundsOn4326, {
-            duration: 1000,
-            padding: { top: 50, bottom: 50, left: 100, right: 100 }
-        });
-
-        (node as ResourceNode).context = {
-            ...((node as ResourceNode).context ?? {}),
-            topologyLayerId,
+        pageContext.current.benchmarkCleanup = () => {
+            editLatencyBenchmarkHandle?.stop()
+            renderBenchmarkHandle?.stop()
+        }
+        map.fitBounds(boundsOn4326, { duration: 1000, padding: { top: 50, bottom: 50, left: 100, right: 100 } })
+        resource.context = {
+            ...resource.context,
             __cleanup: {
-                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
-                topology: () => {
-                    const id = pageContext.current.perPatchCLGId
-                    if (id && map.getLayer(id)) map.removeLayer(id)
-                    pageContext.current.perPatchCLGId = null
-
+                ...resource.context?.__cleanup,
+                patchEditor: () => {
                     clearUploadedFeaturePreview({ repaint: false })
-
                     pageContext.current.benchmarkCleanup?.()
                     pageContext.current.benchmarkCleanup = null
                     pageContext.current.topologyLayer = null
                     pageContext.current.patchCore = null
-                    layerOrderCoordinator.unregister(node.nodeInfo)
                 },
             },
         }
-
+        setDisplayReady(true)
         triggerRepaint()
-    }
+    }, [node, map, getEditingState, setPatchCheckMode, clearUploadedFeaturePreview])
 
-    const unloadContext = () => {
-
-        console.log('unloadContext called')
-
+    const unloadContext = useCallback(() => {
         clearUploadedFeaturePreview({ repaint: false })
         pageContext.current.benchmarkCleanup?.()
-        pageContext.current.benchmarkCleanup = null;
-
-        (node as ResourceNode).context = {
+        pageContext.current.benchmarkCleanup = null
+        const resource = node as ResourceNode
+        resource.context = {
+            ...resource.context,
             ...pageContext.current,
             topologyLayerId,
-            __cleanup: {
-                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
-                topology: () => {
-                    const id = pageContext.current.perPatchCLGId
-                    if (id && map.getLayer(id)) map.removeLayer(id)
-                    pageContext.current.perPatchCLGId = null
-
-                    clearUploadedFeaturePreview({ repaint: false })
-
-                    pageContext.current.benchmarkCleanup?.()
-                    pageContext.current.benchmarkCleanup = null
-                    pageContext.current.topologyLayer = null
-                    pageContext.current.patchCore = null
-                    layerOrderCoordinator.unregister(node.nodeInfo)
-                },
-            },
+            __cleanup: resource.context?.__cleanup,
         }
+    }, [node, topologyLayerId, clearUploadedFeaturePreview])
 
-        return
-    }
+    useEffect(() => {
+        let active = true
+        setLoadError(null)
+        setDisplayReady(false)
+        void loadContext(() => active).catch(cause => {
+            if (active) setLoadError(errorMessage(cause))
+        })
+        return () => {
+            active = false
+            unloadContext()
+        }
+    }, [loadContext, unloadContext, loadRevision])
 
     useEffect(() => {
         if (!map) return
+        if (!displayReady) return
         if (!pageContext.current.topologyLayer) return
 
         const canvas = map.getCanvas()
@@ -409,7 +334,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         const localMouseMovePos = { current: [0, 0] as [number, number] }
 
         const onMouseDown = (e: MouseEvent) => {
-            if (!e.shiftKey) return
+            if (pageContext.current.isChecking || !e.shiftKey) return
             localIsMouseDown.current = true
             map.dragPan.disable()
             map.scrollZoom.disable()
@@ -418,10 +343,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             const y = e.clientY - rect.top
             localMouseDownPos.current = [x, y]
 
-            if (pageContext.current.isChecking) {
-                gridInfo.current = pageContext.current.topologyLayer!.executeCheckCell([x, y])
-                triggerRepaint()
-            }
         }
 
         const onMouseMove = (e: MouseEvent) => {
@@ -520,8 +441,14 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             canvas.removeEventListener('mousemove', onMouseMove)
             canvas.removeEventListener('mouseup', onMouseUp)
             canvas.removeEventListener('mouseout', onMouseOut)
+            if (localIsMouseDown.current) {
+                map.dragPan.enable()
+                map.scrollZoom.enable()
+                pageContext.current.topologyLayer?.executeClearDrawBox()
+                canvas.style.cursor = ''
+            }
         }
-    }, [map, getEditingState, topologyLayerReadyRevision])
+    }, [map, getEditingState, topologyLayerReadyRevision, displayReady])
 
     const handleConfirmSelectAll = useCallback(() => {
         setSelectAllDialogOpen(false)
@@ -536,11 +463,11 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const handleConfirmTopologyAction = useCallback(() => {
         switch (activeTopologyOperation) {
             case 'subdivide':
-                store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
                 pageContext.current.topologyLayer!.executeSubdivideCells()
                 break
             case 'merge':
-                store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
                 pageContext.current.topologyLayer!.executeMergeCells()
                 break
             case 'delete':
@@ -616,7 +543,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 name: getDraggedNodeDisplayName(payload)
             }
 
-            store.get<{ on: Function; off: Function }>('isLoading')!.on()
+            store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
 
             const vectorData = await api.vector.getVector(dragNodeInfo, vectorLockId)
             pageContext.current.vectorData = vectorData.data;
@@ -624,13 +551,13 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
             try {
                 if (drawInstance) {
-                    const addedIds = drawInstance.add(pageContext.current.vectorData.feature_json as any) as string[]
+                    const addedIds = drawInstance.add(pageContext.current.vectorData.feature_json as Parameters<typeof drawInstance.add>[0])
                     addedIds.forEach((id) => pageContext.current.selectedVectorFeatureIds.add(id))
                 }
             } catch (renderErr) {
                 console.warn('Failed to render dragged vector on map:', renderErr)
             }
-            store.get<{ on: Function; off: Function }>('isLoading')!.off()
+            store.get<{ on: () => void; off: () => void }>('isLoading')!.off()
 
         } catch (error) {
             console.error('Invalid drag payload:', error)
@@ -656,7 +583,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         }
 
         try {
-            store.get<{ on: Function; off: Function }>('isLoading')!.on()
+            store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
 
             if (pageContext.current.featuePickResource.kind === 'vector') {
                 const vectorLockId = pageContext.current.featuePickResource.lockId ?? pageContext.current.vectorLockId
@@ -673,11 +600,11 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         if (highSpeedMode && operationType !== null) {
             switch (operationType) {
                 case 'subdivide':
-                    store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                    store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
                     pageContext.current.topologyLayer!.executeSubdivideCells()
                     break
                 case 'merge':
-                    store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                    store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
                     pageContext.current.topologyLayer!.executeMergeCells()
                     break
                 case 'delete':
@@ -696,6 +623,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (!displayReady) return
             if (pageContext.current.isChecking) return
             if (event.ctrlKey || event.metaKey) {
                 const key = event.key.toLowerCase()
@@ -735,7 +663,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (key === 's') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                        store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
                         pageContext.current.topologyLayer!.executeSubdivideCells()
                     } else {
                         setActiveTopologyOperation('subdivide')
@@ -744,7 +672,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                 if (key === 'm') {
                     event.preventDefault()
                     if (highSpeedMode) {
-                        store.get<{ on: Function; off: Function }>('isLoading')!.on()
+                        store.get<{ on: () => void; off: () => void }>('isLoading')!.on()
                         pageContext.current.topologyLayer!.executeMergeCells()
                     } else {
                         setActiveTopologyOperation('merge')
@@ -779,7 +707,8 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
         handleConfirmDeleteSelect,
         handleConfirmSelectAll,
         setPatchSelectMode,
-        highSpeedMode
+        highSpeedMode,
+        displayReady
     ])
 
     useEffect(() => {
@@ -808,6 +737,12 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
             toast.success(`Topology edit state of ${pageContext.current.patch?.name} saved successfully`)
         })
     }
+
+    if (loadError) return <div role='alert' className='p-4 text-sm text-red-400 break-words'>
+        <p>{t('loadError', { message: loadError })}</p>
+        <Button variant='outline' onClick={() => setLoadRevision(value => value + 1)}>{t('retry')}</Button>
+    </div>
+    if (!displayReady) return <p role='status' className='p-4 text-sm text-white'>{t('loading')}</p>
 
     return (
         <div className='w-full h-full flex flex-col'>
@@ -843,7 +778,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                         </ul>
                     </div>
                     <div className='text-sm w-full flex flex-row items-center justify-between space-x-2'>
-                        <CapacityBar gridCore={pageContext.current.patchCore!} />
+
                         <div className='space-y-2'>
                             <div className='flex flex-row items-center justify-between gap-2'>
                                 <div
@@ -900,28 +835,6 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                         <div>
                             <span className='font-bold'>EPSG: </span>
                             {pageContext.current.patch?.epsg}
-                        </div>
-                        <div className='flex items-start flex-row gap-0.5'>
-                            <div className={`font-bold w-[35%]`}>Grid Levels(m): </div>
-                            <div className='space-y-1'>
-                                {pageContext.current?.patch?.grid_info && (
-                                    pageContext.current?.patch?.grid_info.map(
-                                        (level: number[], index: number) => {
-                                            const color = pageContext.current!.topologyLayer!.paletteColorList ?
-                                                [pageContext.current!.topologyLayer!.paletteColorList[(index + 1) * 3], pageContext.current!.topologyLayer!.paletteColorList[(index + 1) * 3 + 1], pageContext.current!.topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
-                                            const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined
-
-                                            return (
-                                                <div key={index} className='text-sm'
-                                                    style={{ color: colorStyle }}
-                                                >
-                                                    level {index + 1}: [{level.join(', ')}]
-                                                </div>
-                                            )
-                                        }
-                                    )
-                                )}
-                            </div>
                         </div>
                         <div className='font-bold'>
                             <span className='text-white'>BoundingBox:</span>
@@ -1168,7 +1081,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                         <button
                                             className={`flex-1 py-2 px-3 rounded-md transition-colors text-white duration-200 flex flex-col text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} 
                                                             ${pickingTab === true ? 'bg-gray-600 ' : 'bg-transparent hover:bg-gray-500'}`}
-                                            onClick={() => { !checkSwitchOn && setPatchPickingMode(true) }}
+                                            onClick={() => { if (!checkSwitchOn) setPatchPickingMode(true) }}
                                             disabled={checkSwitchOn}
                                         >
                                             <div className='flex flex-row gap-1 items-center'>
@@ -1182,7 +1095,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                         <button
                                             className={`flex-1 py-2 px-3 rounded-md transition-colors text-white duration-200 flex flex-col text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} 
                                                             ${pickingTab === false ? 'bg-gray-700 ' : 'bg-transparent hover:bg-gray-500'}`}
-                                            onClick={() => { !checkSwitchOn && setPatchPickingMode(false) }}
+                                            onClick={() => { if (!checkSwitchOn) setPatchPickingMode(false) }}
                                             disabled={checkSwitchOn}
                                         >
                                             <div className='flex flex-row gap-1 items-center'>
@@ -1198,7 +1111,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                         <button
                                             className={`flex-1 py-2 px-3 rounded-md text-white transition-colors duration-200 flex flex-col text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} 
                                                             ${selectAllDialogOpen ? 'bg-green-500 ' : ' hover:bg-green-500'}`}
-                                            onClick={() => { !checkSwitchOn && handleSelectAllClick() }}
+                                            onClick={() => { if (!checkSwitchOn) handleSelectAllClick() }}
                                             disabled={checkSwitchOn}
                                         >
                                             <div className='flex flex-row gap-1 items-center'>
@@ -1212,7 +1125,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                         <button
                                             className={`flex-1 py-2 px-3 rounded-md text-white transition-colors duration-200 flex flex-col text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} 
                                                             ${deleteSelectDialogOpen ? 'bg-red-500 ' : ' hover:bg-red-500'}`}
-                                            onClick={() => { !checkSwitchOn && handleDeleteSelectClick() }}
+                                            onClick={() => { if (!checkSwitchOn) handleDeleteSelectClick() }}
                                             disabled={checkSwitchOn}
                                         >
                                             <div className='flex flex-row gap-1 items-center'>
@@ -1321,7 +1234,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                                             key={operation.type}
                                             className={`flex-1 py-1 px-2 rounded-md transition-colors duration-200 flex flex-col gap-0.5 text-sm justify-center items-center ${checkSwitchOn ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer text-white'} 
                                                             ${activeTopologyOperation === operation.type ? operation.activeColor : `${operation.hoverColor}`}`}
-                                            onClick={() => { !checkSwitchOn && onTopologyOperationClick(operation.type) }}
+                                            onClick={() => { if (!checkSwitchOn) onTopologyOperationClick(operation.type) }}
                                             disabled={checkSwitchOn}
                                         >
                                             <div className='flex flex-row items-center'>
@@ -1340,39 +1253,10 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
                     {/* ////////////////////////////////////////////////////////////////// */}
                     {/* ////////////////////////////////////////////////////////////////// */}
                     <Separator className='mb-2 bg-[#414141]' />
-                    <div className='w-full mx-auto space-y-4 px-4'>
-                        <div className='space-y-2 p-2 mb-4'>
-                            <h1 className='text-2xl font-bold text-white'>Checking</h1>
-                            <div className='space-y-2 p-1 text-white'>
-                                <div className='flex flex-col'>
-                                    <span className='text-sm font-medium text-gray-300'>Level</span>
-                                    <span className='text-lg font-semibold'>{gridInfo.current?.level ?? '-'}</span>
-                                </div>
-                                <div className='flex flex-col'>
-                                    <span className='text-sm font-medium text-gray-300'>Local ID</span>
-                                    <span className='text-lg font-semibold'>{gridInfo.current?.localId ?? '-'}</span>
-                                </div>
-                                <div className='flex flex-col'>
-                                    <span className='text-sm font-medium text-gray-300'>Deleted</span>
-                                    <span className='text-lg font-semibold'>
-                                        {gridInfo.current?.deleted === true
-                                            ? 'True'
-                                            : gridInfo.current?.deleted === false
-                                                ? 'False'
-                                                : '-'}
-                                    </span>
-                                </div>
-                                <div className='flex flex-col'>
-                                    <span className='text-sm font-medium text-gray-300'>Global ID</span>
-                                    <span className='text-lg font-semibold'>{gridInfo.current?.globalId ?? '-'}</span>
-                                </div>
-                                <div className='flex flex-col'>
-                                    <span className='text-sm font-medium text-gray-300'>Storage ID</span>
-                                    <span className='text-lg font-semibold'>{gridInfo.current?.storageId ?? '-'}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    {pageContext.current.topologyLayer && pageContext.current.patch && <div className='w-full mx-auto space-y-4 px-4 pb-4'>
+                        <GridDisplayPanel map={map} layer={pageContext.current.topologyLayer} attributes={['level']}
+                            gridInfo={pageContext.current.patch.grid_info} inspectEnabled={checkSwitchOn} />
+                    </div>}
                 </div>
             </div>
         </div>

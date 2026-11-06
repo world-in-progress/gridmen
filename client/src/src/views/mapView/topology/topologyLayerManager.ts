@@ -57,10 +57,10 @@ export function removePerPatchTopology(map: MapboxMap, nodeKey: string): void {
     perPatchCLGs.delete(clgId)
 }
 
-export async function ensureTopologyLayerInitialized(layer: TopologyLayer, map: MapboxMap): Promise<void> {
+export async function ensureTopologyLayerInitialized(layer: TopologyLayer): Promise<void> {
     const typed = layer as TopologyLayerWithInitPromise
     if (!typed.__nh_initPromise) {
-        typed.__nh_initPromise = layer.initialize(map, map.painter.context.gl)
+        typed.__nh_initPromise = layer.whenInitialized()
     }
     await typed.__nh_initPromise
 }

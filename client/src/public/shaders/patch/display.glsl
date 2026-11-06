@@ -1,0 +1,76 @@
+precision highp float;
+precision highp int;
+
+#ifdef VERTEX_SHADER
+layout(location = 0) in vec2 tl;
+layout(location = 1) in vec2 tr;
+layout(location = 2) in vec2 bl;
+layout(location = 3) in vec2 br;
+layout(location = 4) in vec4 values;
+layout(location = 5) in vec4 flags;
+uniform mat4 matrix;
+out vec2 uv;
+flat out vec4 sampleValues;
+flat out vec4 sampleFlags;
+void main() {
+    vec2 vertices[4] = vec2[4](tl, tr, bl, br);
+    vec2 coordinates[4] = vec2[4](vec2(0.0, 1.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 0.0));
+    gl_Position = matrix * vec4(vertices[gl_VertexID], 0.0, 1.0);
+    uv = coordinates[gl_VertexID];
+    sampleValues = values;
+    sampleFlags = flags;
+}
+#endif
+
+#ifdef FRAGMENT_SHADER
+uniform sampler2D paletteTexture;
+uniform int displayAttribute;
+uniform float metersPerPixel;
+uniform float devicePixelRatio;
+uniform vec2 elevationRange;
+uniform vec3 elevationLowColor;
+uniform vec3 elevationHighColor;
+uniform float outlineDarkening;
+in vec2 uv;
+flat in vec4 sampleValues;
+flat in vec4 sampleFlags;
+out vec4 fragColor;
+const float CELL_THRESHOLD = 4.0;
+const float FULL_OUTLINE_THRESHOLD = 8.0;
+void main() {
+    vec3 color;
+    if (displayAttribute == 1) {
+        float t = elevationRange.x == elevationRange.y ? 0.0 : clamp((sampleValues.y - elevationRange.x) / (elevationRange.y - elevationRange.x), 0.0, 1.0);
+        color = mix(elevationLowColor, elevationHighColor, t);
+    } else {
+        float category = displayAttribute == 0 ? sampleValues.x : sampleValues.z;
+        color = texelFetch(paletteTexture, ivec2(int(mod(category, 256.0)), 0), 0).rgb;
+    }
+    float coverage = min(1.0, 2.0 * metersPerPixel / sampleValues.w);
+    if (sampleFlags.x > 0.0) {
+        // Native schema dimensions of this field sample, independent of occupancy.
+        // Recover the local CRS footprint of a CSS pixel even at pitch/rotation.
+        vec2 dx = dFdx(uv) * sampleFlags.xy * devicePixelRatio;
+        vec2 dy = dFdy(uv) * sampleFlags.xy * devicePixelRatio;
+        float trace = dot(dx, dx) + dot(dy, dy);
+        float determinant = dx.x * dy.y - dx.y * dy.x;
+        float localScale = sqrt(0.5 * (trace + sqrt(max(0.0, trace * trace - 4.0 * determinant * determinant))));
+        coverage = min(1.0, 2.0 * localScale / sampleValues.w);
+    } else {
+        // Each neighbor supplies half of a one-CSS-pixel edge. A field never
+        // uses this UV boundary, so summary bins cannot become fake cells.
+        vec2 cssDerivative = fwidth(uv) * devicePixelRatio;
+        float pixels = 1.0 / max(cssDerivative.x, cssDerivative.y);
+        vec2 edgeDistance = min(uv, 1.0 - uv) / max(cssDerivative, vec2(0.0000001));
+        float outline = 1.0 - smoothstep(0.0, 1.0, min(edgeDistance.x, edgeDistance.y));
+        float realCoverage = min(1.0, 2.0 / max(pixels, 0.00001));
+        coverage = mix(realCoverage, outline, smoothstep(CELL_THRESHOLD, FULL_OUTLINE_THRESHOLD, pixels));
+        if (sampleFlags.y > 0.5) color = mix(color, vec3(0.75, 0.20, 0.16), 0.7);
+
+    }
+    color = mix(color, vec3(1.0, 0.78, 0.20), 0.7 * sampleFlags.z);
+    color *= 1.0 - outlineDarkening * coverage;
+    float opacity = sampleFlags.w;
+    fragColor = vec4(color * opacity, opacity);
+}
+#endif

@@ -51,7 +51,7 @@ export default class CustomLayerGroup implements CustomLayerInterface {
       this.map.triggerRepaint()
       return
     }
-    this.update(matrix as any)
+    this.update(matrix as mat4)
 
     this.layers.forEach(layer => layer.render(gl, matrix))
   }
@@ -75,7 +75,7 @@ export default class CustomLayerGroup implements CustomLayerInterface {
   private update(matrix: mat4) {
 
     const mercatorCenter = MercatorCoordinate.fromLngLat(
-        this.map.transform._center.toArray()
+        this.map.getCenter().toArray()
     )
 
     this.mercatorCenterX = encodeFloatToDouble(mercatorCenter.x)

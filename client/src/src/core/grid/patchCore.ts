@@ -1,10 +1,9 @@
 import proj4 from 'proj4'
 import * as apis from '@/template/api/apis'
 import Dispatcher from '../message/dispatcher'
-import type { Callback } from '../types'
 import BoundingBox2D from '../util/boundingBox2D'
 import { MercatorCoordinate } from '../math/mercatorCoordinate'
-import { PatchContext, CellCheckInfo, PatchSaveInfo, MultiCellBaseInfo, StructuredCellRenderVertices, CellKeyHashTable } from './types'
+import { PatchContext, CellCheckInfo, PatchSaveInfo, MultiCellBaseInfo, CellKeyHashTable } from './types'
 
 const DELETED_FLAG = 1
 const UNDELETED_FLAG = 0
@@ -15,25 +14,31 @@ interface PatchLevelInfo {
 }
 
 export interface PatchCoreOptions {
-    maxCellNum?: number
     workerCount?: number
     dispatcher?: Dispatcher
 }
 
+export interface PatchCellChange {
+    removed: number[]
+    upserted: number[]
+    reset?: boolean
+}
+
+type PatchCellRenderInfo = [number, Uint8Array, Float32Array, Float32Array, Uint8Array]
+type PatchCellRenderCallback = (info: PatchCellRenderInfo) => void
+
 export default class PatchCore {
     // Patch metadata
     nodeInfo: string
-    maxCellNum: number
     levelInfos: PatchLevelInfo[]
     renderRelativeCenter: Float32Array = new Float32Array([0.0, 0.0])
 
     // Private patch memory cache
     private _lockId: string
     private _nextStorageId = 0
-    private _levelCache: Uint8Array
-    private _deletedCache: Uint8Array
-    private _globalIdCache: Uint32Array
+    private _cells = new Map<number, { level: number; globalId: number; deleted: number }>()
     private _key_storageId_dict: CellKeyHashTable
+    private _changeListeners = new Set<(change: PatchCellChange) => void>()
 
     // Worker dispatcher
     private _dispatcher: Dispatcher
@@ -42,8 +47,6 @@ export default class PatchCore {
         // Init metadata
         this._lockId = context.lockId
         this.nodeInfo = context.nodeInfo
-        // this.maxCellNum = options.maxCellNum ?? 4096 * 4096
-        this.maxCellNum = options.maxCellNum ?? 25000000
         this.levelInfos = new Array<PatchLevelInfo>(this.context.rules.length)
         this.context.rules.forEach((_, level, rules) => {
             let width: number, height: number
@@ -58,13 +61,10 @@ export default class PatchCore {
         })
 
         // Init dispatcher
-        this._dispatcher = new Dispatcher(this, options.workerCount)
+        this._dispatcher = options.dispatcher ?? new Dispatcher(this, options.workerCount)
 
         // Init patch cache
-        this._levelCache = new Uint8Array(this.maxCellNum)
-        this._globalIdCache = new Uint32Array(this.maxCellNum)
-        this._key_storageId_dict = new CellKeyHashTable(this.maxCellNum)
-        this._deletedCache = new Uint8Array(this.maxCellNum).fill(UNDELETED_FLAG)
+        this._key_storageId_dict = new CellKeyHashTable()
     }
 
     get bBox(): BoundingBox2D {
@@ -87,13 +87,26 @@ export default class PatchCore {
         return this.levelInfos.length - 1
     }
 
-    private sendWorkerApiTask(type: string, data: unknown, callback?: Callback<any>): void {
+    getStorageId(level: number, globalId: number): number | undefined {
+        return this._key_storageId_dict.get(level, globalId)
+    }
+
+    addChangeListener(listener: (change: PatchCellChange) => void): () => void {
+        this._changeListeners.add(listener)
+        return () => this._changeListeners.delete(listener)
+    }
+
+    private emitChange(change: PatchCellChange): void {
+        for (const listener of this._changeListeners) listener(change)
+    }
+
+    private sendWorkerApiTask<T>(type: string, data: unknown, callback?: (error: Error | null | undefined, result: T) => void): void {
         this._dispatcher.syncApiBaseUrl(() => {
             this._dispatcher.actor.send(type, data, callback)
         })
     }
 
-    init(callback?: Function): void {
+    init(callback?: PatchCellRenderCallback): void {
         // Get src EPSG code (number type)
         const srcEPSG: number = parseInt(this.srcCRS.split(':')[1])
 
@@ -108,153 +121,74 @@ export default class PatchCore {
             const centerY = encodeFloatToDouble(mercatorCenter[1])
             this.renderRelativeCenter = new Float32Array([...centerX, ...centerY])
 
-            // Clear next storage ID
+            // Clear old cells before loading the current patch.
             this._nextStorageId = 0
+            this._cells.clear()
+            this._key_storageId_dict = new CellKeyHashTable()
+            this.emitChange({ removed: [], upserted: [], reset: true })
 
-            // Brodcast actors to init patch manager and initialize patch cache
-            this._dispatcher.syncApiBaseUrl(() => {
-                this._dispatcher.broadcast('setPatchManager', this.context, () => {
-                    // Get activate patch information
-                    this.sendWorkerApiTask('getPatchInfo', { nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, baseInfo: MultiCellBaseInfo) => {
-                        this.updateMultiCellRenderInfo(baseInfo, callback)
-                    })
-                })
+            this.sendWorkerApiTask('getPatchInfo', { nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, baseInfo: MultiCellBaseInfo) => {
+                this.updateMultiCellRenderInfo(baseInfo, callback)
             })
         })
     }
 
-    updateMultiCellRenderInfo(baseInfo: MultiCellBaseInfo, callback?: Function): void {
-        // Initialize cell cache
+    updateMultiCellRenderInfo(baseInfo: MultiCellBaseInfo, callback?: PatchCellRenderCallback): void {
         const cellNum = baseInfo.levels.length
+        if (baseInfo.globalIds.length !== cellNum || (baseInfo.deleted && baseInfo.deleted.length !== cellNum)) {
+            throw new Error('Patch cell arrays have inconsistent lengths')
+        }
+        const start = this._nextStorageId
         for (let i = 0; i < cellNum; i++) {
-            const storageId = this._nextStorageId + i
+            const storageId = start + i
+            this._cells.set(storageId, { level: baseInfo.levels[i], globalId: baseInfo.globalIds[i], deleted: baseInfo.deleted?.[i] ?? UNDELETED_FLAG })
             this._key_storageId_dict.update(storageId, baseInfo.levels[i], baseInfo.globalIds[i])
         }
-
-        // Get render vertices of all cells
-        this._levelCache.set(baseInfo.levels, this._nextStorageId)
-        this._deletedCache.set(baseInfo.deleted!, this._nextStorageId)
-        this._globalIdCache.set(baseInfo.globalIds, this._nextStorageId)
-
-        let completedActorNum = 0
-        const vertices = new Float32Array(cellNum * 8)
-        const verticesLow = new Float32Array(cellNum * 8)
-        const actorNum = cellNum < this._dispatcher.actorNum ? 1 : this._dispatcher.actorNum  // avoid abusing too many actors when cellNum is small
-        const batchSize = Math.ceil(cellNum / actorNum)
-        for (let actorIndex = 0; actorIndex < actorNum; actorIndex++) {
-            const fromStorageId = actorIndex * batchSize
-            const toStorageId = Math.min(cellNum, (actorIndex + 1) * batchSize)
-
-            // Send cell info batch to actor and get render vertices
-            const info: MultiCellBaseInfo = {
-                levels: baseInfo.levels.slice(fromStorageId, toStorageId),
-                globalIds: baseInfo.globalIds.slice(fromStorageId, toStorageId),
-            }
-            this._dispatcher.actor.send('getMultiCellRenderVertices', info, (_, renderInfo: StructuredCellRenderVertices) => {
-                completedActorNum += 1
-                vertices.set(renderInfo.tl, cellNum * 2 * 0 + fromStorageId * 2)
-                vertices.set(renderInfo.tr, cellNum * 2 * 1 + fromStorageId * 2)
-                vertices.set(renderInfo.bl, cellNum * 2 * 2 + fromStorageId * 2)
-                vertices.set(renderInfo.br, cellNum * 2 * 3 + fromStorageId * 2)
-
-                verticesLow.set(renderInfo.tlLow, cellNum * 2 * 0 + fromStorageId * 2)
-                verticesLow.set(renderInfo.trLow, cellNum * 2 * 1 + fromStorageId * 2)
-                verticesLow.set(renderInfo.blLow, cellNum * 2 * 2 + fromStorageId * 2)
-                verticesLow.set(renderInfo.brLow, cellNum * 2 * 3 + fromStorageId * 2)
-
-                // If all actors have completed, make callback
-                if (completedActorNum === actorNum) {
-                    callback && callback([this._nextStorageId, baseInfo.levels, vertices, verticesLow, baseInfo.deleted])
-                    this._nextStorageId += cellNum
-                }
-            })
-        }
+        this._nextStorageId += cellNum
+        if (cellNum > 0) this.emitChange({ removed: [], upserted: Array.from({ length: cellNum }, (_, i) => start + i) })
+        callback?.([start, baseInfo.levels, new Float32Array(0), new Float32Array(0), baseInfo.deleted ?? new Uint8Array(cellNum)])
     }
 
-    deleteCellLocally(storageId: number, callback?: Function): void {
+    deleteCellLocally(storageId: number, callback?: (info: [number, number]) => void): void {
         const lastStorageId = this._nextStorageId - 1
-
-        // Get render info of this removable cell and the cell having the last storageId
-        const lastDeleted = this._deletedCache[lastStorageId]
-        const [lastLevel, lastGlobalId] = this.getInfoByStorageId(lastStorageId)
-        this._key_storageId_dict.delete(lastLevel, lastGlobalId)
-        this._nextStorageId -= 1
-
-        // Do nothing if the removable cell is the cell having the last storageId
-        if (this._nextStorageId === storageId) return
-
-        // Replace removable render info with the last render info in the cache
-        this._levelCache[storageId] = lastLevel
-        this._deletedCache[storageId] = lastDeleted
-        this._globalIdCache[storageId] = lastGlobalId
-        this._key_storageId_dict.update(storageId, lastLevel, lastGlobalId)
-        callback && callback([lastStorageId, storageId])
+        this.deleteCellsLocally([storageId], ([sources, targets]: [number[], number[]]) => {
+            callback?.([sources[0] ?? lastStorageId, targets[0] ?? storageId])
+        })
     }
 
-    deleteCellsLocally(storageIds: number[], callback?: Function): void {
-        // Convert removableStorageIds to ascending order and record cells' levels and globalIds which point to
-        const removableCellNum = storageIds.length
-        const removableLevels = new Array<number>(removableCellNum)
-        const removableGlobalIds = new Array<number>(removableCellNum)
-
-        storageIds.sort((a, b) => a - b).forEach((storageId, index) => {
-            const [level, globalId] = this.getInfoByStorageId(storageId)
-            removableLevels[index] = level
-            removableGlobalIds[index] = globalId
-        })
-
-        for (let i = 0; i < removableCellNum; i++) {
-            this._key_storageId_dict.delete(removableLevels[i], removableGlobalIds[i])
+    deleteCellsLocally(storageIds: number[], callback?: (info: [number[], number[]]) => void): void {
+        const sorted = [...new Set(storageIds)].sort((a, b) => a - b)
+        for (const id of sorted) {
+            if (!Number.isInteger(id) || id < 0 || id >= this._nextStorageId) throw new RangeError(`Invalid storage ID: ${id}`)
+        }
+        if (sorted.length === 0) {
+            callback?.([[], []])
+            return
         }
 
-        const maintainedCellNum = this.cellNum - removableCellNum
-        const replacedCellNum = maintainedCellNum > removableCellNum ? removableCellNum : maintainedCellNum
+        const removedSet = new Set(sorted)
+        const nextCount = this._nextStorageId - sorted.length
+        for (const id of sorted) { const cell = this._cells.get(id)!; this._key_storageId_dict.delete(cell.level, cell.globalId) }
 
-        // Generate info cache about replaced cells having last valid storageIds 
-        // Note: storageId not pointing to any removable cells is valid
-        let replacedStorageId = this._nextStorageId - 1
-        const removableIdStack = storageIds.slice()
-        const replacedCellInfos = new Array<[storageId: number, level: number, globalId: number, deleted: number]>()
-        while (replacedCellInfos.length !== replacedCellNum) {
-
-            // No need to replace removable cells by valid cell infos since they are never be used
-            if (storageIds[replacedCellInfos.length] >= this.cellNum) break
-
-            // Check if lastStorageId is one of removable storageIds
-            if (removableIdStack.length && removableIdStack[removableIdStack.length - 1] === replacedStorageId) {
-                removableIdStack.pop()
-            } else {
-
-                // If replacedStorageId is less than removableStorageId, break for replacement not necessary
-                if (replacedStorageId <= storageIds[replacedCellInfos.length]) break
-                const [lastLevel, lastGlobalId] = this.getInfoByStorageId(replacedStorageId)
-                const lastDeleted = this._deletedCache[replacedStorageId]
-                replacedCellInfos.push([replacedStorageId, lastLevel, lastGlobalId, lastDeleted])
-            }
-            replacedStorageId--
+        const sources: number[] = []
+        const targets: number[] = []
+        let source = this._nextStorageId - 1
+        for (const target of sorted) {
+            if (target >= nextCount) break
+            while (removedSet.has(source)) source--
+            const cell = this._cells.get(source)!
+            const { level, globalId } = cell
+            this._cells.set(target, cell)
+            this._key_storageId_dict.update(target, level, globalId)
+            sources.push(source)
+            targets.push(target)
+            source--
         }
 
-        this._nextStorageId -= removableCellNum
-
-        const replacedStorageIds: number[] = []     // source storageIds to be replaced
-        const removableStorageIds: number[] = []    // target storageIds to be removed
-        storageIds.forEach((storageId, index) => {
-            if (index > replacedCellInfos.length - 1) return
-
-            // Replace removable render info with the last render info in the cache
-            const [replacedStorageId, replacedLevel, replacedGlobalId, replacedDeleted] = replacedCellInfos[index]
-            this._levelCache[storageId] = replacedLevel
-            this._deletedCache[storageId] = replacedDeleted
-            this._globalIdCache[storageId] = replacedGlobalId
-            this._key_storageId_dict.update(storageId, replacedLevel, replacedGlobalId)
-
-            replacedStorageIds.push(replacedStorageId)
-            removableStorageIds.push(storageId)
-        })
-        callback && callback([
-            replacedStorageIds,
-            removableStorageIds,
-        ])
+        for (let id = nextCount; id < this._nextStorageId; id++) this._cells.delete(id)
+        this._nextStorageId = nextCount
+        this.emitChange({ removed: [...new Set([...sorted, ...sources])], upserted: targets })
+        callback?.([sources, targets])
     }
 
     /**
@@ -263,7 +197,7 @@ export default class PatchCore {
      * Not really deleted, but marked as deleted.  
      * For restore operation, the deleted cells must still can be picked up.
      */
-    markCellsAsDeleted(removableStorageIds: number[], callback?: Function): void {
+    markCellsAsDeleted(removableStorageIds: number[], callback?: () => void): void {
         const levels = new Uint8Array(removableStorageIds.length)
         const globalIds = new Uint32Array(removableStorageIds.length)
         for (let i = 0; i < removableStorageIds.length; i++) {
@@ -271,15 +205,16 @@ export default class PatchCore {
             const [level, globalId] = this.getInfoByStorageId(storageId)
             levels[i] = level
             globalIds[i] = globalId
-            this._deletedCache[storageId] = DELETED_FLAG
+            this._cells.get(storageId)!.deleted = DELETED_FLAG
         }
+        if (removableStorageIds.length > 0) this.emitChange({ removed: [], upserted: [...removableStorageIds] })
         // Mark provided cells as deleted
         this.sendWorkerApiTask('deleteCells', { levels, globalIds, nodeInfo: this.nodeInfo, lockId: this._lockId }, () => {
-            callback && callback()
+            callback?.()
         })
     }
 
-    restoreCells(restorableStorageIds: number[], callback?: Function): void {
+    restoreCells(restorableStorageIds: number[], callback?: () => void): void {
         const levels = new Uint8Array(restorableStorageIds.length)
         const globalIds = new Uint32Array(restorableStorageIds.length)
         for (let i = 0; i < restorableStorageIds.length; i++) {
@@ -287,11 +222,12 @@ export default class PatchCore {
             const [level, globalId] = this.getInfoByStorageId(storageId)
             levels[i] = level
             globalIds[i] = globalId
-            this._deletedCache[storageId] = UNDELETED_FLAG
+            this._cells.get(storageId)!.deleted = UNDELETED_FLAG
         }
+        if (restorableStorageIds.length > 0) this.emitChange({ removed: [], upserted: [...restorableStorageIds] })
         // Recover provided cells
         this.sendWorkerApiTask('restoreCells', { levels, globalIds, nodeInfo: this.nodeInfo, lockId: this._lockId }, () => {
-            callback && callback()
+            callback?.()
         })
     }
 
@@ -301,7 +237,7 @@ export default class PatchCore {
      * Info stored in cache (indexed by storageIds) of the subdividable cells is replaced because of the previous delete operation,
      * use storageIds to get info of subdividable cells is incorrect.
      */
-    subdivideCells(subdivideInfos: { levels: Uint8Array, globalIds: Uint32Array }, callback?: Function): void {
+    subdivideCells(subdivideInfos: { levels: Uint8Array, globalIds: Uint32Array }, callback?: PatchCellRenderCallback): void {
         // Dispatch a worker to subdivide the cells
         this.sendWorkerApiTask('subdivideCells', { ...subdivideInfos, nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, baseInfo: MultiCellBaseInfo) => {
             baseInfo.deleted = new Uint8Array(baseInfo.levels.length).fill(UNDELETED_FLAG)
@@ -309,7 +245,7 @@ export default class PatchCore {
         })
     }
 
-    mergeCells(mergeableStorageIds: number[], callback?: Function): void {
+    mergeCells(mergeableStorageIds: number[], callback?: (info: { childStorageIds: number[]; parentInfo: MultiCellBaseInfo }) => void): void {
         const levels = new Uint8Array(mergeableStorageIds.length)
         const globalIds = new Uint32Array(mergeableStorageIds.length)
         for (let i = 0; i < mergeableStorageIds.length; i++) {
@@ -319,7 +255,7 @@ export default class PatchCore {
             globalIds[i] = globalId
         }
         // Merge provided cells
-        this.sendWorkerApiTask('mergeCells', { levels, globalIds, nodeInfo: this.nodeInfo, lockId: this._lockId }, (_: any, parentInfo: MultiCellBaseInfo) => {
+        this.sendWorkerApiTask('mergeCells', { levels, globalIds, nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, parentInfo: MultiCellBaseInfo) => {
             // Get storageIds of all child cells
             const childStorageIds: number[] = []
             const parentNum = parentInfo.levels.length
@@ -334,11 +270,11 @@ export default class PatchCore {
                     })
                 }
             }
-            callback && callback({ childStorageIds, parentInfo })
+            callback?.({ childStorageIds, parentInfo })
         })
     }
 
-    getCellInfoByFeature(path: string, callback?: Function) {
+    getCellInfoByFeature(path: string, callback?: (storageIds: number[]) => void) {
         this.sendWorkerApiTask('getCellInfoByFeature', { path, nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, cellInfos: { levels: Uint8Array, globalIds: Uint32Array }) => {
             const { levels, globalIds } = cellInfos
             const cellNum = levels.length
@@ -347,11 +283,11 @@ export default class PatchCore {
                 const id = this._key_storageId_dict.get(levels[i], globalIds[i])! // ! ensured because all activated cells are stored in the cache
                 storageIds[i] = id
             }
-            callback && callback(storageIds)
+            callback?.(storageIds)
         })
     }
 
-    getCellInfoByVectorNode(vectorNodeInfo: string, vectorNodeLockId: string | null, callback?: Function) {
+    getCellInfoByVectorNode(vectorNodeInfo: string, vectorNodeLockId: string | null, callback?: (storageIds: number[]) => void) {
         this.sendWorkerApiTask('getCellInfoByVectorNode', { nodeInfo: this.nodeInfo, lockId: this._lockId, vectorNodeInfo, vectorNodeLockId }, (_, cellInfos: { levels: Uint8Array, globalIds: Uint32Array }) => {
             const { levels, globalIds } = cellInfos
             const cellNum = levels.length
@@ -360,12 +296,12 @@ export default class PatchCore {
                 const id = this._key_storageId_dict.get(levels[i], globalIds[i])! // ! ensured because all activated cells are stored in the cache
                 storageIds[i] = id
             }
-            callback && callback(storageIds)
+            callback?.(storageIds)
         })
     }
 
     getChildren(level: number, globalId: number): number[] | null {
-        if (level >= this.levelInfos.length || level < 0) return null
+        if (!Number.isInteger(level) || level < 0 || level >= this.maxLevel) return null
 
         const { width: levelWidth } = this.levelInfos[level]
         const globalU = globalId % levelWidth
@@ -390,14 +326,13 @@ export default class PatchCore {
     }
 
     getInfoByStorageId(storageId: number): [level: number, globalId: number] {
-        return [
-            this._levelCache[storageId],
-            this._globalIdCache[storageId]
-        ]
+        const cell = this._cells.get(storageId)
+        if (!cell) throw new RangeError(`Invalid storage ID: ${storageId}`)
+        return [cell.level, cell.globalId]
     }
 
     isDeleted(storageId: number): boolean {
-        return this._deletedCache[storageId] === DELETED_FLAG
+        return this._cells.get(storageId)?.deleted === DELETED_FLAG
     }
 
     getLocalId(level: number, globalId: number) {
@@ -413,10 +348,9 @@ export default class PatchCore {
     }
 
     check(storageId: number): CellCheckInfo {
-        const level = this._levelCache[storageId]
-        const globalId = this._globalIdCache[storageId]
+        const [level, globalId] = this.getInfoByStorageId(storageId)
         const localId = this.getLocalId(level, globalId)
-        const deleted = this._deletedCache[storageId] === DELETED_FLAG
+        const deleted = this.isDeleted(storageId)
 
         return {
             storageId,
@@ -427,9 +361,9 @@ export default class PatchCore {
         }
     }
 
-    save(callback: Function) {
-        this.sendWorkerApiTask('savePatch', { nodeInfo: this.nodeInfo, lockId: this._lockId }, (_: any, patchInfo: PatchSaveInfo) => {
-            callback && callback(patchInfo)
+    save(callback: (info: PatchSaveInfo) => void) {
+        this.sendWorkerApiTask('savePatch', { nodeInfo: this.nodeInfo, lockId: this._lockId }, (_, patchInfo: PatchSaveInfo) => {
+            callback?.(patchInfo)
         })
     }
 

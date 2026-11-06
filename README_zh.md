@@ -25,6 +25,14 @@ Gridmen 是一个供研究人员和工程人员创建、编辑多分辨率笛卡
 
 用户需自行提供具有适当使用权的 DEM、地类和矢量数据。
 
+## 查看网格分辨率与属性
+
+对装配后的网格选择 **Check**，即可只读浏览。patch 编辑器与装配网格查看器共用一个渲染器，按视口加载、绘制与 schema 格点对齐的显示块。显示块与 patch 无关；编辑只重建包含改动单元的块，GPU 缓冲按可见块申请，不再按固定单元总容量预分配。
+
+单元边长达到 4 个 CSS 像素时显示真实填充与边线。更小的单元显示为不带格线的属性场，并以边线密度表示分辨率：颜色越深，单元越细。密度采用 `coverage = min(1, 2s/c)`，其中 `s` 是每像素对应的米数，`c` 是有贡献的真实单元中最小的边长。图例会标明场模式并解释深浅含义；放大时连续过渡到真实边线。亚像素空洞通过已占用面积比例影响场的透明度。
+
+装配网格查看器提供层级、高程和地类场。高程与地类读取 `ne.txt` 中包含矢量干预的最终情景属性。在 **Check** 中点击地图，或启用 patch 编辑器的查看工具，即可在任何比例尺下查看真实单元及相邻单元。粗细交界处每条分段边的邻接都会列出，场样本不会被当作计算单元报告。
+
 ## 快速开始
 
 需要 Node.js 22.12 或更新版本及 npm、Python 3.12（`server/.python-version` 选定的版本）和 `uv`。服务端清单允许 Python 3.10 或更新版本，实际还受锁定依赖的要求约束。本机 GDAL 库必须与 Python 绑定匹配；macOS 清单固定为 GDAL 3.13.1。完整依赖见各清单文件。
@@ -88,7 +96,7 @@ npx tsc -b
 npm run build
 ```
 
-渲染端构建输出到仓库根目录的 `templates/`。基准测试说明见 [docs/benchmark/patch-render-benchmark.md](docs/benchmark/patch-render-benchmark.md)。
+渲染端构建输出到仓库根目录的 `templates/`。基准测试说明见 [docs/benchmark/patch-render-benchmark.md](docs/benchmark/patch-render-benchmark.md)。显示接口与场聚合规则见 [docs/viewport-grid-contract.md](docs/viewport-grid-contract.md)。
 
 ## 矢量干预的高程操作
 
