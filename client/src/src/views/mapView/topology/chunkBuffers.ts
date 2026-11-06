@@ -1,4 +1,5 @@
 import type { DisplayChunk } from '../../../core/grid/displayTypes'
+import { cellSide } from '../../../core/grid/displayMath'
 
 /** One 16-float record per drawn cell or field sample. Field flags.xy hold native sample width/height; real-cell flags.xy are zero/deleted. */
 const FLOATS_PER_INSTANCE = 16
@@ -11,6 +12,7 @@ export interface ChunkBuffer {
     count: number
     visibleCells: number
     fieldSamples: number
+    minOriginalCellSize: number
     bytes: number
     source: DisplayChunk
     revision: unknown
@@ -114,6 +116,7 @@ export class ChunkBuffers {
         return {
             buffer, vao, origin, count: data.length / FLOATS_PER_INSTANCE,
             visibleCells: source.cells.length, fieldSamples: source.fields.length,
+            minOriginalCellSize: source.cells.reduce((minimum, cell) => Math.min(minimum, cellSide(cell)), Infinity),
             bytes: data.byteLength, source, revision,
         }
     }

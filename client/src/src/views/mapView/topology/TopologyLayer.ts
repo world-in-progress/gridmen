@@ -15,13 +15,13 @@ import type { NHCustomLayerInterface } from './interfaces'
 import type { TopologyRenderSample } from './renderSample'
 import { chunkMatrix, chunkOnScreen, displayCamera, gridPoint, mercatorPoint, polygonIntersectsBox } from './displayProjection'
 import { selectDisplayBlocks } from '../../../core/grid/displayHierarchy'
-import { CELL_PIXEL_THRESHOLD, cellSide } from '../../../core/grid/displayMath'
+import { CELL_PIXEL_THRESHOLD } from '../../../core/grid/displayMath'
 import { gridDisplayI18n } from '../../../i18n/gridDisplay'
 import { validateDisplayMeta } from '../../../core/grid/displayValidation'
 
 const LEVEL_PALETTE_LENGTH = 256
 const BENCHMARK_RENDER_FRAME_TIMEOUT_MS = 10000
-const CAMERA_EVENTS = ['moveend', 'resize'] as const
+const CAMERA_EVENTS = ['move', 'zoom', 'moveend', 'resize'] as const
 
 type RenderSampleListener = (sample: TopologyRenderSample) => void
 type BenchmarkEditOperation = 'pick' | 'subdivide' | 'merge' | 'delete' | 'recover'
@@ -79,7 +79,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _forceView = false
     private _lastCamera?: string
     private _generation = 0
-    private _scheduled = false
+    private _scheduled?: object
+    private _cameraFrame?: number
+    private _contextUnavailable = false
     private _removed = false
     private _overlayCanvas: HTMLCanvasElement | null = null
     private _overlayCtx: CanvasRenderingContext2D | null = null
@@ -100,13 +102,28 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _completeMergeGroups = new Set<string>()
     private _benchmarkSubdivideChildGroups = new Map<number, number[]>()
     private _benchmarkDeletedGroups = new Map<number, number[]>()
-    private _cameraMoved = () => this.evictOffscreen()
-    private _cameraChanged = () => { this.evictOffscreen(); this.requestView(false) }
+    private _cameraChanged = () => {
+        if (!this._dataReady || !this.visible || this._removed || this._contextUnavailable || this._cameraFrame !== undefined) return
+        const frame = requestAnimationFrame(() => {
+            if (this._cameraFrame !== frame) return
+            this._cameraFrame = undefined
+            this.updateCameraScale()
+            this.syncGPU()
+            this.requestView(false)
+        })
+        this._cameraFrame = frame
+    }
     private _keyDown = (event: KeyboardEvent) => {
         if (event.key === 'A' && this._patchCore && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) this.executePickAllCells()
     }
-    private _contextLost = () => { this.releaseGPU(); this.emitStats() }
-    private _contextRestored = () => { void this.initGPUResource().then(() => this.requestView()).catch(error => console.error('Grid renderer initialization failed', error)) }
+    private _contextLost = () => { this._contextUnavailable = true; this.cancelView(); this.releaseGPU(); this.emitStats() }
+    private _contextRestored = () => {
+        void this.initGPUResource().then(() => {
+            if (!this.initialized || this._removed) return
+            this._contextUnavailable = false
+            this.requestView()
+        }).catch(error => console.error('Grid renderer initialization failed', error))
+    }
 
     constructor(public map: MapboxMap) {
         const generator = new VibrantColorGenerator()
@@ -192,6 +209,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     async initialize(_: MapboxMap, gl: WebGL2RenderingContext): Promise<void> {
         this._gl = gl
         this._removed = false
+        this._contextUnavailable = false
         this.initDOM()
         await this.initGPUResource()
         this.requestView()
@@ -214,7 +232,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._resizeObserver = new ResizeObserver(this.resizeHandler)
         this._resizeObserver.observe(this.map.getContainer())
         this.resizeOverlay()
-        this.map.on('move', this._cameraMoved)
         for (const event of CAMERA_EVENTS) this.map.on(event, this._cameraChanged)
         this.map.getCanvas().addEventListener('webglcontextlost', this._contextLost)
         this.map.getCanvas().addEventListener('webglcontextrestored', this._contextRestored)
@@ -311,27 +328,29 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.requestView()
     }
     private requestView(force = true): void {
-        if (!this._dataReady || !this.visible || this._removed) return
+        if (!this._dataReady || !this.visible || this._removed || this._contextUnavailable) return
         this._pendingView = true
         this._forceView ||= force
-        // Edits refresh immediately. Camera events wait for motion to finish,
-        // and an active query drains only the latest pending camera afterward.
-        if (this._scheduled || this._viewPromise || (!this._forceView && this.map.isMoving())) return
-        this._scheduled = true
+        // Camera events arrive once per browser frame; edits use this microtask
+        // immediately. An active load drains only the latest pending camera.
+        if (this._scheduled || this._viewPromise) return
+        const scheduled = {}
+        this._scheduled = scheduled
         queueMicrotask(() => {
-            this._scheduled = false
+            if (this._scheduled !== scheduled) return
+            this._scheduled = undefined
             void this.refreshView().catch(error => { if (!this._removed) console.error('Grid display query failed', error) })
         })
         this.map.triggerRepaint()
     }
     private refreshView(): Promise<void> {
         if (this._viewPromise) return this._viewPromise
-        if (!this._projection || !this._dataReady || !this.visible || this._removed || !this._pendingView) return Promise.resolve()
+        if (!this._projection || !this._dataReady || !this.visible || this._removed || this._contextUnavailable || !this._pendingView) return Promise.resolve()
         const generation = this._generation
         const load = async () => {
             while (this._pendingView && this._dataReady && this.visible && !this._removed && generation === this._generation) {
-                if (!this._forceView && this.map.isMoving()) break
                 const camera = displayCamera(this.map, this._projection!)
+                this._metersPerPixel = camera.metersPerPixel
                 const signature = `${camera.bounds.join(',')}:${camera.metersPerPixel}:${camera.rasterRatio}`
                 const force = this._forceView
                 this._pendingView = false
@@ -355,7 +374,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     this._view = this._source ? reuseChunks(this._view, view) : view
                     this._lastCamera = signature
                     this._blocks = blocks
-                    this._metersPerPixel = camera.metersPerPixel
                     this.syncGPU()
                     this.map.triggerRepaint()
                 } catch (error) {
@@ -386,7 +404,13 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._buffers.sync(this.visibleChunks(), key => `${this._index?.getChunkRevision(key) ?? 0}:${this._selectionVersions.get(key) ?? 0}`, chunk => this.prepareChunk(chunk))
         this.emitStats()
     }
-    private evictOffscreen(): void { if (this.initialized) this.syncGPU() }
+    private updateCameraScale(): void {
+        if (!this._projection) return
+        const scale = displayCamera(this.map, this._projection).metersPerPixel
+        if (scale === this._metersPerPixel) return
+        this._metersPerPixel = scale
+        this.emitStats()
+    }
     private prepareChunk(chunk: DisplayChunk): { data: Float32Array; origin: [number, number] } {
         const projection = this._projection!
         const origin = mercatorPoint(projection, [(chunk.bounds[0] + chunk.bounds[2]) / 2, (chunk.bounds[1] + chunk.bounds[3]) / 2])
@@ -411,7 +435,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private emitStats(): void {
         const resources = [...(this._buffers?.chunks.values() ?? [])]
         const fieldSamples = resources.reduce((sum, chunk) => sum + chunk.fieldSamples, 0)
-        const next: DisplayStats = { gpuBytes: (this._buffers?.gpuBytes ?? 0) + this._textureBytes, visibleChunks: resources.length, visibleCells: resources.reduce((sum, chunk) => sum + chunk.visibleCells, 0), fieldSamples, fieldMode: fieldSamples > 0 || resources.some(chunk => chunk.source.cells.some(cell => cellSide(cell) / this._metersPerPixel < CELL_PIXEL_THRESHOLD)), ready: this.isReady }
+        const next: DisplayStats = { gpuBytes: (this._buffers?.gpuBytes ?? 0) + this._textureBytes, visibleChunks: resources.length, visibleCells: resources.reduce((sum, chunk) => sum + chunk.visibleCells, 0), fieldSamples, fieldMode: fieldSamples > 0 || resources.some(chunk => chunk.minOriginalCellSize / this._metersPerPixel < CELL_PIXEL_THRESHOLD), ready: this.isReady }
         if (Object.keys(next).some(key => next[key as keyof DisplayStats] !== this._stats[key as keyof DisplayStats])) {
             this._stats = next
             for (const listener of this._displayListeners) listener({ ...next })
@@ -422,6 +446,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     render(gl: WebGL2RenderingContext, matrix: number[]): void {
         if (!this.visible || !this.initialized || !this._dataReady || !this._program || !this._buffers) return
         const start = performance.now()
+        this.updateCameraScale()
         let passCount = 0
         if (!this.isTransparent) {
             gl.useProgram(this._program)
@@ -845,6 +870,17 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     show(): void { this.visible = true; if (this._overlayCanvas) this._overlayCanvas.style.display = 'block'; this.requestView() }
     hide(): void {
         this.visible = false
+        this.cancelView()
+        this._buffers?.clear()
+        this._view = { chunks: [], cellCount: this._view.cellCount }
+        if (this._overlayCanvas) this._overlayCanvas.style.display = 'none'
+        this.emitStats()
+        this.map.triggerRepaint()
+    }
+    private cancelView(): void {
+        if (this._cameraFrame !== undefined) cancelAnimationFrame(this._cameraFrame)
+        this._cameraFrame = undefined
+        this._scheduled = undefined
         this._request?.abort()
         this._request = undefined
         this._viewPromise = undefined
@@ -853,20 +889,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._lastCamera = undefined
         this._blocks = []
         this._loading = false
-        this._buffers?.clear()
-        this._view = { chunks: [], cellCount: this._view.cellCount }
-        if (this._overlayCanvas) this._overlayCanvas.style.display = 'none'
-        this.emitStats()
-        this.map.triggerRepaint()
     }
     private detachSource(): void {
-        this._request?.abort()
-        this._request = undefined
-        this._viewPromise = undefined
-        this._pendingView = false
-        this._forceView = false
-        this._lastCamera = undefined
-        this._blocks = []
+        this.cancelView()
         this._generation++
         this._unsubscribePatch?.()
         this._unsubscribePatch = undefined
@@ -910,7 +935,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.detachSource()
         this.releaseGPU()
         core?.remove()
-        this.map.off('move', this._cameraMoved)
         for (const event of CAMERA_EVENTS) this.map.off(event, this._cameraChanged)
         this.map.getCanvas().removeEventListener('webglcontextlost', this._contextLost)
         this.map.getCanvas().removeEventListener('webglcontextrestored', this._contextRestored)

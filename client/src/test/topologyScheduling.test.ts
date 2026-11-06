@@ -32,11 +32,15 @@ class Camera {
 }
 
 function fixture(t: { after(fn: () => void): void }) {
+    let nextFrame = 0
+    const frames = new Map<number, FrameRequestCallback>()
     const overlay = { style: {}, width: 0, height: 0, getContext: () => null, remove() {} }
     const indicator = { style: {}, textContent: '', hidden: false, setAttribute() {}, remove() {} }
     const globals = {
         document: { createElement: (tag: string) => tag === 'canvas' ? overlay : indicator }, window: new EventTarget(),
         ResizeObserver: class { observe() {} disconnect() {} },
+        requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame },
+        cancelAnimationFrame: (id: number) => { frames.delete(id) },
     }
     const originals = Object.getOwnPropertyDescriptors(globalThis)
     for (const [key, value] of Object.entries(globals)) {
@@ -76,46 +80,70 @@ function fixture(t: { after(fn: () => void): void }) {
         calls[0].resolve(view)
         await started
     }
-    return { camera, layer, calls, start, ready, maxActive: () => maxActive }
+    async function frame() {
+        const callbacks = [...frames.values()]
+        frames.clear()
+        callbacks.forEach(callback => callback(performance.now()))
+        await tick()
+    }
+    return { camera, layer, calls, start, ready, frame, frames, maxActive: () => maxActive }
 }
 
-test('camera movement keeps visible data and requests only the final camera', async t => {
+test('camera frames request new visible blocks while moving and merge input bursts', async t => {
     const f = fixture(t)
     await f.ready()
     f.camera.moving = true
     for (let i = 1; i <= 120; i++) {
         f.camera.center = i
         f.camera.emit('move')
-        f.camera.emit('resize')
-        await tick()
+        f.camera.emit('zoom')
     }
-    assert.equal(f.calls.length, 1, 'animation must not issue or abort per-frame network queries')
-    assert.equal(f.calls[0].signal.aborted, false)
-    assert.equal(f.layer.isReady, true, 'cached data remains usable during motion')
-    f.camera.moving = false
-    f.camera.emit('moveend')
-    await tick()
-    assert.equal(f.calls.length, 2)
+    assert.equal(f.calls.length, 1, 'raw camera events must coalesce until the browser frame')
+    assert.equal(f.frames.size, 1)
+    await f.frame()
+    assert.equal(f.calls.length, 2, 'a moving camera must start loading before moveend')
     assert.equal(f.calls[1].center, 120)
+    assert.notDeepEqual(f.calls[1].blocks, f.calls[0].blocks, 'the request must select the new viewport geometry')
+    assert.equal(f.calls[0].signal.aborted, false)
     f.calls[1].resolve(view)
     await tick()
+    assert.equal(f.layer.isReady, true)
+    assert.equal(f.camera.isMoving(), true, 'the new viewport must commit during motion')
+    f.camera.center = 200
+    f.camera.emit('move')
+    await f.frame()
+    assert.equal(f.calls.length, 3)
+    f.camera.center = 240
+    f.camera.moving = false
+    f.camera.emit('moveend')
+    await f.frame()
+    f.calls[2].resolve(view)
+    await tick()
+    assert.equal(f.calls.length, 4)
+    assert.equal(f.calls[3].center, 240, 'the final view must follow the active request')
+    f.calls[3].resolve(view)
+    await tick()
+    assert.equal(f.frames.size, 0)
     assert.equal(f.layer.isReady, true)
     assert.equal(f.maxActive(), 1)
     f.camera.emit('moveend')
     f.camera.emit('resize')
-    await tick()
-    assert.equal(f.calls.length, 2, 'an unchanged camera must be deduplicated')
+    await f.frame()
+    assert.equal(f.calls.length, 4, 'an unchanged camera must be deduplicated')
+    await f.frame()
+    assert.equal(f.frames.size, 0, 'an idle camera must not keep scheduling frames')
 })
 
 test('one in-flight query coalesces camera bursts and reaches final ready', async t => {
     const f = fixture(t)
     const started = f.start()
     await tick()
+    f.camera.moving = true
     for (let i = 1; i <= 120; i++) {
         f.camera.center = i
-        f.camera.emit('moveend')
+        f.camera.emit('move')
         f.camera.emit('resize')
-        await tick()
+        await f.frame()
     }
     assert.equal(f.calls.length, 1)
     assert.equal(f.calls[0].signal.aborted, false)
@@ -127,7 +155,7 @@ test('one in-flight query coalesces camera bursts and reaches final ready', asyn
     for (let i = 121; i <= 240; i++) {
         f.camera.center = i
         f.camera.emit('resize')
-        await tick()
+        await f.frame()
     }
     assert.equal(f.calls.length, 2)
     assert.equal(f.calls[1].signal.aborted, false)
@@ -137,6 +165,7 @@ test('one in-flight query coalesces camera bursts and reaches final ready', asyn
     assert.equal(f.calls[2].center, 240)
     f.calls[2].resolve(view)
     await started
+    assert.equal(f.camera.isMoving(), true)
     assert.equal(f.layer.isReady, true)
     assert.equal(f.maxActive(), 1)
     assert.ok(f.calls.every(call => !call.signal.aborted))
@@ -154,7 +183,7 @@ test('edit invalidation refreshes immediately during motion at the same camera',
     assert.equal(f.layer.isReady, true)
     f.camera.moving = false
     f.camera.emit('moveend')
-    await tick()
+    await f.frame()
     assert.equal(f.calls.length, 2)
 })
 
@@ -163,8 +192,10 @@ test('hide cancels the active lifecycle and queued cameras cannot restart it', a
     const started = f.start()
     await tick()
     f.camera.center = 1
-    f.camera.emit('moveend')
+    f.camera.emit('move')
+    assert.equal(f.frames.size, 1)
     f.layer.hide()
+    assert.equal(f.frames.size, 0, 'hide must cancel the queued camera frame')
     assert.equal(f.calls[0].signal.aborted, true)
     f.calls[0].resolve(view)
     await started
@@ -196,6 +227,41 @@ test('source replacement cancels only the old lifecycle and ignores its late res
     await current
     assert.equal(f.layer.isReady, true)
     f.camera.emit('moveend')
-    await tick()
+    await f.frame()
     assert.equal(f.calls.length, 2)
+})
+
+test('remove cancels the active load and queued frame without restarting', async t => {
+    const f = fixture(t)
+    const started = f.start()
+    await tick()
+    f.camera.center = 100
+    f.camera.emit('move')
+    f.layer.remove(f.camera as never, undefined as never)
+    assert.equal(f.calls[0].signal.aborted, true)
+    assert.equal(f.frames.size, 0)
+    f.calls[0].resolve(view)
+    await started
+    await f.frame()
+    assert.equal(f.calls.length, 1)
+    assert.equal(f.layer.isReady, false)
+    assert.ok([...f.camera.listeners.values()].every(listeners => listeners.size === 0))
+})
+
+test('context loss cancels active and queued camera work and suspends new queries', async t => {
+    const f = fixture(t)
+    const started = f.start()
+    await tick()
+    f.camera.emit('move')
+    f.camera.canvas.dispatchEvent(new Event('webglcontextlost'))
+    assert.equal(f.calls[0].signal.aborted, true)
+    assert.equal(f.frames.size, 0)
+    f.calls[0].resolve(view)
+    await started
+    f.camera.center = 100
+    f.camera.emit('move')
+    f.camera.emit('resize')
+    await f.frame()
+    assert.equal(f.calls.length, 1)
+    assert.equal(f.layer.isReady, false)
 })
