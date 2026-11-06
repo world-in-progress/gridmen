@@ -81,9 +81,13 @@ export interface GridInspection {
 
 export interface ReadOnlyGridSource {
     meta: GridDisplayMeta
-    loadBlocks(blocks: DisplayBlock[], signal: AbortSignal): Promise<GridDisplayView>
+    loadBlocks(blocks: DisplayBlock[], signal: AbortSignal, decode?: DisplayBlockDecoder): Promise<GridDisplayView>
+    clearCache?(): void
+    reportError?(error: unknown): void
     inspect(x: number, y: number): Promise<GridInspection>
 }
+
+export type DisplayBlockDecoder = (blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]) => Promise<DisplayChunk[]>
 
 export interface DisplayStats {
     /** Bytes allocated by this renderer's buffers and textures. */

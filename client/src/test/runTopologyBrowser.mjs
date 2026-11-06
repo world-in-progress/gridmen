@@ -11,12 +11,16 @@ await mkdir(evidence, { recursive: true })
 await build({ entryPoints: [resolve(root, 'test/topologyLayer.browser.ts')], bundle: true, platform: 'browser',
   format: 'esm', target: 'chrome120', outfile: resolve(evidence, 'topologyLayer.bundle.js'),
   define: { 'import.meta.env': '{}' }, tsconfig: resolve(root, 'tsconfig.app.json'), logLevel: 'warning' })
+await build({ entryPoints: [resolve(root, 'src/core/worker/displayGeometry.worker.ts')], bundle: true, platform: 'browser',
+  format: 'esm', target: 'chrome120', outfile: resolve(evidence, 'displayGeometry.worker.js'),
+  tsconfig: resolve(root, 'tsconfig.app.json'), logLevel: 'warning' })
 const html = '<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#182025;color:#eee;font:14px monospace}#gl{width:512px;height:512px;display:block}#result{white-space:pre-wrap}</style></head><body><div><canvas id="gl" width="512" height="512"></canvas></div><pre id="result">running</pre><script type="module" src="/fixture.js"></script></body></html>'
 const server = createServer(async (req, res) => {
   if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end(html); return }
   if (req.url === '/favicon.ico') { res.writeHead(204); res.end(); return }
   const route = new Map([
     ['/fixture.js', [resolve(evidence, 'topologyLayer.bundle.js'), 'text/javascript']],
+    ['/displayGeometry.worker.ts', [resolve(evidence, 'displayGeometry.worker.js'), 'text/javascript']],
     ['/shaders/patch/display.glsl', [resolve(root, 'public/shaders/patch/display.glsl'), 'text/plain']],
   ]).get(req.url)
   if (!route) { res.writeHead(404); res.end(); return }

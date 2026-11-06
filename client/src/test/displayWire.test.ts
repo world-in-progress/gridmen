@@ -71,3 +71,15 @@ test('one original spanning several blocks appears once in the merged view', () 
     assert.equal(view.chunks[0].key, 'original:42')
     assert.equal(view.chunks[0].cells.length, 1)
 })
+
+test('an original crossing only one side of a block keeps its real bounds and one stable owner', () => {
+    const original = { id: 84, bounds: [0.5, 0.25, 1.5, 0.75] as [number, number, number, number], level: 1, elevation: 9, landClass: 3 }
+    const a = { key: 'left', bounds: [0, 0, 1, 1] as [number, number, number, number], cells: [original], fields: [] }
+    const b = { key: 'right', bounds: [1, 0, 2, 1] as [number, number, number, number], cells: [original], fields: [] }
+    const before = displayBlockView([a], 1)
+    const after = displayBlockView([a, b], 1, before)
+    assert.equal(after.chunks.length, 1)
+    assert.equal(after.chunks[0], before.chunks[0])
+    assert.equal(after.chunks[0].cells[0], original)
+    assert.deepEqual(after.chunks[0].bounds, original.bounds)
+})

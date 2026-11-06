@@ -1,8 +1,9 @@
 import { decodeNodeInfo } from './utils'
-import type { DisplayBlock, GridDisplayMeta, GridDisplayView, GridInspection } from '@/core/grid/displayTypes'
+import type { DisplayBlock, DisplayBlockDecoder, GridDisplayMeta, GridDisplayView, GridInspection } from '@/core/grid/displayTypes'
 import type { BaseResponse } from './types'
 import { decodeDisplayBlock, displayBlockView } from '@/core/grid/displayWire'
 import { gridDisplayI18n } from '@/i18n/gridDisplay'
+import { DisplayBlockCache } from '@/core/grid/displayBlockCache'
 
 const API_PREFIX = `/api/grid`
 async function requestGridDisplay(nodeInfo: string, path: string, options?: RequestInit): Promise<Response> {
@@ -18,13 +19,23 @@ async function requestGridDisplay(nodeInfo: string, path: string, options?: Requ
 export const getGridDisplayMeta = async (nodeInfo: string, signal?: AbortSignal): Promise<GridDisplayMeta> =>
     (await requestGridDisplay(nodeInfo, 'meta', { signal })).json()
 
-export async function queryGridDisplayBlocks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal?: AbortSignal): Promise<GridDisplayView> {
-    const chunks = await Promise.all(blocks.map(async block => {
+async function loadGridDisplayChunks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal?: AbortSignal, decode?: DisplayBlockDecoder) {
+    const responses = await Promise.all(blocks.map(async block => {
         const path = `nodes/${encodeURIComponent(meta.revision)}/${block.blockLayer}/${block.x}/${block.y}/${block.displayLayer}`
         const response = await requestGridDisplay(nodeInfo, path, { signal })
-        return decodeDisplayBlock(await response.arrayBuffer(), block, meta)
+        return { block, buffer: await response.arrayBuffer() }
     }))
-    return displayBlockView(chunks, meta.cellCount)
+    signal?.throwIfAborted()
+    return decode ? decode(responses) : responses.map(({ buffer, block }) => decodeDisplayBlock(buffer, block, meta))
+}
+
+export function createGridDisplayBlockCache(nodeInfo: string, meta: GridDisplayMeta): DisplayBlockCache {
+    // The closure owns source URL, immutable revision, CRS, and lattice identity.
+    return new DisplayBlockCache(meta, (blocks, signal, decode) => loadGridDisplayChunks(nodeInfo, meta, blocks, signal, decode))
+}
+
+export async function queryGridDisplayBlocks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal?: AbortSignal): Promise<GridDisplayView> {
+    return displayBlockView(await loadGridDisplayChunks(nodeInfo, meta, blocks, signal), meta.cellCount)
 }
 
 export const inspectGrid = async (nodeInfo: string, x: number, y: number, signal?: AbortSignal): Promise<GridInspection> =>

@@ -109,31 +109,45 @@ export function projectedCorners(bounds: Bounds, project: ProjectPoint): [number
         .map(point => project(point as [number, number]))
 }
 
-/** Largest inscribed circle of the convex four-corner node. */
-export function projectedRadius(bounds: Bounds, project: ProjectPoint): number {
+/** Largest inscribed circle of the convex four-corner node. With a finite
+ * required radius, a feasible circle can prove acceptance before solving the LP.
+ */
+export function projectedRadius(bounds: Bounds, project: ProjectPoint, required = Infinity): number {
     const corners = projectedCorners(bounds, project)
-    const cx = corners.reduce((sum, p) => sum + p[0], 0) / 4
-    const cy = corners.reduce((sum, p) => sum + p[1], 0) / 4
-    const edges = corners.map((p, i) => {
+    // Cancel world/screen translation before solving the supporting lines. This
+    // also makes small Mercator nodes stable without camera-sized offsets.
+    const ox = corners[0][0], oy = corners[0][1]
+    const cx = ((corners[1][0] - ox) + (corners[2][0] - ox) + (corners[3][0] - ox)) / 4
+    const cy = ((corners[1][1] - oy) + (corners[2][1] - oy) + (corners[3][1] - oy)) / 4
+    const nx = [0, 0, 0, 0], ny = [0, 0, 0, 0], offsets = [0, 0, 0, 0]
+    let radius = Infinity
+    for (let i = 0; i < 4; i++) {
+        const p = corners[i]
         const q = corners[(i + 1) % 4]
         const length = Math.hypot(q[0] - p[0], q[1] - p[1])
-        let nx = (p[1] - q[1]) / length, ny = (q[0] - p[0]) / length
-        if (nx * (cx - p[0]) + ny * (cy - p[1]) < 0) { nx = -nx; ny = -ny }
-        return { nx, ny, offset: nx * p[0] + ny * p[1] }
-    })
-    let radius = Math.min(...edges.map(edge => edge.nx * cx + edge.ny * cy - edge.offset))
+        nx[i] = (p[1] - q[1]) / length; ny[i] = (q[0] - p[0]) / length
+        const px = p[0] - ox, py = p[1] - oy
+        if (nx[i] * (cx - px) + ny[i] * (cy - py) < 0) { nx[i] = -nx[i]; ny[i] = -ny[i] }
+        offsets[i] = nx[i] * px + ny[i] * py
+        radius = Math.min(radius, nx[i] * cx + ny[i] * cy - offsets[i])
+    }
+    if (radius >= required) return radius
     // A maximum circle is tangent to three supporting lines. Solve the four
     // possible triples, retaining only centers inside all four half-planes.
     for (let omitted = 0; omitted < 4; omitted++) {
-        const [a, b, c] = edges.filter((_, i) => i !== omitted)
-        const ax = a.nx - c.nx, ay = a.ny - c.ny, av = a.offset - c.offset
-        const bx = b.nx - c.nx, by = b.ny - c.ny, bv = b.offset - c.offset
+        const a = (omitted + 1) % 4, b = (omitted + 2) % 4, c = (omitted + 3) % 4
+        const ax = nx[a] - nx[c], ay = ny[a] - ny[c], av = offsets[a] - offsets[c]
+        const bx = nx[b] - nx[c], by = ny[b] - ny[c], bv = offsets[b] - offsets[c]
         const determinant = ax * by - ay * bx
         if (Math.abs(determinant) < Number.EPSILON) continue
         const x = (av * by - ay * bv) / determinant
         const y = (ax * bv - av * bx) / determinant
-        const r = c.nx * x + c.ny * y - c.offset
-        if (r > radius && edges.every(edge => edge.nx * x + edge.ny * y - edge.offset + 1e-9 >= r)) radius = r
+        // The minimum distance is a feasible circle even at a roundoff boundary;
+        // no absolute tolerance in projection-dependent units is needed here.
+        let r = Infinity
+        for (let i = 0; i < 4; i++) r = Math.min(r, nx[i] * x + ny[i] * y - offsets[i])
+        if (r > radius) radius = r
+        if (radius >= required) return radius
     }
     return radius
 }
@@ -145,16 +159,24 @@ export function blockKey(block: DisplayBlock): string {
 /** Partition visible space into hierarchical blocks, then choose each block's finest valid layer.
  * Projection is in CSS pixels. Only the four corners of a node are projected.
  */
-export function selectDisplayBlocks(layers: DisplayLayer[], origin: [number, number], viewport: Bounds, project: ProjectPoint): DisplayBlock[] {
+export interface DisplayBlockMeasures {
+    fits(bounds: Bounds): boolean
+    size(bounds: Bounds): number
+    layerFits(index: number, bounds: Bounds): boolean
+}
+
+export function selectDisplayBlocks(layers: DisplayLayer[], origin: [number, number], viewport: Bounds, project: ProjectPoint, measures?: DisplayBlockMeasures): DisplayBlock[] {
     const result: DisplayBlock[] = []
     const layer = (index: number) => displayLayer(layers, index)
-    const fits = (bounds: Bounds) => projectedRadius(bounds, project) + 1e-9 >= NODE_RADIUS
+    const fits = measures?.fits ?? ((bounds: Bounds) => projectedRadius(bounds, project) + 1e-9 >= NODE_RADIUS)
     const choose = (blockLayer: number, x: number, y: number) => {
         const bounds = nodeBounds(layer(blockLayer), x, y, origin)
         if (!intersects(bounds, viewport)) return
-        const corners = projectedCorners(bounds, project)
-        const size = Math.max(...corners.map((p, i) => Math.hypot(p[0] - corners[(i + 1) % 4][0], p[1] - corners[(i + 1) % 4][1])))
-        if (blockLayer > 0 && size > BLOCK_PIXELS) {
+        const corners = measures ? [] : projectedCorners(bounds, project)
+        const size = measures ? measures.size(bounds) : Math.max(...corners.map((p, i) => Math.hypot(p[0] - corners[(i + 1) % 4][0], p[1] - corners[(i + 1) % 4][1])))
+        // Keep a theoretically 128-CSS-pixel edge on the same side of the
+        // partition after a change of projection units and float64 roundoff.
+        if (blockLayer > 0 && size > BLOCK_PIXELS + 1e-9) {
             const child = layer(blockLayer - 1)
             const [x0, y0, x1, y1] = nodeRange(child, bounds, origin)
             const children: [number, number][] = []
@@ -169,6 +191,11 @@ export function selectDisplayBlocks(layers: DisplayLayer[], origin: [number, num
         }
         let selected = blockLayer
         for (let i = blockLayer - 1; i >= 0; i--) {
+            if (measures) {
+                if (!measures.layerFits(i, bounds)) break
+                selected = i
+                continue
+            }
             const candidate = layer(i)
             const [x0, y0, x1, y1] = nodeRange(candidate, bounds, origin)
             let valid = true

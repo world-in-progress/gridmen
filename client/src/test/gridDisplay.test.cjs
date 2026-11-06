@@ -78,6 +78,7 @@ test('API uses encoded node keys, revision block paths, HTTP errors and abort si
     let response = { ok: true, json: async () => ({ actual: true }), arrayBuffer: async () => payload }
     const decoded = []
     const api = load('template/api/grid.ts', {
+        '@/core/grid/displayBlockCache': { DisplayBlockCache: class {} },
         './utils': { decodeNodeInfo: () => ({ address: 'http://local.test', nodeKey: 'a/b grid' }) },
         '@/i18n/gridDisplay': i18n,
         '@/core/grid/displayWire': {
@@ -137,11 +138,11 @@ test('grid tabs share one source, propagate viewport errors and cancel requests 
     let observedSignal
     ctx.dependencies['../api/grid'] = {
         getGridDisplayMeta: async () => ctx.meta,
-        queryGridDisplayBlocks: async (_node, _meta, _blocks, signal) => {
+        createGridDisplayBlockCache: () => ({ clear() {}, query: async (_blocks, signal) => {
             observedSignal = signal
             if (fail) throw new Error('broken viewport')
             return { chunks: [], cellCount: 0 }
-        },
+        } }),
         inspectGrid: async (_node, _x, _y, signal) => { observedSignal = signal; return { cell: null, neighbors: [] } },
     }
     const module = load('template/grid/gridDisplaySession.ts', ctx.dependencies)
@@ -174,6 +175,7 @@ test('closing a pending grid prevents a late layer mount and permits a fresh ses
     let calls = 0
     ctx.dependencies['../api/grid'] = {
         getGridDisplayMeta: () => ++calls === 1 ? pending.promise : Promise.resolve(ctx.meta),
+        createGridDisplayBlockCache: () => ({ clear() {}, query: async () => ({ chunks: [], cellCount: 0 }) }),
     }
     const module = load('template/grid/gridDisplaySession.ts', ctx.dependencies)
     const node = { nodeInfo: 'grid' }

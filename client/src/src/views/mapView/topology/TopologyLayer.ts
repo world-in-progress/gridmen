@@ -13,11 +13,13 @@ import { ChunkBuffers } from './chunkBuffers'
 import type CustomLayerGroup from './customLayerGroup'
 import type { NHCustomLayerInterface } from './interfaces'
 import type { TopologyRenderSample } from './renderSample'
-import { chunkMatrix, chunkOnScreen, displayCamera, gridPoint, mercatorPoint, polygonIntersectsBox } from './displayProjection'
+import { chunkMatrix, chunkOnScreen, displayCamera, gridPoint, polygonIntersectsBox, type DisplayCamera } from './displayProjection'
 import { selectDisplayBlocks } from '../../../core/grid/displayHierarchy'
 import { CELL_PIXEL_THRESHOLD } from '../../../core/grid/displayMath'
 import { gridDisplayI18n } from '../../../i18n/gridDisplay'
 import { validateDisplayMeta } from '../../../core/grid/displayValidation'
+import { DisplayGeometryClient } from '../../../core/worker/displayGeometryClient'
+import type { PreparedDisplayChunk } from '../../../core/grid/displayGeometryEngine'
 
 const LEVEL_PALETTE_LENGTH = 256
 const BENCHMARK_RENDER_FRAME_TIMEOUT_MS = 10000
@@ -66,6 +68,11 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _unsubscribePatch?: () => void
     private _source?: ReadOnlyGridSource
     private _projection?: Converter
+    private _projectionDefinition?: string
+    private _geometry?: DisplayGeometryClient
+    private _prepared = new Map<DisplayChunk, PreparedDisplayChunk>()
+    private _previousPrepared = new Set<DisplayChunk>()
+    private _camera?: DisplayCamera
     private _attribute: DisplayAttribute = 'level'
     private _showDeletedCells = true
     private _dataReady = false
@@ -103,6 +110,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _benchmarkSubdivideChildGroups = new Map<number, number[]>()
     private _benchmarkDeletedGroups = new Map<number, number[]>()
     private _cameraChanged = () => {
+        this._camera = undefined
         if (!this._dataReady || !this.visible || this._removed || this._contextUnavailable || this._cameraFrame !== undefined) return
         const frame = requestAnimationFrame(() => {
             if (this._cameraFrame !== frame) return
@@ -150,6 +158,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         core.init(() => {
             if (this._patchCore !== core || generation !== this._generation || this._removed) return
             this._projection = proj4(core.srcCRS, 'EPSG:4326')
+            this._projectionDefinition = JSON.stringify(proj4.defs(core.srcCRS))
             this.rebuildPatchIndex()
             this._unsubscribePatch = core.addChangeListener(change => this.patchChanged(change))
             this._dataReady = true
@@ -157,7 +166,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
             this.endCallback()
         })
     }
-    get isReady(): boolean { return this.initialized && this._dataReady && !this._loading }
+    get isReady(): boolean { return this.initialized && this._dataReady && !this._loading && !this._pendingView && !this._scheduled && this._cameraFrame === undefined }
     set startCallback(callback: () => void) { this._startCallback = () => { callback(); this.map.triggerRepaint() } }
     get startCallback(): () => void { return this._startCallback }
     set endCallback(callback: () => void) { this._endCallback = () => { callback(); this.map.triggerRepaint() } }
@@ -172,6 +181,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         if (!proj4.defs(crs)) proj4.defs(crs, await apis.proj.getProj4Defs(source.meta.epsg))
         if (generation !== this._generation) return
         this._projection = proj4(crs, 'EPSG:4326')
+        this._projectionDefinition = JSON.stringify(proj4.defs(crs))
         this._dataReady = true
         this.requestView()
         await this.refreshView()
@@ -349,9 +359,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const generation = this._generation
         const load = async () => {
             while (this._pendingView && this._dataReady && this.visible && !this._removed && generation === this._generation) {
-                const camera = displayCamera(this.map, this._projection!)
+                const camera = this.camera()
                 this._metersPerPixel = camera.metersPerPixel
-                const signature = `${camera.bounds.join(',')}:${camera.metersPerPixel}`
+                const signature = this.cameraSignature(camera)
                 const force = this._forceView
                 this._pendingView = false
                 this._forceView = false
@@ -361,17 +371,58 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                 this._loading = true
                 this.emitStats()
                 try {
-                    const layers = this._source?.meta.displayLayers ?? this._index!.displayLayers
-                    const origin = this._source?.meta.alignment_origin ?? this._index!.origin
-                    const blocks = signature === this._lastCamera ? this._blocks : selectDisplayBlocks(layers, origin, camera.bounds, point => {
-                        const screen = this.map.project(this._projection!.forward(point) as [number, number])
-                        return [screen.x, screen.y]
-                    })
-                    const view = this._source
-                        ? await this._source.loadBlocks(blocks, request.signal)
+                    const source = this._source
+                    const layers = source?.meta.displayLayers ?? this._index!.displayLayers
+                    const origin = source?.meta.alignment_origin ?? this._index!.origin
+                    const geometry = this._geometry ??= new DisplayGeometryClient({ layers, origin, definition: this._projectionDefinition! })
+                    let blocks = this._blocks
+                    if (signature !== this._lastCamera) {
+                        if (camera.mercator) {
+                            const selected = await geometry.run({ type: 'select', bounds: camera.bounds, scale: camera.mercator.scale })
+                            if (!selected.blocks) throw new Error('Missing display block selection')
+                            blocks = selected.blocks
+                        } else {
+                            blocks = selectDisplayBlocks(layers, origin, camera.bounds, point => {
+                                const screen = this.map.project(this._projection!.forward(point) as [number, number])
+                                return [screen.x, screen.y]
+                            })
+                            await geometry.run({ type: 'reset' })
+                        }
+                    }
+                    if (request.signal.aborted || generation !== this._generation || this._removed) return
+                    if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
+                    const view = source
+                        ? await source.loadBlocks(blocks, request.signal, async buffers => {
+                            request.signal.throwIfAborted()
+                            if (generation !== this._generation) throw new DOMException('Grid source replaced', 'AbortError')
+                            const result = await geometry.run({ type: 'decode', blocks: buffers, meta: source.meta })
+                            if (request.signal.aborted || generation !== this._generation) throw new DOMException('Grid display cancelled', 'AbortError')
+                            if (!result.chunks || !result.prepared) throw new Error('Missing decoded display geometry')
+                            result.chunks.forEach((chunk, index) => this._prepared.set(chunk, result.prepared![index]))
+                            return result.chunks
+                        })
                         : this._index!.queryBlocks(blocks, this._showDeletedCells)
                     if (request.signal.aborted || generation !== this._generation || this._removed) return
-                    this._view = this._source ? reuseChunks(this._view, view) : view
+                    const next = source ? reuseChunks(this._view, view) : view
+                    // Also prune replies superseded by motion. Otherwise a long
+                    // gesture could accumulate prepared arrays before any commit.
+                    const retained = new Set(next.chunks)
+                    for (const chunk of this._prepared.keys()) if (!retained.has(chunk) && !this._previousPrepared.has(chunk)) this._prepared.delete(chunk)
+                    if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
+                    const missing = next.chunks.filter(chunk => !this._prepared.has(chunk))
+                    if (missing.length) {
+                        const result = await geometry.run({ type: 'prepare', chunks: missing })
+                        if (request.signal.aborted || generation !== this._generation || this._removed) return
+                        if (!result.prepared) throw new Error('Missing prepared display geometry')
+                        missing.forEach((chunk, index) => this._prepared.set(chunk, result.prepared![index]))
+                    }
+                    if (!this.usableCamera(camera)) { this._pendingView = true; this._forceView = true; continue }
+                    // Immutable nodes from a pan at the same Mercator scale stay
+                    // valid. Cull them against the current camera, keep loading
+                    // the latest view, and never report that partial view ready.
+                    if (signature !== this.cameraSignature(this.camera())) this._pendingView = true
+                    this._view = next
+                    this._previousPrepared = retained
                     this._lastCamera = signature
                     this._blocks = blocks
                     this.syncGPU()
@@ -380,6 +431,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     if (request.signal.aborted || generation !== this._generation) return
                     this._dataReady = false
                     this._buffers?.clear()
+                    this._source?.reportError?.(error)
                     throw error
                 }
             }
@@ -397,7 +449,15 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     }
     private visibleChunks(): DisplayChunk[] {
         if (!this._projection || !this.visible) return []
-        return this._view.chunks.filter(chunk => chunkOnScreen(this.map, this._projection!, chunk.bounds))
+        const camera = this.camera()
+        return this._view.chunks.filter(chunk => {
+            const prepared = this._prepared.get(chunk)
+            if (camera.mercator && prepared) {
+                const a = prepared.worldBounds, b = camera.mercator.bounds
+                return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
+            }
+            return chunkOnScreen(this.map, this._projection!, chunk.bounds, prepared?.corners)
+        })
     }
     private syncGPU(): void {
         if (!this.initialized || !this._buffers || !this._projection) return
@@ -406,31 +466,31 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     }
     private updateCameraScale(): void {
         if (!this._projection) return
-        const scale = displayCamera(this.map, this._projection).metersPerPixel
+        // Rendering can precede the coalesced camera callback/network response.
+        this._camera = displayCamera(this.map, this._projection)
+        const scale = this._camera.metersPerPixel
         if (scale === this._metersPerPixel) return
         this._metersPerPixel = scale
         this.emitStats()
     }
     private prepareChunk(chunk: DisplayChunk): { data: Float32Array; origin: [number, number] } {
-        const projection = this._projection!
-        const origin = mercatorPoint(projection, [(chunk.bounds[0] + chunk.bounds[2]) / 2, (chunk.bounds[1] + chunk.bounds[3]) / 2])
-        const data = new Float32Array((chunk.cells.length + chunk.fields.length) * 16)
-        const add = (sample: DisplayCell | DisplayField, field: boolean, index: number) => {
-            const [x0, y0, x1, y1] = sample.bounds
-            const corners: [number, number][] = [[x0, y1], [x1, y1], [x0, y0], [x1, y0]]
-            const offset = index * 16
-            corners.forEach((xy, corner) => {
-                const mercator = mercatorPoint(projection, xy)
-                data[offset + corner * 2] = mercator[0] - origin[0]
-                data[offset + corner * 2 + 1] = mercator[1] - origin[1]
-            })
-            const cell = sample as DisplayCell
-            const summary = sample as DisplayField
-            data.set([sample.level, sample.elevation, sample.landClass, field ? summary.minCellSize : Math.min(x1 - x0, y1 - y0), field ? x1 - x0 : 0, field ? y1 - y0 : cell.deleted ? 1 : 0, (field ? this.fieldSelection(summary) : this.hitBuffer.isHit(cell.id) ? 1 : 0), field ? summary.occupiedFraction : 1], offset + 8)
-        }
-        chunk.cells.forEach((cell, index) => add(cell, false, index))
-        chunk.fields.forEach((field, index) => add(field, true, chunk.cells.length + index))
+        const prepared = this._prepared.get(chunk)
+        if (!prepared) throw new Error('Display chunk geometry is not prepared')
+        const { data, origin } = prepared
+        chunk.cells.forEach((cell, index) => { data[index * 16 + 14] = this.hitBuffer.isHit(cell.id) ? 1 : 0 })
+        chunk.fields.forEach((field, index) => { data[(chunk.cells.length + index) * 16 + 14] = this.fieldSelection(field) })
         return { data, origin }
+    }
+    private camera(): DisplayCamera {
+        return this._camera ??= displayCamera(this.map, this._projection!)
+    }
+    private cameraSignature(camera: DisplayCamera): string {
+        return `${camera.bounds.join(',')}:${camera.metersPerPixel}:${camera.mercator?.scale ?? 'projected'}`
+    }
+    private usableCamera(camera: DisplayCamera): boolean {
+        const current = this.camera()
+        return this.cameraSignature(camera) === this.cameraSignature(current)
+            || !!camera.mercator && !!current.mercator && camera.zoom === current.zoom
     }
     private emitStats(): void {
         const resources = [...(this._buffers?.chunks.values() ?? [])]
@@ -852,6 +912,9 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         return new Promise((resolve, reject) => {
             let timeoutId = 0
             const unsubscribe = this.addRenderSampleListener(sample => {
+                // Async geometry must reach the GPU before an edit benchmark
+                // can accept its frame, even if an older usable view rendered.
+                if (!this.isReady) return
                 if (timeoutId) window.clearTimeout(timeoutId)
                 unsubscribe()
                 resolve(sample)
@@ -882,6 +945,13 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._cameraFrame = undefined
         this._scheduled = undefined
         this._request?.abort()
+        this._geometry?.dispose()
+        this._geometry = undefined
+        this._prepared.clear()
+        this._previousPrepared.clear()
+        this._view = { chunks: [], cellCount: this._view.cellCount }
+        this._source?.clearCache?.()
+        this._camera = undefined
         this._request = undefined
         this._viewPromise = undefined
         this._pendingView = false
@@ -900,6 +970,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._index = undefined
         this._selectionIndex = undefined
         this._projection = undefined
+        this._projectionDefinition = undefined
         this._dataReady = false
         this._loading = false
         this._view = { chunks: [], cellCount: 0 }
@@ -1000,7 +1071,7 @@ function reuseChunks(previous: GridDisplayView, next: GridDisplayView): GridDisp
             : 'occupiedFraction' in a && 'occupiedFraction' in b && a.occupiedFraction === b.occupiedFraction && a.minCellSize === b.minCellSize)
     return { cellCount: next.cellCount, chunks: next.chunks.map(chunk => {
         const old = cached.get(chunk.key)
-        return old && equalBounds(old.bounds, chunk.bounds) && old.cells.length === chunk.cells.length && old.fields.length === chunk.fields.length
+        return old === chunk ? old : old && equalBounds(old.bounds, chunk.bounds) && old.cells.length === chunk.cells.length && old.fields.length === chunk.fields.length
             && old.cells.every((cell, index) => equalSample(cell, chunk.cells[index]))
             && old.fields.every((field, index) => equalSample(field, chunk.fields[index])) ? old : chunk
     }) }

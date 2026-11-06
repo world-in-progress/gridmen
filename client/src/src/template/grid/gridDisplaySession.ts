@@ -1,7 +1,7 @@
 import type { Map as MapboxMap } from 'mapbox-gl'
 import type { GridDisplayMeta, ReadOnlyGridSource } from '@/core/grid/displayTypes'
 import { ResourceNode } from '../scene/scene'
-import { getGridDisplayMeta, inspectGrid, queryGridDisplayBlocks } from '../api/grid'
+import { createGridDisplayBlockCache, getGridDisplayMeta, inspectGrid } from '../api/grid'
 import { errorMessage } from '@/i18n/gridDisplay'
 import { displayBoundsOn4326 } from '@/components/gridDisplay/displayBounds'
 import { waitForDisplayMap } from '@/components/gridDisplay/mapReady'
@@ -16,12 +16,15 @@ async function createGridDisplay(node: ResourceNode, map: MapboxMap, signal: Abo
     const { clgId, topologyLayer } = getOrCreatePerPatchTopology(map, node.nodeInfo, `TopologyLayer:${node.nodeInfo}`)
     await ensureTopologyLayerInitialized(topologyLayer)
     signal.throwIfAborted()
+    const cache = createGridDisplayBlockCache(node.nodeInfo, meta)
     const source: ReadOnlyGridSource = {
         meta,
-        loadBlocks: async (blocks, requestSignal) => {
+        clearCache: () => cache.clear(),
+        reportError: error => reportError(errorMessage(error)),
+        loadBlocks: async (blocks, requestSignal, decode) => {
             const combined = AbortSignal.any([signal, requestSignal])
             try {
-                const view = await queryGridDisplayBlocks(node.nodeInfo, meta, blocks, combined)
+                const view = await cache.query(blocks, combined, decode)
                 if (!combined.aborted) reportError(null)
                 return view
             } catch (error) {

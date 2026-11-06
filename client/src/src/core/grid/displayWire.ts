@@ -37,15 +37,20 @@ export function decodeDisplayBlock(buffer: ArrayBuffer, block: DisplayBlock, met
 }
 
 /** An original cell spanning several requested blocks owns one draw instance. */
-export function displayBlockView(chunks: DisplayChunk[], cellCount: number): GridDisplayView {
+export function displayBlockView(chunks: DisplayChunk[], cellCount: number, previous?: GridDisplayView): GridDisplayView {
+    const cached = new Map(previous?.chunks.map(chunk => [chunk.key, chunk]))
     const originals = new Map<number, DisplayChunk>()
     const result: DisplayChunk[] = []
-    const counts = new Map<number, number>()
-    for (const chunk of chunks) for (const cell of chunk.cells) counts.set(cell.id, (counts.get(cell.id) ?? 0) + 1)
     for (const chunk of chunks) {
+        // Complete hierarchy blocks have disjoint interiors. An original in
+        // several blocks must cross a block boundary, so only those originals
+        // need ID deduplication. Interior cells in reused immutable chunks need
+        // neither a viewport-wide counting pass nor another record scan.
+        if (cached.get(chunk.key) === chunk) { result.push(chunk); continue }
         const inside = chunk.cells.filter(cell => {
             const a = cell.bounds, b = chunk.bounds
-            if (counts.get(cell.id)! > 1 || a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]) {
+            if (a[0] < b[0] || a[1] < b[1] || a[2] > b[2] || a[3] > b[3]
+                || a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]) {
                 if (!originals.has(cell.id)) originals.set(cell.id, { key: `original:${cell.id}`, bounds: a, cells: [cell], fields: [] })
                 return false
             }
@@ -54,5 +59,10 @@ export function displayBlockView(chunks: DisplayChunk[], cellCount: number): Gri
         if (inside.length || chunk.fields.length) result.push(inside.length === chunk.cells.length ? chunk : { ...chunk, cells: inside })
     }
     result.push(...originals.values())
-    return { chunks: result, cellCount }
+    return { chunks: result.map(chunk => {
+        const old = cached.get(chunk.key)
+        return old && old.fields === chunk.fields && old.cells.length === chunk.cells.length
+            && old.cells.every((cell, index) => cell === chunk.cells[index]) ? old
+            : old?.cells.length === 1 && chunk.key.startsWith('original:') && old.cells[0] === chunk.cells[0] ? old : chunk
+    }), cellCount }
 }

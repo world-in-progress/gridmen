@@ -3,6 +3,8 @@ import test from 'node:test'
 import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
 import { displayLayers } from '../src/core/grid/displayHierarchy'
 import type { DisplayBlock, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
+import { GeometryWorker } from './displayGeometryWorker'
+import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
 
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 const view: GridDisplayView = { cellCount: 1, chunks: [{
@@ -12,6 +14,7 @@ const view: GridDisplayView = { cellCount: 1, chunks: [{
 
 class Camera {
     center = 0
+    zoom = 10
     moving = false
     canvas = Object.assign(new EventTarget(), { width: 100, height: 100, clientWidth: 100, clientHeight: 100 })
     listeners = new Map<string, Set<() => void>>()
@@ -20,8 +23,12 @@ class Camera {
     getContainer() { return this.container }
     triggerRepaint() {}
     isMoving() { return this.moving }
-    unproject([x, y]: [number, number]) { return { lng: (x + this.center) * 0.01, lat: -y * 0.01 } }
-    project([lng, lat]: [number, number]) { return { x: lng / 0.01 - this.center, y: -lat / 0.01 } }
+    getProjection() { return { name: 'mercator' } }
+    getPitch() { return 0 }
+    getBearing() { return 0 }
+    getZoom() { return this.zoom }
+    unproject([x, y]: [number, number]) { const scale = 2 ** (this.zoom - 10); return { lng: (x / scale + this.center) * 0.01, lat: MercatorCoordinate.latFromMercatorY(0.5 + y / scale / 36000) } }
+    project([lng, lat]: [number, number]) { const scale = 2 ** (this.zoom - 10); return { x: (lng / 0.01 - this.center) * scale, y: (MercatorCoordinate.mercatorYfromLat(lat) - 0.5) * 36000 * scale } }
     on(event: string, fn: () => void) {
         const listeners = this.listeners.get(event) ?? new Set()
         listeners.add(fn)
@@ -39,6 +46,7 @@ function fixture(t: { after(fn: () => void): void }) {
     const globals = {
         document: { createElement: (tag: string) => tag === 'canvas' ? overlay : indicator }, window: new EventTarget(),
         ResizeObserver: class { observe() {} disconnect() {} },
+        Worker: GeometryWorker,
         requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame },
         cancelAnimationFrame: (id: number) => { frames.delete(id) },
     }
@@ -185,6 +193,28 @@ test('edit invalidation refreshes immediately during motion at the same camera',
     f.camera.emit('moveend')
     await f.frame()
     assert.equal(f.calls.length, 2)
+})
+
+test('a superseded zoom response cannot commit geometry or mark the latest view ready', async t => {
+    const f = fixture(t)
+    await f.ready()
+    f.camera.zoom = 9
+    f.camera.emit('zoom')
+    await f.frame()
+    assert.equal(f.calls.length, 2)
+    f.camera.zoom = 11
+    f.camera.emit('zoom')
+    await f.frame()
+    const before = Reflect.get(f.layer, '_view')
+    f.calls[1].resolve({ chunks: [], cellCount: 12345 })
+    await tick()
+    assert.equal(Reflect.get(f.layer, '_view'), before)
+    assert.equal(f.calls.length, 3)
+    assert.equal(f.layer.isReady, false)
+    f.calls[2].resolve(view)
+    await tick()
+    assert.equal(f.layer.isReady, true)
+    assert.equal(f.maxActive(), 1)
 })
 
 test('hide cancels the active lifecycle and queued cameras cannot restart it', async t => {

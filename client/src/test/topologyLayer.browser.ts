@@ -2,7 +2,8 @@ import { OUTLINE_DARKENING } from '../src/core/grid/displayColors'
 import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
 import PatchCore from '../src/core/grid/patchCore'
 import DisplayIndex from '../src/core/grid/displayIndex'
-import { displayLayers } from '../src/core/grid/displayHierarchy'
+import { displayLayer, displayLayers, nodeBounds, nodeRange } from '../src/core/grid/displayHierarchy'
+import { DisplayBlockCache } from '../src/core/grid/displayBlockCache'
 import type Dispatcher from '../src/core/message/dispatcher'
 import BoundingBox2D from '../src/core/util/boundingBox2D'
 import type { DisplayBlock, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
@@ -23,6 +24,13 @@ function check(name: string, condition: unknown, detail?: unknown): void {
 }
 function near(a: number, b: number, tolerance = 3): boolean { return Math.abs(a - b) <= tolerance }
 function tick(): Promise<void> { return new Promise(resolve => setTimeout(resolve, 0)) }
+async function until(condition: () => boolean): Promise<void> {
+    const deadline = performance.now() + 5000
+    while (!condition()) {
+        if (performance.now() > deadline) throw new Error('Timed out waiting for display worker/lifecycle')
+        await new Promise(resolve => setTimeout(resolve, 5))
+    }
+}
 async function frame(): Promise<void> {
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     await tick()
@@ -40,6 +48,10 @@ class PublicCamera {
     listeners = new Map<string, Set<() => void>>()
     triggerRepaint() {}
     isMoving() { return this.moving }
+    getProjection() { return { name: 'mercator' } }
+    getPitch() { return 0 }
+    getBearing() { return 0 }
+    getZoom() { return Math.log2(SIZE * EARTH / this.span / 512) }
     getCanvas() { return canvas }
     getContainer() { return canvas.parentElement! }
     on(event: string, listener: () => void) {
@@ -156,23 +168,33 @@ async function main() {
     camera.emit('move')
     camera.emit('moveend')
     await frame()
-    requests[requests.length - 1]!.resolve(JSON.parse(JSON.stringify(view)))
+    await until(() => requests.length === 1)
+    let receivedPendingFrame = false
+    const completeViewFrame = layer.waitForBenchmarkRenderFrame(1000)
+    void completeViewFrame.then(() => { receivedPendingFrame = true })
+    draw(layer, camera)
     await tick()
+    check('benchmark frame waits for complete geometry while an older view can still render', !receivedPendingFrame && !layer.isReady)
+    requests[requests.length - 1]!.resolve(JSON.parse(JSON.stringify(view)))
+    await until(() => layer.isReady)
+    draw(layer, camera)
+    await completeViewFrame
     check('unchanged JSON chunks survive camera pan without buffer upload', uploads === 0, uploads)
     gl.bufferData = originalBufferData
     camera.centerX = 0
     layer.hide()
     check('hide frees all chunk allocations but retains palette', layer.getDisplayStats().gpuBytes === 768 && layer.getDisplayStats().visibleChunks === 0, layer.getDisplayStats())
     layer.show()
-    await tick()
+    await until(() => requests.length === 2)
     const shown = requests[requests.length - 1]!
     shown.resolve(view)
-    await tick()
+    await until(() => layer.isReady)
     check('show restores visible chunk', layer.getDisplayStats().gpuBytes === 960, layer.getDisplayStats())
     camera.moving = true
     camera.centerX = 8500
     camera.emit('move')
     await frame()
+    await until(() => requests.length === 3)
     check('pan immediately evicts offscreen chunk', layer.getDisplayStats().gpuBytes === 768, layer.getDisplayStats())
     const stale = requests[requests.length - 1]!
     check('moving pan requests newly visible block geometry before moveend', stale.moving && stale.centerX === 8500
@@ -182,11 +204,11 @@ async function main() {
     await frame()
     check('new camera coalesces behind one uncanceled read request', !stale.signal.aborted && requests[requests.length - 1] === stale)
     stale.resolve(view)
-    await tick()
+    await until(() => requests.length === 4)
     const newest = requests[requests.length - 1]!
     check('completion starts one latest-camera read and keeps offscreen data evicted', !newest.signal.aborted && stale !== newest && layer.getDisplayStats().visibleChunks === 0)
     newest.resolve(farView)
-    await tick()
+    await until(() => layer.isReady)
     check('latest camera reaches ready with the correct visible chunk', layer.isReady && layer.getDisplayStats().gpuBytes === 832 && layer.getDisplayStats().visibleCells === 1, layer.getDisplayStats())
     draw(layer, camera)
     const movingPixel = pixel(250, 224)
@@ -196,12 +218,13 @@ async function main() {
     camera.moving = false
     camera.emit('moveend')
     await frame()
+    await until(() => requests.length === 5)
     const final = requests[requests.length - 1]!
     const uploadAfterPan = gl.bufferData.bind(gl)
     let finalUploads = 0
     gl.bufferData = ((...args: Parameters<typeof gl.bufferData>) => { finalUploads++; uploadAfterPan(...args) }) as typeof gl.bufferData
     final.resolve(JSON.parse(JSON.stringify(farView)))
-    await tick()
+    await until(() => layer.isReady)
     gl.bufferData = originalBufferData
     check('motion termination commits the latest camera and retains unchanged distant buffers', final !== newest && final.centerX === 8700
         && layer.isReady && finalUploads === 0 && maxActiveLoads === 1, { final, finalUploads, maxActiveLoads })
@@ -238,7 +261,7 @@ async function main() {
     core.updateMultiCellRenderInfo({ levels: new Uint8Array([1, 1, 1, 1]), globalIds: new Uint32Array([0, 1, 2, 3]) })
     core.init = callback => callback?.(undefined as never)
     editLayer.patchCore = core
-    await tick()
+    await until(() => editLayer.isReady)
     const originalDrawInstances = gl.drawArraysInstanced.bind(gl)
     let drawnVaos = new Set<WebGLVertexArrayObject>()
     gl.drawArraysInstanced = (...args) => {
@@ -257,6 +280,7 @@ async function main() {
     camera.moving = true
     core.markCellsAsDeleted([0])
     await tick()
+    await until(() => editLayer.isReady)
     draw(editLayer, camera)
     const retainedVaos = [...uneditedVaos].filter(vao => drawnVaos.has(vao)).length
     check('forced edit during motion uploads only the changed chunk and retains distant VAO identity',
@@ -268,22 +292,27 @@ async function main() {
     gl.bufferData = editBufferData
     core.restoreCells([0])
     await tick()
+    await until(() => editLayer.isReady)
     camera.moving = false
     editLayer.executePickCells('brush', true, [64, 448])
     check('patch brush selects original storage id', editLayer.hitBuffer.all.join(',') === '0', editLayer.hitBuffer.all)
     editLayer.executeSubdivideCells()
     await tick()
+    await until(() => editLayer.isReady)
     check('subdivision preserves editor selection and loaded-cell growth', core.cellNum === 7 && editLayer.hitBuffer.size === 4, { count: core.cellNum, selected: editLayer.hitBuffer.all })
     const hanging = await editLayer.inspectAt([320, 384])
     check('patch inspect returns real hanging neighbors at current storage ids', hanging.cell?.level === 1 && hanging.neighbors.filter(n => n.side === 'west').length === 2 && hanging.neighbors.every(n => n.edgeIds.length > 0), hanging)
     editLayer.executeDeleteCells()
     await tick()
+    await until(() => editLayer.isReady)
     check('delete marks selected real cells and retains sparse selection', editLayer.hitBuffer.all.every(id => core.isDeleted(id)) && editLayer.hitBuffer.size === 4)
     editLayer.executeRecoverCells()
     await tick()
+    await until(() => editLayer.isReady)
     check('restore clears real deletion flags', editLayer.hitBuffer.all.every(id => !core.isDeleted(id)) && editLayer.hitBuffer.size === 4)
     editLayer.executeMergeCells()
     await tick()
+    await until(() => editLayer.isReady)
     check('merge restores parent and storage map after tail compaction', core.cellNum === 4 && core.getStorageId(1, 0) !== undefined && editLayer.hitBuffer.size === 1, { count: core.cellNum, selected: editLayer.hitBuffer.all })
     editLayer.executeClearSelection()
     editLayer.executePickCells('box', true, [0, 256], [256, 512])
@@ -296,6 +325,7 @@ async function main() {
     for (const operation of ['pick', 'subdivide', 'merge', 'delete', 'recover'] as const) {
         const task = editLayer.runBenchmarkEditOperation(operation, 17)
         await tick()
+        await until(() => editLayer.isReady)
         draw(editLayer, camera)
         const report = await task
         check(`benchmark ${operation} completes with original-cell metadata`, report.operation === operation && report.cellCountAfter === core.cellNum && report.selectedCellCount > 0, report)
@@ -362,6 +392,7 @@ async function main() {
     camera.centerX = 1
     camera.emit('move')
     await frame()
+    await until(() => contextRequests.length === 1)
     camera.centerX = 2
     camera.emit('move')
     canvas.dispatchEvent(new Event('webglcontextlost'))
@@ -369,14 +400,14 @@ async function main() {
         && restoringLayer.getDisplayStats().gpuBytes === 0 && !restoringLayer.isReady, restoringLayer.getDisplayStats())
     canvas.dispatchEvent(new Event('webglcontextrestored'))
     await restoringLayer.whenInitialized()
-    await tick()
+    await until(() => contextRequests.length === 2)
     contextRequests[0].resolve({ chunks: [], cellCount: -1 })
     await tick()
     check('late canceled camera response cannot finish or replace the restored lifecycle', contextRequests.length === 2
-        && !contextRequests[1].signal.aborted && !restoringLayer.isReady && restoringLayer.getDisplayStats().gpuBytes === 960,
+        && !contextRequests[1].signal.aborted && !restoringLayer.isReady && restoringLayer.getDisplayStats().gpuBytes === 768,
         { requests: contextRequests.length, stats: restoringLayer.getDisplayStats() })
     contextRequests[1].resolve(view)
-    await tick()
+    await until(() => restoringLayer.isReady)
     draw(restoringLayer, camera)
     check('restored context commits the current camera while still moving', camera.isMoving() && restoringLayer.isReady
         && restoringLayer.getDisplayStats().visibleCells === 1 && pixel(160, 224)[3] === 255, restoringLayer.getDisplayStats())
@@ -489,6 +520,7 @@ async function main() {
                     thresholdCamera.emit('move')
                     thresholdCamera.emit('zoom')
                     await frame()
+                    if (currentPixels === 3.999) await until(() => pendingViews.length === 1)
                 }
                 const readsBeforeStableFrame = geometryReads, uploadsBeforeStableFrame = cameraUploads
                 thresholdCamera.emit('move')
@@ -500,7 +532,7 @@ async function main() {
                 gl.bufferData = scaleBufferData
                 for (const { cell, bounds } of watched) Object.defineProperty(cell, 'bounds', { configurable: true, writable: true, value: bounds })
                 pendingViews[0].resolve(thresholdIndex.queryBlocks(pendingViews[0].blocks))
-                await tick()
+                await until(() => pendingViews.length === 2)
                 draw(thresholdLayer, thresholdCamera)
                 const scaleAfterReply = currentShaderScale()
                 check(`DPR ${dpr} stale zoom reply cannot restore its old shader scale`, Math.abs(scaleAfterReply - uniformSide / 16) < 0.00001, scaleAfterReply)
@@ -508,7 +540,7 @@ async function main() {
                 thresholdCamera.emit('moveend')
                 await frame()
                 pendingViews[1].resolve(thresholdIndex.queryBlocks(pendingViews[1].blocks))
-                await tick()
+                await until(() => thresholdLayer.isReady)
                 check(`DPR ${dpr} final zoom view drains once and becomes ready`, thresholdLayer.isReady && pendingViews.length === 2, { stats: thresholdLayer.getDisplayStats(), requests: pendingViews.length })
                 movingScaleMeasurements.push({ dpr, scales, renderGeometryReads, renderUploads, cameraUploads, scaleAfterReply, requests: pendingViews.length })
             }
@@ -525,8 +557,46 @@ async function main() {
     check('the same CSS field viewport selects identical nodes and GPU records at DPR 1 and 2',
         geometry.length === 2 && JSON.stringify(geometry[0]) === JSON.stringify(geometry[1]), logicalFieldViews)
     measurements.cssFieldViews = logicalFieldViews
-
-
+    const wireLayer = new TopologyLayer(camera as never)
+    await wireLayer.initialize(camera as never, gl)
+    let reads = 0, transferred = true
+    const cache = new DisplayBlockCache(source.meta, async (blocks, signal, decode) => {
+        signal.throwIfAborted()
+        if (!decode) throw new Error('Expected production worker decoder')
+        reads += blocks.length
+        const buffers = blocks.map(block => {
+            const bounds = nodeBounds(displayLayer(source.meta.displayLayers, block.blockLayer), block.x, block.y, source.meta.alignment_origin)
+            const layer = displayLayer(source.meta.displayLayers, block.displayLayer)
+            const [x, y] = nodeRange(layer, bounds, source.meta.alignment_origin)
+            const sample = nodeBounds(layer, x, y, source.meta.alignment_origin)
+            const occupied = (sample[2] - sample[0]) * (sample[3] - sample[1]) * 0.5
+            const buffer = new ArrayBuffer(80), data = new DataView(buffer)
+            data.setUint32(0, 0x47444e34, false); data.setUint32(4, 1, true)
+            sample.forEach((value, i) => data.setFloat64(16 + i * 8, value, true))
+            data.setFloat64(48, occupied, true); data.setFloat64(56, occupied * 9.25, true)
+            data.setFloat64(64, 2, true); data.setUint32(72, 2, true); data.setUint32(76, 7, true)
+            return { block, buffer }
+        })
+        const chunks = await decode(buffers)
+        transferred &&= buffers.every(item => item.buffer.byteLength === 0)
+        return chunks
+    })
+    let wireView!: GridDisplayView
+    await wireLayer.setReadOnlySource({ ...source, clearCache: () => cache.clear(),
+        async loadBlocks(blocks, signal, decode) { wireView = await cache.query(blocks, signal, decode); return wireView } })
+    check('real module worker decodes transferred GDN4 buffers in a finite block stream', transferred && reads > 0 && wireView.chunks.length > 0)
+    check('worker-decoded summaries retain exact minc, occupancy and attributes', wireView.chunks.every(chunk => chunk.fields.every(field =>
+        field.minCellSize === 2 && field.occupiedFraction === 0.5 && field.elevation === 9.25 && field.landClass === 7 && field.level === 2)))
+    const cachedView = wireView, coldReads = reads
+    let warmUploads = 0
+    gl.bufferData = ((...args: Parameters<typeof gl.bufferData>) => { warmUploads++; originalBufferData(...args) }) as typeof gl.bufferData
+    wireLayer.updateGPUCell()
+    await tick()
+    await until(() => wireLayer.isReady)
+    gl.bufferData = originalBufferData
+    check('warm immutable wire view performs no reads, decodes, geometry uploads or identity replacement',
+        wireView === cachedView && reads === coldReads && warmUploads === 0, { reads, coldReads, warmUploads })
+    wireLayer.remove(camera as never, gl)
 }
 
 main().catch(error => errors.push(error instanceof Error ? error.stack ?? error.message : String(error))).finally(() => {

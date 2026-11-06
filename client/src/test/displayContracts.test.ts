@@ -3,7 +3,9 @@ import test from 'node:test'
 import { elevationColor, ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, OUTLINE_DARKENING } from '../src/core/grid/displayColors'
 import { validateDisplayMeta, validateDisplayView } from '../src/core/grid/displayValidation'
 import { displayLayers } from '../src/core/grid/displayHierarchy'
-import { chunkMatrix } from '../src/views/mapView/topology/displayProjection'
+import { chunkMatrix, displayCamera } from '../src/views/mapView/topology/displayProjection'
+import proj4 from 'proj4'
+import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
 import type { GridDisplayMeta, GridDisplayView } from '../src/core/grid/displayTypes'
 
 test('shared elevation colors clamp values, interpolate, and handle constant ranges', () => {
@@ -38,4 +40,23 @@ test('chunk origin cancels large zoom translation before float conversion', () =
     const relative = chunkMatrix(matrix, origin)
     assert.equal(relative[12], 0.25)
     assert.equal(relative[13], -0.75)
+})
+
+test('Mercator invariants apply only to the public flat camera and the completed globe transition', () => {
+    let zoom = 10, pitch = 0, bearing = 0, name = 'mercator'
+    const map = {
+        getCanvas: () => ({ clientWidth: 100, clientHeight: 100 }),
+        getProjection: () => ({ name }), getZoom: () => zoom, getPitch: () => pitch, getBearing: () => bearing,
+        unproject: ([x, y]: [number, number]) => ({ lng: x * 0.01, lat: MercatorCoordinate.latFromMercatorY(0.5 + y / 36000) }),
+    }
+    const projection = proj4('EPSG:4326', 'EPSG:4326')
+    assert.ok(displayCamera(map as never, projection).mercator)
+    for (const [p, b] of [[1, 0], [0, 90]]) {
+        pitch = p; bearing = b
+        assert.equal(displayCamera(map as never, projection).mercator, undefined)
+    }
+    pitch = 0; bearing = 0; name = 'globe'; zoom = 5.999
+    assert.equal(displayCamera(map as never, projection).mercator, undefined)
+    zoom = 6
+    assert.ok(displayCamera(map as never, projection).mercator)
 })
