@@ -351,7 +351,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
             while (this._pendingView && this._dataReady && this.visible && !this._removed && generation === this._generation) {
                 const camera = displayCamera(this.map, this._projection!)
                 this._metersPerPixel = camera.metersPerPixel
-                const signature = `${camera.bounds.join(',')}:${camera.metersPerPixel}:${camera.rasterRatio}`
+                const signature = `${camera.bounds.join(',')}:${camera.metersPerPixel}`
                 const force = this._forceView
                 this._pendingView = false
                 this._forceView = false
@@ -365,7 +365,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     const origin = this._source?.meta.alignment_origin ?? this._index!.origin
                     const blocks = signature === this._lastCamera ? this._blocks : selectDisplayBlocks(layers, origin, camera.bounds, point => {
                         const screen = this.map.project(this._projection!.forward(point) as [number, number])
-                        return [screen.x * camera.rasterRatio, screen.y * camera.rasterRatio]
+                        return [screen.x, screen.y]
                     })
                     const view = this._source
                         ? await this._source.loadBlocks(blocks, request.signal)

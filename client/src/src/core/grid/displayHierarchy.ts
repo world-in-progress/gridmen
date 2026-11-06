@@ -143,7 +143,7 @@ export function blockKey(block: DisplayBlock): string {
 }
 
 /** Partition visible space into hierarchical blocks, then choose each block's finest valid layer.
- * Projection is in actual raster pixels. Only the four corners of a node are projected.
+ * Projection is in CSS pixels. Only the four corners of a node are projected.
  */
 export function selectDisplayBlocks(layers: DisplayLayer[], origin: [number, number], viewport: Bounds, project: ProjectPoint): DisplayBlock[] {
     const result: DisplayBlock[] = []

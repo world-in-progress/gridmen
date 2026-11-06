@@ -6,7 +6,6 @@ import { MercatorCoordinate } from '../../../core/math/mercatorCoordinate'
 export interface DisplayCamera {
     bounds: Bounds
     metersPerPixel: number
-    rasterRatio: number
 }
 
 export function gridPoint(map: MapboxMap, projection: Converter, point: [number, number]): [number, number] {
@@ -29,7 +28,7 @@ export function displayCamera(map: MapboxMap, projection: Converter): DisplayCam
         return Math.hypot(adjacent[0] - center[0], adjacent[1] - center[1])
     }))
     if (!(metersPerPixel > 0) || !Number.isFinite(metersPerPixel)) throw new Error('Invalid camera scale')
-    return { bounds, metersPerPixel, rasterRatio: canvas.width / width }
+    return { bounds, metersPerPixel }
 }
 
 export function mercatorPoint(projection: Converter, point: [number, number]): [number, number] {

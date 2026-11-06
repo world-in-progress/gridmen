@@ -401,10 +401,11 @@ async function main() {
     thresholdIndex.load(uniformCells)
     const thresholdMeasurements = []
     const movingScaleMeasurements = []
+    const logicalFieldViews: { dpr: number; fields: number; chunks: number; minNodeCssPixels: number; gpuBytes: number }[] = []
     for (const dpr of [1, 2]) {
         canvas.width = SIZE * dpr; canvas.height = SIZE * dpr
         const pair = []
-        for (const cellPixels of [3.999, 4.001, 16]) {
+        for (const cellPixels of [3.999, 4.001, 16, 0.5]) {
             const thresholdCamera = new PublicCamera()
             thresholdCamera.span = SIZE * uniformSide / cellPixels
             const thresholdLayer = new TopologyLayer(thresholdCamera as never)
@@ -431,17 +432,25 @@ async function main() {
             draw(thresholdLayer, thresholdCamera)
             const palette = Array.from(thresholdLayer.paletteColorList.slice(3, 6))
             const channel = palette.indexOf(Math.max(...palette)), base = palette[channel]
-            const extent = 384 * dpr, pixels = new Uint8Array(extent * extent * 4)
-            gl.readPixels(64 * dpr, 64 * dpr, extent, extent, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+            const extent = (cellPixels === 0.5 ? 32 : 384) * dpr, pixels = new Uint8Array(extent * extent * 4)
+            const margin = (SIZE * dpr - extent) / 2
+            gl.readPixels(margin, margin, extent, extent, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
             let sum = 0
             for (let i = channel; i < pixels.length; i += 4) sum += pixels[i]
             const meanDarkening = 1 - sum / (extent * extent * base)
-            const expected = OUTLINE_DARKENING * (1 - (1 - 1 / cellPixels) ** 2)
+            const expected = OUTLINE_DARKENING * (1 - (1 - Math.min(1, 1 / cellPixels)) ** 2)
             const stats = thresholdLayer.getDisplayStats()
             check(`DPR ${dpr} uniform ${cellPixels}px shader matches centered-line coverage`, Math.abs(meanDarkening - expected) < 0.01,
                 { meanDarkening, expected, base, stats })
             check(`DPR ${dpr} uniform ${cellPixels}px field indicator matches transition`, stats.fieldMode === (cellPixels < 4), stats)
             pair.push({ cellPixels, meanDarkening, expected, stats })
+            if (cellPixels === 0.5) {
+                const minNodeCssPixels = Math.min(...loadedView.chunks.flatMap(chunk => chunk.fields.map(field =>
+                    Math.min(field.bounds[2] - field.bounds[0], field.bounds[3] - field.bounds[1]) / (thresholdCamera.span / SIZE))))
+                check(`DPR ${dpr} field nodes keep the 1.5 CSS pixel minimum`, stats.fieldSamples > 0 && minNodeCssPixels >= 1.5,
+                    { minNodeCssPixels, stats })
+                logicalFieldViews.push({ dpr, fields: stats.fieldSamples, chunks: stats.visibleChunks, minNodeCssPixels, gpuBytes: stats.gpuBytes })
+            }
             if (cellPixels === 16) {
                 holdCamera = true
                 thresholdCamera.moving = true
@@ -512,6 +521,10 @@ async function main() {
     canvas.width = SIZE; canvas.height = SIZE
     measurements.uniformThresholds = thresholdMeasurements
     measurements.movingScales = movingScaleMeasurements
+    const geometry = logicalFieldViews.map(({ fields, chunks, minNodeCssPixels, gpuBytes }) => ({ fields, chunks, minNodeCssPixels, gpuBytes }))
+    check('the same CSS field viewport selects identical nodes and GPU records at DPR 1 and 2',
+        geometry.length === 2 && JSON.stringify(geometry[0]) === JSON.stringify(geometry[1]), logicalFieldViews)
+    measurements.cssFieldViews = logicalFieldViews
 
 
 }
