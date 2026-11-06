@@ -113,13 +113,20 @@ export function projectedCorners(bounds: Bounds, project: ProjectPoint): [number
  * required radius, a feasible circle can prove acceptance before solving the LP.
  */
 export function projectedRadius(bounds: Bounds, project: ProjectPoint, required = Infinity): number {
-    const corners = projectedCorners(bounds, project)
+    return projectedCornerRadius(projectedCorners(bounds, project), required)
+}
+
+/** Same supporting-line solve, also used by scans sharing exact adjacent
+ * vertices. A caller may reuse its scratch arrays between sequential nodes.
+ */
+export function projectedCornerRadius(corners: [number, number][], required = Infinity,
+    scratch = { nx: [0, 0, 0, 0], ny: [0, 0, 0, 0], offsets: [0, 0, 0, 0] }): number {
     // Cancel world/screen translation before solving the supporting lines. This
     // also makes small Mercator nodes stable without camera-sized offsets.
     const ox = corners[0][0], oy = corners[0][1]
     const cx = ((corners[1][0] - ox) + (corners[2][0] - ox) + (corners[3][0] - ox)) / 4
     const cy = ((corners[1][1] - oy) + (corners[2][1] - oy) + (corners[3][1] - oy)) / 4
-    const nx = [0, 0, 0, 0], ny = [0, 0, 0, 0], offsets = [0, 0, 0, 0]
+    const { nx, ny, offsets } = scratch
     let radius = Infinity
     for (let i = 0; i < 4; i++) {
         const p = corners[i]

@@ -7,6 +7,7 @@ import { build } from 'esbuild'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const evidence = resolve(process.env.GRID_TEST_EVIDENCE ?? resolve(root, '../../.verification/topology-browser'))
+const hardware = process.env.GRID_TEST_ANGLE === 'metal'
 await mkdir(evidence, { recursive: true })
 await build({ entryPoints: [resolve(root, 'test/topologyLayer.browser.ts')], bundle: true, platform: 'browser',
   format: 'esm', target: 'chrome120', outfile: resolve(evidence, 'topologyLayer.bundle.js'),
@@ -28,8 +29,9 @@ const server = createServer(async (req, res) => {
 })
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
-  '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
-  '--disable-extensions', '--disable-sync', '--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader',
+  ...(hardware ? ['--use-angle=metal'] : ['--headless=new', '--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader']),
+  '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
+  '--disable-extensions', '--disable-sync',
   '--disable-gpu-sandbox', '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
   '--disable-backgrounding-occluded-windows', '--remote-debugging-port=0', '--window-size=640,640',
   `--user-data-dir=${resolve(evidence, 'chrome-profile')}`, 'about:blank',
@@ -76,6 +78,7 @@ try {
   const { targetId } = await send('Target.createTarget', { url: 'about:blank' })
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true })
   await send('Runtime.enable', {}, sessionId)
+  if (hardware) await writeFile(resolve(evidence, 'gpu-info.json'), JSON.stringify(await send('SystemInfo.getInfo'), null, 2) + '\n')
   await send('Page.enable', {}, sessionId)
   await send('Page.bringToFront', {}, sessionId)
   await send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/` }, sessionId)
