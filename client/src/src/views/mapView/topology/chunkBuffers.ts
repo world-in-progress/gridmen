@@ -15,7 +15,6 @@ export interface ChunkBuffer {
     minOriginalCellSize: number
     bytes: number
     source: DisplayChunk
-    revision: unknown
 }
 
 export class ChunkBuffers {
@@ -26,7 +25,6 @@ export class ChunkBuffers {
 
     sync(
         visible: DisplayChunk[],
-        revision: (key: string) => unknown,
         prepare: (chunk: DisplayChunk) => { data: Float32Array; origin: [number, number] },
     ): void {
         const keys = new Set(visible.map(chunk => chunk.key))
@@ -36,14 +34,7 @@ export class ChunkBuffers {
 
         for (const chunk of visible) {
             const old = this.chunks.get(chunk.key)
-            let nextRevision: unknown
-            try {
-                nextRevision = revision(chunk.key)
-            } catch (error) {
-                this.remove(chunk.key)
-                throw error
-            }
-            if (old?.source === chunk && Object.is(old.revision, nextRevision)) continue
+            if (old?.source === chunk) continue
 
             // Drop the old resource first so a failed preparation cannot draw stale data.
             this.remove(chunk.key)
@@ -51,14 +42,10 @@ export class ChunkBuffers {
             if (data.length % FLOATS_PER_INSTANCE !== 0) {
                 throw new Error(`Chunk ${chunk.key} has an incomplete instance record`)
             }
-            const resource = this.upload(chunk, nextRevision, data, origin)
+            const resource = this.upload(chunk, data, origin)
             this.chunks.set(chunk.key, resource)
             this.gpuBytes += resource.bytes
         }
-    }
-
-    invalidate(keys: Iterable<string>): void {
-        for (const key of keys) this.remove(key)
     }
 
     clear(): void {
@@ -76,7 +63,6 @@ export class ChunkBuffers {
 
     private upload(
         source: DisplayChunk,
-        revision: unknown,
         data: Float32Array,
         origin: [number, number],
     ): ChunkBuffer {
@@ -117,7 +103,7 @@ export class ChunkBuffers {
             buffer, vao, origin, count: data.length / FLOATS_PER_INSTANCE,
             visibleCells: source.cells.length, fieldSamples: source.fields.length,
             minOriginalCellSize: source.cells.reduce((minimum, cell) => Math.min(minimum, cellSide(cell)), Infinity),
-            bytes: data.byteLength, source, revision,
+            bytes: data.byteLength, source,
         }
     }
 }

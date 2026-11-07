@@ -1,3 +1,6 @@
+import type { DisplayViewCache } from './displayBlockCache'
+import type { PreparedDisplayChunk } from './displayGeometryEngine'
+
 /** Shared display contract. Geometry is always expressed in the grid CRS. */
 export type Bounds = [number, number, number, number]
 
@@ -30,11 +33,7 @@ export interface GridDisplayMeta {
     epsg: number
     bounds: Bounds
     grid_info: [number, number][]
-    level_info: { width: number; height: number }[]
-    subdivide_rules: [number, number][]
     alignment_origin: [number, number]
-    cellCount: number
-    attributes: DisplayAttribute[]
     elevationRange: [number, number]
     landClasses: number[]
 }
@@ -66,8 +65,6 @@ export interface DisplayChunk {
 
 export interface GridDisplayView {
     chunks: DisplayChunk[]
-    /** Number of original cells, including those represented by summaries. */
-    cellCount: number
 }
 
 export interface GridInspection {
@@ -81,14 +78,17 @@ export interface GridInspection {
 
 export interface ReadOnlyGridSource {
     meta: GridDisplayMeta
-    loadBlocks(blocks: DisplayBlock[], signal: AbortSignal, decode?: DisplayBlockDecoder): Promise<GridDisplayView>
-    clearCache?(): void
-    retainBlocks?(blocks: DisplayBlock[], stopped: boolean): void
-    reportError?(error: unknown): void
+    cache: DisplayViewCache
+    loadBlocks(blocks: DisplayBlock[], signal: AbortSignal, decode: DisplayBlockDecoder): Promise<GridDisplayView>
     inspect(x: number, y: number): Promise<GridInspection>
 }
 
-export type DisplayBlockDecoder = (blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]) => Promise<DisplayChunk[]>
+export interface DecodedDisplayBlock {
+    chunks: DisplayChunk[]
+    prepared: (PreparedDisplayChunk | undefined)[]
+}
+
+export type DisplayBlockDecoder = (blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]) => Promise<DecodedDisplayBlock[]>
 
 export interface DisplayStats {
     /** Bytes allocated by this renderer's buffers and textures. */

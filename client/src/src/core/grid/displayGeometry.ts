@@ -50,8 +50,9 @@ export class DisplayGeometrySelector {
     constructor(private readonly layers: DisplayLayer[], private readonly origin: [number, number], private readonly project: ProjectPoint,
         private readonly projectIsCached = false) {}
 
-    select(viewport: Bounds, pixelsPerUnit: number) {
+    select(viewport: Bounds, pixelsPerUnit: number, requiredRadius = NODE_RADIUS) {
         if (!(pixelsPerUnit > 0) || !Number.isFinite(pixelsPerUnit)) throw new Error('Invalid display projection scale')
+        if (!(requiredRadius > 0) || !Number.isFinite(requiredRadius)) throw new Error('Invalid display node radius')
         const usedNodes = new Set<string>(), usedMinima = new Set<string>()
         const geometry = new Map<string, DisplayGeometryFootprint>()
         const quad = (bounds: Bounds) => {
@@ -83,7 +84,7 @@ export class DisplayGeometrySelector {
             }
             return value
         }
-        const fits = (radius: number) => radius * pixelsPerUnit + 1e-9 >= NODE_RADIUS
+        const fits = (radius: number) => radius * pixelsPerUnit + 1e-9 >= requiredRadius
         const rangeFits = (index: number, x0: number, y0: number, x1: number, y1: number) => {
             const key = `${index}:${x0},${y0},${x1},${y1}`
             usedMinima.add(key)
@@ -110,7 +111,7 @@ export class DisplayGeometrySelector {
                     bottom[i + 1] ??= project([xs[i + 1], bottomY])
                     top[i] ??= project([xs[i], topY])
                     top[i + 1] = project([xs[i + 1], topY])
-                    radius = Math.min(radius, projectedCornerRadius([bottom[i], bottom[i + 1], top[i + 1], top[i]], (NODE_RADIUS - 1e-9) / pixelsPerUnit, scratch))
+                    radius = Math.min(radius, projectedCornerRadius([bottom[i], bottom[i + 1], top[i + 1], top[i]], (requiredRadius - 1e-9) / pixelsPerUnit, scratch))
                     if (!fits(radius)) {
                         const rejectedBounds: Bounds = old && old.rejectedRadius <= radius ? old.rejectedBounds! : [xs[i], bottomY, xs[i + 1], topY]
                         this.minima.set(key, { acceptedRadius: old?.acceptedRadius ?? 0, rejectedRadius: Math.min(old?.rejectedRadius ?? Infinity, radius), rejectedBounds })

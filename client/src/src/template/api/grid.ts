@@ -1,41 +1,44 @@
 import { decodeNodeInfo } from './utils'
-import type { DisplayBlock, DisplayBlockDecoder, GridDisplayMeta, GridDisplayView, GridInspection } from '@/core/grid/displayTypes'
+import type { DisplayBlock, DisplayBlockDecoder, GridDisplayMeta, GridInspection } from '@/core/grid/displayTypes'
 import type { BaseResponse } from './types'
-import { decodeDisplayBlock, displayBlockView } from '@/core/grid/displayWire'
-import { gridDisplayI18n } from '@/i18n/gridDisplay'
+import i18n from '@/i18n'
+import { validateDisplayMeta } from '@/core/grid/displayValidation'
+import { displayLayers } from '@/core/grid/displayHierarchy'
 import { DisplayBlockCache } from '@/core/grid/displayBlockCache'
 
 const API_PREFIX = `/api/grid`
+export class GridDisplayHttpError extends Error {
+    constructor(public readonly status: number, message: string) { super(message); this.name = 'GridDisplayHttpError' }
+}
 async function requestGridDisplay(nodeInfo: string, path: string, options?: RequestInit): Promise<Response> {
     const { address, nodeKey } = decodeNodeInfo(nodeInfo)
     const response = await fetch(`${address}${API_PREFIX}/${encodeURIComponent(nodeKey)}/display/${path}`, options)
     if (!response.ok) {
         const detail = await response.text()
-        throw new Error(gridDisplayI18n.t('httpError', { path, status: response.status, detail: detail ? ` — ${detail}` : '' }))
+        throw new GridDisplayHttpError(response.status, i18n.t('gridDisplay:httpError', { path, status: response.status, detail: detail ? ` — ${detail}` : '' }))
     }
     return response
 }
 
-export const getGridDisplayMeta = async (nodeInfo: string, signal?: AbortSignal): Promise<GridDisplayMeta> =>
-    (await requestGridDisplay(nodeInfo, 'meta', { signal })).json()
+export async function getGridDisplayMeta(nodeInfo: string, signal?: AbortSignal): Promise<GridDisplayMeta> {
+    const meta: unknown = await (await requestGridDisplay(nodeInfo, 'meta', { signal })).json()
+    validateDisplayMeta(meta)
+    return { ...meta, displayLayers: displayLayers(meta.bounds, meta.grid_info, meta.alignment_origin, 1) }
+}
 
-async function loadGridDisplayChunks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal?: AbortSignal, decode?: DisplayBlockDecoder) {
+async function loadGridDisplayChunks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal: AbortSignal, decode: DisplayBlockDecoder) {
     const responses = await Promise.all(blocks.map(async block => {
         const path = `nodes/${encodeURIComponent(meta.revision)}/${block.blockLayer}/${block.x}/${block.y}/${block.displayLayer}`
         const response = await requestGridDisplay(nodeInfo, path, { signal })
         return { block, buffer: await response.arrayBuffer() }
     }))
-    signal?.throwIfAborted()
-    return decode ? decode(responses) : responses.map(({ buffer, block }) => decodeDisplayBlock(buffer, block, meta))
+    signal.throwIfAborted()
+    return decode(responses)
 }
 
 export function createGridDisplayBlockCache(nodeInfo: string, meta: GridDisplayMeta): DisplayBlockCache {
     // The closure owns source URL, immutable revision, CRS, and lattice identity.
-    return new DisplayBlockCache(meta, (blocks, signal, decode) => loadGridDisplayChunks(nodeInfo, meta, blocks, signal, decode))
-}
-
-export async function queryGridDisplayBlocks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal?: AbortSignal): Promise<GridDisplayView> {
-    return displayBlockView(await loadGridDisplayChunks(nodeInfo, meta, blocks, signal), meta.cellCount)
+    return new DisplayBlockCache((blocks, signal, decode) => loadGridDisplayChunks(nodeInfo, meta, blocks, signal, decode))
 }
 
 export const inspectGrid = async (nodeInfo: string, x: number, y: number, signal?: AbortSignal): Promise<GridInspection> =>

@@ -1,7 +1,6 @@
-import type { DisplayGeometryEngine, PreparedDisplayChunk } from '../grid/displayGeometryEngine'
+import type { DisplayGeometryResult, PreparedDisplayChunk } from '../grid/displayGeometryEngine'
 import type { ValidatedDisplayBlockBuffer } from '../grid/displayWire'
-
-export type DisplayGeometryResult = ReturnType<DisplayGeometryEngine['run']>
+export type { DisplayGeometryResult } from '../grid/displayGeometryEngine'
 
 /** Decode returns the validated input buffer, never the engine's chunk graph.
  * The client restores that one block before acknowledging the next input.
@@ -9,7 +8,7 @@ export type DisplayGeometryResult = ReturnType<DisplayGeometryEngine['run']>
 export interface DisplayGeometryReply {
     id: number
     result?: DisplayGeometryResult
-    part?: { prepared?: PreparedDisplayChunk[] }
+    part?: { prepared: (PreparedDisplayChunk | undefined)[] }
     decoded?: ValidatedDisplayBlockBuffer
     done?: boolean
     error?: string

@@ -1,8 +1,8 @@
 import proj4 from 'proj4'
 import type { ProjectionDefinition } from 'proj4/dist/lib/defs'
-import type { Bounds, DisplayBlock, DisplayChunk, DisplayLayer, GridDisplayMeta } from './displayTypes'
+import type { Bounds, DecodedDisplayBlock, DisplayBlock, DisplayChunk, DisplayLayer, GridDisplayMeta } from './displayTypes'
 import { DisplayGeometrySelector, visitDisplayGeometry } from './displayGeometry'
-import { decodeDisplayBlock } from './displayWire'
+import { canonicalDisplayChunks, decodeDisplayBlock } from './displayWire'
 import { MercatorCoordinate } from '../math/mercatorCoordinate'
 
 export interface DisplayGeometryConfig {
@@ -18,12 +18,18 @@ export interface PreparedDisplayChunk {
     corners: [number, number][]
     worldBounds: Bounds
 }
+export interface DisplayGeometryResult {
+    blocks?: DisplayBlock[]
+    selection?: number
+    prepared?: PreparedDisplayChunk[]
+    decodedBlocks?: DecodedDisplayBlock[]
+}
 export type DisplayGeometryTask =
     | { type: 'reset' }
-    | { type: 'select'; bounds: Bounds; scale: number }
+    | { type: 'select'; bounds: Bounds; scale: number; requiredRadius?: number }
     | { type: 'publish'; selection: number; stopped: boolean }
     | { type: 'prepare'; chunks: DisplayChunk[] }
-    | { type: 'decode'; blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]; meta: GridDisplayMeta }
+    | { type: 'decode'; blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]; meta: GridDisplayMeta; knownOriginals?: number[] }
 
 interface DisplayVertex { x: number; y: number; world?: [number, number]; references: number }
 interface VertexColumn { points: Map<number, DisplayVertex> }
@@ -45,7 +51,7 @@ export class DisplayGeometryEngine {
             ([x, y]) => this.worldPoint(x, y), true)
     }
 
-    run(task: DisplayGeometryTask) {
+    run(task: DisplayGeometryTask): DisplayGeometryResult {
         if (task.type === 'reset') {
             this.points.clear(); this.geometryGroups.clear(); this.transient = []
             return {}
@@ -57,13 +63,34 @@ export class DisplayGeometryEngine {
         }
         if (task.type === 'select') {
             try {
-                const blocks = this.selector.select(task.bounds, task.scale)
+                const blocks = this.selector.select(task.bounds, task.scale, task.requiredRadius)
                 return { blocks, selection: this.selector.selectionId }
             } finally { this.syncVertexReferences() }
         }
         if (task.type === 'prepare') return { prepared: this.prepare(task.chunks) }
-        const chunks = task.blocks.map(({ buffer, block }) => decodeDisplayBlock(buffer, block, task.meta))
-        return { chunks, prepared: this.prepare(chunks) }
+        return { decodedBlocks: this.decodeBlocks(task.blocks, task.meta, new Set(task.knownOriginals)) }
+    }
+
+    /** `seenOriginals` belongs to one decode RPC and spans its acknowledged
+     * input blocks. It is seeded with prepared originals in the view cache.
+     */
+    decodeBlocks(blocks: { block: DisplayBlock; buffer: ArrayBuffer }[], meta: GridDisplayMeta, seenOriginals: Set<number>): DecodedDisplayBlock[] {
+        try {
+            return blocks.map(({ buffer, block }) => {
+                const chunks = canonicalDisplayChunks(decodeDisplayBlock(buffer, block, meta))
+                const prepared = chunks.map(chunk => {
+                    if (chunk.key.startsWith('original:')) {
+                        const id = chunk.cells[0].id
+                        if (seenOriginals.has(id)) return undefined
+                        const result = this.prepareChunk(chunk)
+                        seenOriginals.add(id)
+                        return result
+                    }
+                    return this.prepareChunk(chunk)
+                })
+                return { chunks, prepared }
+            })
+        } finally { this.pruneTransient() }
     }
 
     prepare(chunks: DisplayChunk[]): PreparedDisplayChunk[] {

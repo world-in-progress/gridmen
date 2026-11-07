@@ -1,6 +1,6 @@
 import type { DisplayGeometryConfig, DisplayGeometryTask, PreparedDisplayChunk } from '../grid/displayGeometryEngine'
-import type { DisplayChunk } from '../grid/displayTypes'
-import { restoreDisplayBlock } from '../grid/displayWire'
+import type { DecodedDisplayBlock } from '../grid/displayTypes'
+import { canonicalDisplayChunks, restoreDisplayBlock } from '../grid/displayWire'
 import type { DisplayGeometryReply, DisplayGeometryResult as Result } from './displayGeometryProtocol'
 
 type StreamTask = Extract<DisplayGeometryTask, { type: 'prepare' | 'decode' }>
@@ -11,7 +11,7 @@ type StreamTask = Extract<DisplayGeometryTask, { type: 'prepare' | 'decode' }>
 export class DisplayGeometryClient {
     private worker?: Worker
     private sequence = 0
-    private pending?: { id: number; resolve: (value: Result) => void; reject: (error: Error) => void; chunks: DisplayChunk[]; prepared: PreparedDisplayChunk[]; input?: StreamTask; next: number; continueAfterBlock?: () => boolean }
+    private pending?: { id: number; resolve: (value: Result) => void; reject: (error: Error) => void; decodedBlocks: DecodedDisplayBlock[]; prepared: PreparedDisplayChunk[]; input?: StreamTask; next: number; continueAfterBlock?: () => boolean }
 
     constructor(private readonly config: DisplayGeometryConfig) {}
 
@@ -27,13 +27,20 @@ export class DisplayGeometryClient {
                 if (pending.input?.type === 'decode' && event.data.decoded) {
                     try {
                         const { block } = pending.input.blocks[pending.next - 1]
-                        pending.chunks.push(restoreDisplayBlock(event.data.decoded, block, pending.input.meta))
+                        const chunks = canonicalDisplayChunks(restoreDisplayBlock(event.data.decoded, block, pending.input.meta))
+                        const prepared = event.data.part?.prepared
+                        if (!prepared || prepared.length !== chunks.length) throw new Error('Invalid decoded display geometry reply')
+                        pending.decodedBlocks.push({ chunks, prepared })
                     } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); return }
                 }
-                if (event.data.part) {
-                    if (event.data.part.prepared) pending.prepared.push(...event.data.part.prepared)
+                if (pending.input?.type === 'prepare' && event.data.part) {
+                    for (const prepared of event.data.part.prepared) {
+                        if (!prepared) { this.fail(new Error('Invalid prepared display geometry reply')); return }
+                        pending.prepared.push(prepared)
+                    }
                     if (!event.data.done) return
                 }
+                if (pending.input?.type === 'decode' && event.data.part && !event.data.done) return
                 if (event.data.done && pending.continueAfterBlock) {
                     try {
                         if (!pending.continueAfterBlock()) {
@@ -53,7 +60,8 @@ export class DisplayGeometryClient {
                 }
                 this.pending = undefined
                 if (event.data.error !== undefined) pending.reject(new Error(event.data.error))
-                else if (event.data.done) pending.resolve({ chunks: pending.chunks, prepared: pending.prepared })
+                else if (event.data.done) pending.resolve(pending.input?.type === 'decode'
+                    ? { decodedBlocks: pending.decodedBlocks } : { prepared: pending.prepared })
                 else pending.resolve(event.data.result!)
             }
             this.worker.onerror = event => this.fail(new Error(event.message))
@@ -62,7 +70,7 @@ export class DisplayGeometryClient {
         return new Promise((resolve, reject) => {
             const id = ++this.sequence
             const input = task.type === 'prepare' || task.type === 'decode' ? task : undefined
-            this.pending = { id, resolve, reject, chunks: [], prepared: [], input, next: 0, continueAfterBlock }
+            this.pending = { id, resolve, reject, decodedBlocks: [], prepared: [], input, next: 0, continueAfterBlock }
             try {
                 if (input && (input.type === 'decode' ? input.blocks.length : input.chunks.length)) this.postNext(this.pending, config)
                 else this.worker!.postMessage({ id, config, task })
@@ -73,8 +81,10 @@ export class DisplayGeometryClient {
     private postNext(pending: NonNullable<DisplayGeometryClient['pending']>, config?: DisplayGeometryConfig): void {
         const input = pending.input!
         if (input.type === 'decode') {
-            const block = input.blocks[pending.next++]
-            this.worker!.postMessage({ id: pending.id, config, task: { type: 'decode', blocks: [block], meta: input.meta } }, [block.buffer])
+            const index = pending.next++
+            const block = input.blocks[index]
+            this.worker!.postMessage({ id: pending.id, config, task: { type: 'decode', blocks: [block], meta: input.meta,
+                ...(index === 0 ? { knownOriginals: input.knownOriginals } : {}) } }, [block.buffer])
         } else {
             this.worker!.postMessage({ id: pending.id, config, task: { type: 'prepare', chunks: [input.chunks[pending.next++]] } })
         }

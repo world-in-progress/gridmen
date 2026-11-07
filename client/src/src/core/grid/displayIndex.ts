@@ -1,13 +1,12 @@
 import type {
-    Bounds, DisplayBlock, DisplayCell, DisplayChunk, DisplayField, DisplayLayer, GridDisplayMeta, GridDisplayView, GridInspection,
+    Bounds, DisplayBlock, DisplayCell, DisplayField, DisplayLayer, GridDisplayMeta, GridDisplayView, GridInspection,
 } from './displayTypes'
 import { AreaSummary, cellSide, containsPoint, intersectionArea, intersects, validBounds } from './displayMath'
-import { axisIndex, blockKey, displayLayer, displayLayers, nodeBounds, selectDisplayBlocks } from './displayHierarchy'
+import { axisIndex, blockKey, displayLayer, displayLayers, nodeBounds } from './displayHierarchy'
+import { DisplayViewCache } from './displayBlockCache'
 
 const CHUNK_SIZE = 64
-const MAX_CACHED_CHUNKS = 768
-
-type Schema = Partial<Pick<GridDisplayMeta, 'grid_info' | 'level_info' | 'alignment_origin'>>
+type Schema = Pick<GridDisplayMeta, 'grid_info' | 'alignment_origin'>
 interface CellTile { x: number; y: number; ids: Set<number> }
 interface LevelStore { level: number; width: number; height: number; tiles: Map<string, CellTile> }
 interface SummaryNode {
@@ -22,7 +21,6 @@ interface SummaryNode {
     /** Last node on a unary path, so sparse queries do not walk empty depth per output. */
     jump?: SummaryNode
 }
-interface CachedChunk { chunk: DisplayChunk; revision: number; block?: string }
 function tileKey(x: number, y: number): string { return `${x},${y}` }
 
 /** The same native/dyadic hierarchy as the server. An edit changes one ancestor path. */
@@ -30,18 +28,16 @@ export default class DisplayIndex {
     readonly bounds: Bounds
     readonly displayLayers: DisplayLayer[]
     readonly origin: [number, number]
-    queryVisits = 0
-    updateVisits = 0
     private readonly cells = new Map<number, DisplayCell>()
     private readonly levels = new Map<number, LevelStore>()
     private readonly nodes: Map<string, SummaryNode>[]
-    private readonly nativeLayers = new Map<number, number>()
-    private readonly classUnits = new Map<number, bigint>()
-    private readonly chunks = new Map<string, CachedChunk>()
-    private readonly blockCaches = new Map<string, Set<string>>()
     private readonly edgeIds = new Map<string, number>()
     private readonly edgeKeys = new Map<number, string>()
-    private nextRevision = 1
+    private readonly nativeLayers = new Map<number, number>()
+    readonly cache = new DisplayViewCache()
+    private selectionExceptions = new Set<number>()
+    private selectionDefault = false
+    private selectionEpoch = 0
     private readonly originX: number
     private readonly originY: number
     private readonly unitX: number
@@ -53,16 +49,9 @@ export default class DisplayIndex {
         this.origin = schema.alignment_origin ?? [bounds[0], bounds[1]]
         ;[this.originX, this.originY] = this.origin
         if (!this.origin.every(Number.isFinite)) throw new Error('Invalid display alignment origin')
-        const sizes: [number, number][] = schema.grid_info ?? schema.level_info?.map(info => [
-            (bounds[2] - bounds[0]) / info.width, (bounds[3] - bounds[1]) / info.height,
-        ]) ?? []
+        const sizes = schema.grid_info
         this.displayLayers = displayLayers(bounds, sizes, this.origin)
         this.nodes = this.displayLayers.map(() => new Map())
-        let units = 1n
-        for (let i = sizes.length - 1; i >= 0; i--) {
-            if (i + 1 < sizes.length) units *= BigInt(Math.round(sizes[i][0] / sizes[i + 1][0])) * BigInt(Math.round(sizes[i][1] / sizes[i + 1][1]))
-            this.classUnits.set(i, units)
-        }
         this.unitX = sizes[sizes.length - 1][0]
         this.unitY = sizes[sizes.length - 1][1]
         this.displayLayers.forEach((layer, i) => {
@@ -73,18 +62,18 @@ export default class DisplayIndex {
         })
     }
 
-    /** Initial build visits each stored node and its sparse class entries once, bottom-up. */
+    /** Initial build visits each stored node once, bottom-up. */
     load(cells: Iterable<DisplayCell>): void {
         if (this.cells.size) throw new Error('Initial display load requires an empty index')
         for (const input of cells) {
-            const cell = this.checkedCell(input)
+            const cell = input
             if (this.cells.has(cell.id)) throw new Error('Duplicate display cell ID')
             const layer = this.nativeLayers.get(cell.level)!
             const [x, y] = this.locate(layer, (cell.bounds[0] + cell.bounds[2]) / 2, (cell.bounds[1] + cell.bounds[3]) / 2)
             const node = this.node(layer, x, y)
             if (node.original) throw new Error('Duplicate display cell geometry')
             node.original = cell
-            node.all.addCell(cell, (cell.bounds[2] - cell.bounds[0]) * (cell.bounds[3] - cell.bounds[1]), 1, this.classUnits.get(cell.level)!)
+            node.all.addCell(cell, (cell.bounds[2] - cell.bounds[0]) * (cell.bounds[3] - cell.bounds[1]), 1)
             if (cell.deleted) node.live = new AreaSummary(false)
             this.storeCell(cell, true)
         }
@@ -104,23 +93,54 @@ export default class DisplayIndex {
     }
 
     upsert(input: DisplayCell): void {
-        const cell = this.checkedCell(input)
-        this.updateVisits = 0
+        const cell = input
         const old = this.cells.get(cell.id)
+        const selected = !!old && this.isSelected(cell.id)
         if (old) this.change(old, -1)
+        this.markSelected(cell.id, selected)
         this.change(cell, 1)
     }
 
     remove(id: number): void {
-        this.updateVisits = 0
         const cell = this.cells.get(id)
-        if (cell) this.change(cell, -1)
+        if (cell) { this.change(cell, -1); this.selectionExceptions.delete(id) }
     }
 
     getCell(id: number): DisplayCell | undefined { return this.cells.get(id) }
 
+    setSelected(id: number, selected: boolean): void {
+        const cell = this.cells.get(id)
+        if (!cell || this.isSelected(id) === selected) return
+        this.markSelected(id, selected)
+        const area = (cell.bounds[2] - cell.bounds[0]) * (cell.bounds[3] - cell.bounds[1]) * (selected ? 1 : -1)
+        let i = this.nativeLayers.get(cell.level)!
+        let [x, y] = this.locate(i, (cell.bounds[0] + cell.bounds[2]) / 2, (cell.bounds[1] + cell.bounds[3]) / 2)
+        for (; i < this.nodes.length; i++) {
+            const node = this.nodes[i].get(tileKey(x, y))!
+            this.adjustSelected(node.all, area)
+            if (!cell.deleted && node.live !== node.all) this.adjustSelected(node.live, area)
+            if (i + 1 < this.nodes.length) [x, y] = this.parentCoordinates(node)
+        }
+    }
+
+    /** A new epoch avoids touching every ancestor on bulk selection. */
+    selectAll(selected: boolean): void {
+        this.selectionDefault = selected
+        this.selectionExceptions.clear()
+        this.selectionEpoch++
+    }
+
     /** Selection opacity is queried on the exact same display node, without leaf descent. */
+    selectedFraction(bounds: Bounds, showDeleted = true): number {
+        const summary = this.summaryFor(bounds, showDeleted)
+        return summary && summary.occupiedArea > 0 ? Math.min(1, Math.max(0, this.effectiveSelectedArea(summary) / summary.occupiedArea)) : 0
+    }
+
     summarize(bounds: Bounds, showDeleted = true): DisplayField | null {
+        return this.summaryFor(bounds, showDeleted)?.toField(bounds) ?? null
+    }
+
+    private summaryFor(bounds: Bounds, showDeleted: boolean): AreaSummary | null {
         if (!validBounds(bounds)) throw new Error('Invalid summary bounds')
         for (let i = 0; ; i++) {
             const layer = this.layer(i)
@@ -131,14 +151,15 @@ export default class DisplayIndex {
             if (b.every((v, k) => Math.abs(v - bounds[k]) < Math.max(1, Math.abs(v)) * 1e-12)) {
                 this.ensureLayer(i)
                 const node = this.nodes[i].get(tileKey(x, y))
-                if (node) return (showDeleted ? node.all : node.live).toField(bounds)
+                if (node) return showDeleted ? node.all : node.live
                 for (let j = i + 1; j < this.displayLayers.length; j++) {
                     const [cx, cy] = this.locate(j, (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
                     const cell = this.nodes[j].get(tileKey(cx, cy))?.original
                     if (cell && (showDeleted || !cell.deleted)) {
                         const summary = new AreaSummary()
-                        summary.addCell(cell, intersectionArea(bounds, cell.bounds), 1, this.classUnits.get(cell.level)!)
-                        return summary.toField(bounds)
+                        summary.addCell(cell, intersectionArea(bounds, cell.bounds), 1, this.isSelected(cell.id))
+                        summary.selectionEpoch = this.selectionEpoch
+                        return summary
                     }
                 }
                 return null
@@ -147,64 +168,54 @@ export default class DisplayIndex {
         throw new Error('Selection summary must address a display node')
     }
 
-    query(bounds: Bounds, metersPerPixel: number, showDeleted = true): GridDisplayView {
-        if (!validBounds(bounds) || !(metersPerPixel > 0) || !Number.isFinite(metersPerPixel)) throw new Error('Invalid display query')
-        return this.queryBlocks(selectDisplayBlocks(this.displayLayers, this.origin, bounds, ([x, y]) => [x / metersPerPixel, y / metersPerPixel]), showDeleted)
+    cacheKeys(blocks: DisplayBlock[], showDeleted = true): string[] {
+        return blocks.map(block => `${blockKey(block)}:${showDeleted ? 1 : 0}`)
     }
 
     queryBlocks(blocks: DisplayBlock[], showDeleted = true): GridDisplayView {
-        this.queryVisits = 0
-        const chunks: DisplayChunk[] = []
-        const originals = new Set<number>()
-        for (const block of blocks) {
+        const keys = this.cacheKeys(blocks, showDeleted)
+        this.cache.begin(keys)
+        for (let position = 0; position < blocks.length; position++) {
+            const block = blocks[position]
+            const key = keys[position]
+            if (this.cache.getBlock(key)) continue
             const { blockLayer: i, x, y, displayLayer } = block
-            if (!Number.isSafeInteger(i) || !Number.isSafeInteger(displayLayer) || displayLayer < 0 || displayLayer > i
-                || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) throw new Error('Invalid display block')
             const layer = this.layer(i)
-            if (x < layer.x0 || x >= layer.x0 + layer.nx || y < layer.y0 || y >= layer.y0 + layer.ny) throw new Error('Display block outside grid')
             this.ensureLayer(i)
             const bounds = nodeBounds(layer, x, y, this.origin)
             let enclosing: DisplayCell | undefined
             for (let j = i + 1; j < this.displayLayers.length; j++) {
                 const [cx, cy] = this.locate(j, (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
-                this.queryVisits++
                 const cell = this.nodes[j].get(tileKey(cx, cy))?.original
                 if (cell) { enclosing = cell; break }
             }
             if (enclosing) {
-                if ((showDeleted || !enclosing.deleted) && !originals.has(enclosing.id)) {
-                    originals.add(enclosing.id)
-                    chunks.push(this.cached(`original:${enclosing.id}`, () => ({ key: '', bounds: enclosing!.bounds, cells: [enclosing!], fields: [] })))
-                }
+                this.cache.setBlock(key, showDeleted || !enclosing.deleted
+                    ? [{ key: `original:${enclosing.id}`, bounds: enclosing.bounds, cells: [enclosing], fields: [] }]
+                    : [])
                 continue
             }
-            const key = `${blockKey(block)}:${showDeleted ? 1 : 0}`
-            const chunk = this.cached(key, () => {
-                const cells: DisplayCell[] = [], fields: DisplayField[] = []
-                const visit = (node: SummaryNode) => {
-                    this.queryVisits++
-                    const summary = showDeleted ? node.all : node.live
-                    if (summary.occupiedArea <= 0) return
-                    if (node.original) { cells.push(node.original); return }
-                    if (node.layer === displayLayer) {
-                        fields.push(summary.toField(nodeBounds(this.layer(node.layer), node.x, node.y, this.origin))!)
-                    } else if (node.jump) {
-                        if (node.jump.layer >= displayLayer) visit(node.jump)
-                        else {
-                            const b = nodeBounds(this.layer(node.jump.layer), node.jump.x, node.jump.y, this.origin)
-                            const [cx, cy] = this.locate(displayLayer, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
-                            visit(this.nodes[displayLayer].get(tileKey(cx, cy))!)
-                        }
-                    } else for (const child of node.children) visit(child)
-                }
-                const root = this.nodes[i].get(tileKey(x, y))
-                if (root) visit(root)
-                return { key, bounds, cells, fields }
-            }, `${i}:${x}:${y}`)
-            if (chunk.cells.length || chunk.fields.length) chunks.push(chunk)
+            const cells: DisplayCell[] = [], fields: DisplayField[] = []
+            const visit = (node: SummaryNode) => {
+                const summary = showDeleted ? node.all : node.live
+                if (summary.occupiedArea <= 0) return
+                if (node.original) { cells.push(node.original); return }
+                if (node.layer === displayLayer) {
+                    fields.push(summary.toField(nodeBounds(this.layer(node.layer), node.x, node.y, this.origin))!)
+                } else if (node.jump) {
+                    if (node.jump.layer >= displayLayer) visit(node.jump)
+                    else {
+                        const b = nodeBounds(this.layer(node.jump.layer), node.jump.x, node.jump.y, this.origin)
+                        const [cx, cy] = this.locate(displayLayer, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+                        visit(this.nodes[displayLayer].get(tileKey(cx, cy))!)
+                    }
+                } else for (const child of node.children) visit(child)
+            }
+            const root = this.nodes[i].get(tileKey(x, y))
+            if (root) visit(root)
+            this.cache.setBlock(key, cells.length || fields.length ? [{ key, bounds, cells, fields }] : [])
         }
-        this.trimCache(chunks)
-        return { chunks, cellCount: this.cells.size }
+        return this.cache.view(keys)
     }
 
     inspect(x: number, y: number, showDeleted = true): GridInspection {
@@ -256,20 +267,6 @@ export default class DisplayIndex {
             })
         }
         return [...selected].sort((a, b) => a - b)
-    }
-
-    getChunkRevision(key: string): number { return this.chunks.get(key)?.revision ?? 0 }
-
-    private checkedCell(input: DisplayCell): DisplayCell {
-        const layerIndex = this.nativeLayers.get(input.level)
-        if (!validBounds(input.bounds) || !Number.isSafeInteger(input.id) || input.id < 0 || layerIndex === undefined || !Number.isFinite(input.elevation) || !Number.isSafeInteger(input.landClass) || input.landClass < 0) throw new Error('Invalid display cell')
-        const layer = this.displayLayers[layerIndex]
-        const b = input.bounds
-        const ix = Math.round((b[0] - this.originX) / layer.width)
-        const iy = Math.round((b[1] - this.originY) / layer.height)
-        const expected = nodeBounds(layer, ix, iy, this.origin)
-        if (b.some((v, i) => Math.abs(v - expected[i]) > Math.max(1, Math.abs(v)) * 1e-10) || b[0] < this.bounds[0] - 1e-7 || b[1] < this.bounds[1] - 1e-7 || b[2] > this.bounds[2] + 1e-7 || b[3] > this.bounds[3] + 1e-7) throw new Error('Display cell does not match its schema level')
-        return { ...input, bounds: [...input.bounds] }
     }
 
     private locate(i: number, x: number, y: number): [number, number] {
@@ -334,10 +331,8 @@ export default class DisplayIndex {
         const first = this.nativeLayers.get(cell.level)!
         let [x, y] = this.locate(first, (cell.bounds[0] + cell.bounds[2]) / 2, (cell.bounds[1] + cell.bounds[3]) / 2)
         let child: SummaryNode | undefined
-        const signedUnits = this.classUnits.get(cell.level)! * BigInt(sign)
         for (let i = first; i < this.nodes.length; i++) {
             const node = sign === 1 ? this.node(i, x, y) : this.nodes[i].get(tileKey(x, y))!
-            this.updateVisits++
             if (i === first) node.original = sign === 1 ? cell : undefined
             if (child) {
                 const found = node.children.indexOf(child)
@@ -345,18 +340,37 @@ export default class DisplayIndex {
                 if (child.all.occupiedArea <= 0 && found >= 0) node.children.splice(found, 1)
             }
             if (cell.deleted && node.live === node.all) node.live = node.all.clone()
-            node.all.updateClass(cell.landClass, signedUnits)
-            if (!cell.deleted && node.live !== node.all) node.live.updateClass(cell.landClass, signedUnits)
             this.refreshSummary(node)
             if (!node.hasDeleted) node.live = node.all
-            const cacheKey = `${i}:${x}:${y}`
-            for (const key of this.blockCaches.get(cacheKey) ?? []) this.uncache(key)
+            this.cache.deleteNode(`${i}:${x}:${y}`)
             if (node.all.occupiedArea === 0) this.nodes[i].delete(tileKey(x, y))
             child = node
             if (i + 1 < this.nodes.length) [x, y] = this.parentCoordinates(node)
         }
-        this.uncache(`original:${cell.id}`)
+        this.cache.deleteChunk(`original:${cell.id}`)
         this.storeCell(cell, sign === 1)
+    }
+
+    private isSelected(id: number): boolean {
+        return this.selectionDefault !== this.selectionExceptions.has(id)
+    }
+
+    private markSelected(id: number, selected: boolean): void {
+        if (selected !== this.selectionDefault) this.selectionExceptions.add(id)
+        else this.selectionExceptions.delete(id)
+    }
+
+    private effectiveSelectedArea(summary: AreaSummary): number {
+        return summary.selectionEpoch === this.selectionEpoch
+            ? summary.selectedArea : (this.selectionDefault ? summary.occupiedArea : 0)
+    }
+
+    private adjustSelected(summary: AreaSummary, area: number): void {
+        if (summary.selectionEpoch !== this.selectionEpoch) {
+            summary.selectedArea = this.selectionDefault ? summary.occupiedArea : 0
+            summary.selectionEpoch = this.selectionEpoch
+        }
+        summary.selectedArea += area
     }
 
     private refreshSummary(node: SummaryNode): void {
@@ -364,52 +378,20 @@ export default class DisplayIndex {
             const live = summary === node.live && summary !== node.all
             const original = node.original && (!live || !node.original.deleted) ? node.original : undefined
             summary.occupiedArea = original ? (original.bounds[2] - original.bounds[0]) * (original.bounds[3] - original.bounds[1]) : 0
-            summary.elevationArea = original ? original.elevation * summary.occupiedArea : 0
+            summary.selectedArea = original && this.isSelected(original.id) ? summary.occupiedArea : 0
+            summary.selectionEpoch = this.selectionEpoch
             summary.minCellSize = node.original && (!live || !node.original.deleted) ? cellSide(node.original) : Infinity
             summary.finestLevel = node.original && (!live || !node.original.deleted) ? node.original.level : -Infinity
             for (const child of node.children) {
                 const value = live ? child.live : child.all
                 summary.occupiedArea += value.occupiedArea
-                summary.elevationArea += value.elevationArea
+                summary.selectedArea += this.effectiveSelectedArea(value)
                 summary.minCellSize = Math.min(summary.minCellSize, value.minCellSize)
                 summary.finestLevel = Math.max(summary.finestLevel, value.finestLevel)
             }
         }
         node.hasDeleted = !!node.original?.deleted || node.children.some(child => child.hasDeleted)
         node.jump = node.children.length === 1 ? node.children[0].jump ?? node.children[0] : undefined
-    }
-
-    private cached(key: string, build: () => DisplayChunk, block?: string): DisplayChunk {
-        const old = this.chunks.get(key)
-        if (old) { this.chunks.delete(key); this.chunks.set(key, old); return old.chunk }
-        const chunk = build()
-        chunk.key = key
-        this.chunks.set(key, { chunk, revision: this.nextRevision++, block })
-        if (block) {
-            const keys = this.blockCaches.get(block) ?? new Set<string>()
-            keys.add(key)
-            this.blockCaches.set(block, keys)
-        }
-        return chunk
-    }
-
-    private uncache(key: string): void {
-        const entry = this.chunks.get(key)
-        this.chunks.delete(key)
-        if (entry?.block) {
-            const keys = this.blockCaches.get(entry.block)!
-            keys.delete(key)
-            if (!keys.size) this.blockCaches.delete(entry.block)
-        }
-    }
-
-    private trimCache(visible: DisplayChunk[]): void {
-        const keys = new Set(visible.map(chunk => chunk.key))
-        const budget = Math.max(MAX_CACHED_CHUNKS, keys.size)
-        for (const key of this.chunks.keys()) {
-            if (this.chunks.size <= budget) break
-            if (!keys.has(key)) this.uncache(key)
-        }
     }
 
     private visitTiles(store: LevelStore, bounds: Bounds, visit: (tile: CellTile) => void): void {
@@ -423,13 +405,11 @@ export default class DisplayIndex {
         if ((x1 - x0 + 1) * (y1 - y0 + 1) > store.tiles.size * 2) {
             for (const tile of store.tiles.values()) {
                 if (x0 <= tile.x && tile.x <= x1 && y0 <= tile.y && tile.y <= y1) {
-                    this.queryVisits++
-                    visit(tile)
+                        visit(tile)
                 }
             }
         } else {
             for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-                this.queryVisits++
                 const tile = store.tiles.get(tileKey(x, y))
                 if (tile) visit(tile)
             }

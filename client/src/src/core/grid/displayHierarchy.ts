@@ -6,6 +6,12 @@ export type ProjectPoint = (point: [number, number]) => [number, number]
 export const NODE_RADIUS = 0.75
 const BLOCK_PIXELS = 128
 
+/** Selection lengths are CSS pixels; below DPR 1 each node must still cover a physical pixel center. */
+export function requiredDisplayRadius(dpr: number): number {
+    if (!(dpr > 0) || !Number.isFinite(dpr)) throw new Error('Invalid display pixel ratio')
+    return NODE_RADIUS / Math.min(1, dpr)
+}
+
 export function axisBounds(index: number, size: number, layout: Layout): [number, number] {
     if (!layout) return [index * size, (index + 1) * size]
     const [period, count] = layout
@@ -84,23 +90,10 @@ export function displayLayer(layers: DisplayLayer[], index: number): DisplayLaye
     if (!Number.isSafeInteger(index) || index < 0 || !layers.length) throw new Error('Invalid display layer')
     if (index < layers.length) return layers[index]
     const root = layers[layers.length - 1], depth = index - layers.length + 1
-    const scale = (size: number) => {
-        let remaining = depth
-        while (remaining > 0) {
-            const step = Math.min(remaining, 1023)
-            size *= 2 ** step
-            if (!Number.isFinite(size)) throw new Error('Display ancestor exceeds finite grid coordinates')
-            remaining -= step
-        }
-        return size
-    }
     const factor = 2 ** depth
-    // Preserve the two sides of zero even when the scale exceeds float64.
-    const lower = (value: number) => Number.isFinite(factor) ? Math.floor(value / factor) : value < 0 ? -1 : 0
-    const upper = (value: number) => Number.isFinite(factor) ? Math.ceil(value / factor) : value > 0 ? 1 : 0
-    const x0 = lower(root.x0), y0 = lower(root.y0)
-    return { width: scale(root.width), height: scale(root.height), x0, y0,
-        nx: upper(root.x0 + root.nx) - x0, ny: upper(root.y0 + root.ny) - y0,
+    const x0 = Math.floor(root.x0 / factor), y0 = Math.floor(root.y0 / factor)
+    return { width: root.width * factor, height: root.height * factor, x0, y0,
+        nx: Math.ceil((root.x0 + root.nx) / factor) - x0, ny: Math.ceil((root.y0 + root.ny) / factor) - y0,
         nativeLevel: null, xLayout: null, yLayout: null }
 }
 
@@ -172,10 +165,10 @@ export interface DisplayBlockMeasures {
     layerFits(index: number, bounds: Bounds): boolean
 }
 
-export function selectDisplayBlocks(layers: DisplayLayer[], origin: [number, number], viewport: Bounds, project: ProjectPoint, measures?: DisplayBlockMeasures): DisplayBlock[] {
+export function selectDisplayBlocks(layers: DisplayLayer[], origin: [number, number], viewport: Bounds, project: ProjectPoint, measures?: DisplayBlockMeasures, requiredRadius = NODE_RADIUS): DisplayBlock[] {
     const result: DisplayBlock[] = []
     const layer = (index: number) => displayLayer(layers, index)
-    const fits = measures?.fits ?? ((bounds: Bounds) => projectedRadius(bounds, project) + 1e-9 >= NODE_RADIUS)
+    const fits = measures?.fits ?? ((bounds: Bounds) => projectedRadius(bounds, project) + 1e-9 >= requiredRadius)
     const choose = (blockLayer: number, x: number, y: number) => {
         const bounds = nodeBounds(layer(blockLayer), x, y, origin)
         if (!intersects(bounds, viewport)) return

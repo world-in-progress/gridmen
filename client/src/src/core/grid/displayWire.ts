@@ -1,7 +1,7 @@
-import type { DisplayBlock, DisplayChunk, GridDisplayMeta, GridDisplayView } from './displayTypes'
+import type { DisplayBlock, DisplayChunk, GridDisplayMeta } from './displayTypes'
 import { blockKey, displayLayer, nodeBounds } from './displayHierarchy'
 
-const HEADER_BYTES = 8
+const HEADER_BYTES = 4
 const RECORD_BYTES = 72
 
 declare const validatedDisplayBlock: unique symbol
@@ -23,9 +23,9 @@ export function restoreDisplayBlock(buffer: ValidatedDisplayBlockBuffer, block: 
 function readDisplayBlock(buffer: ArrayBuffer, block: DisplayBlock, meta: GridDisplayMeta, validate: boolean): DisplayChunk {
     if (validate && buffer.byteLength < HEADER_BYTES) throw new Error('Truncated grid display header')
     const data = new DataView(buffer)
-    if (validate && data.getUint32(0, false) !== 0x47444e34) throw new Error('Invalid grid display format')
-    const count = data.getUint32(4, true)
-    if (validate && buffer.byteLength !== HEADER_BYTES + RECORD_BYTES * count) throw new Error('Invalid grid display record count')
+    if (validate && data.getUint32(0, false) !== 0x47444e35) throw new Error('Invalid grid display format')
+    if (validate && (buffer.byteLength - HEADER_BYTES) % RECORD_BYTES !== 0) throw new Error('Invalid grid display record length')
+    const count = (buffer.byteLength - HEADER_BYTES) / RECORD_BYTES
     const chunk: DisplayChunk = { key: blockKey(block), bounds: nodeBounds(displayLayer(meta.displayLayers, block.blockLayer), block.x, block.y, meta.alignment_origin), cells: [], fields: [] }
     const ids = validate ? new Set<number>() : undefined
     for (let i = 0; i < count; i++) {
@@ -51,33 +51,22 @@ function readDisplayBlock(buffer: ArrayBuffer, block: DisplayBlock, meta: GridDi
     return chunk
 }
 
-/** An original cell spanning several requested blocks owns one draw instance. */
-export function displayBlockView(chunks: DisplayChunk[], cellCount: number, previous?: GridDisplayView): GridDisplayView {
-    const cached = new Map(previous?.chunks.map(chunk => [chunk.key, chunk]))
-    const originals = new Map<number, DisplayChunk>()
+/** Split before geometry preparation. A crossing original keeps its own bounds
+ * and is prepared once under a stable ID, independent of the block first seen.
+ */
+export function canonicalDisplayChunks(chunk: DisplayChunk): DisplayChunk[] {
+    const originals: DisplayChunk[] = []
+    const inside = chunk.cells.filter(cell => {
+        const a = cell.bounds, b = chunk.bounds
+        if (a[0] < b[0] || a[1] < b[1] || a[2] > b[2] || a[3] > b[3]
+            || a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]) {
+            originals.push({ key: `original:${cell.id}`, bounds: a, cells: [cell], fields: [] })
+            return false
+        }
+        return true
+    })
     const result: DisplayChunk[] = []
-    for (const chunk of chunks) {
-        // Complete hierarchy blocks have disjoint interiors. An original in
-        // several blocks must cross a block boundary, so only those originals
-        // need ID deduplication. Interior cells in reused immutable chunks need
-        // neither a viewport-wide counting pass nor another record scan.
-        if (cached.get(chunk.key) === chunk) { result.push(chunk); continue }
-        const inside = chunk.cells.filter(cell => {
-            const a = cell.bounds, b = chunk.bounds
-            if (a[0] < b[0] || a[1] < b[1] || a[2] > b[2] || a[3] > b[3]
-                || a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]) {
-                if (!originals.has(cell.id)) originals.set(cell.id, { key: `original:${cell.id}`, bounds: a, cells: [cell], fields: [] })
-                return false
-            }
-            return true
-        })
-        if (inside.length || chunk.fields.length) result.push(inside.length === chunk.cells.length ? chunk : { ...chunk, cells: inside })
-    }
-    result.push(...originals.values())
-    return { chunks: result.map(chunk => {
-        const old = cached.get(chunk.key)
-        return old && old.fields === chunk.fields && old.cells.length === chunk.cells.length
-            && old.cells.every((cell, index) => cell === chunk.cells[index]) ? old
-            : old?.cells.length === 1 && chunk.key.startsWith('original:') && old.cells[0] === chunk.cells[0] ? old : chunk
-    }), cellCount }
+    if (inside.length || chunk.fields.length) result.push(inside.length === chunk.cells.length ? chunk : { ...chunk, cells: inside })
+    result.push(...originals)
+    return result
 }

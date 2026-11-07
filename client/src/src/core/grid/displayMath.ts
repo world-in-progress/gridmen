@@ -38,13 +38,11 @@ export function cellSide(cell: DisplayCell): number {
     return Math.min(cell.bounds[2] - cell.bounds[0], cell.bounds[3] - cell.bounds[1])
 }
 
-/** Physical float64 totals and exact class weights in a shared finest-lattice area unit. */
+/** Occupied and selected areas, with the extrema required by field rendering. */
 export class AreaSummary {
     occupiedArea = 0
-    elevationArea = 0
-    private singleClass: number | undefined
-    private singleClassUnits = 0n
-    private multiClasses: Map<number, bigint> | undefined
+    selectedArea = 0
+    selectionEpoch = 0
     minCellSize = Infinity
     finestLevel = -Infinity
 
@@ -53,21 +51,18 @@ export class AreaSummary {
     clone(): AreaSummary {
         const copy = new AreaSummary(this.trackExtrema)
         copy.occupiedArea = this.occupiedArea
-        copy.elevationArea = this.elevationArea
+        copy.selectedArea = this.selectedArea
+        copy.selectionEpoch = this.selectionEpoch
         copy.minCellSize = this.minCellSize
         copy.finestLevel = this.finestLevel
-        copy.singleClass = this.singleClass
-        copy.singleClassUnits = this.singleClassUnits
-        if (this.multiClasses) copy.multiClasses = new Map(this.multiClasses)
         return copy
     }
 
-    addCell(cell: DisplayCell, area: number, sign: 1 | -1, classUnits: bigint): void {
+    addCell(cell: DisplayCell, area: number, sign: 1 | -1, selected = false): void {
         if (area <= 0) return
         const signedArea = area * sign
         this.occupiedArea += signedArea
-        this.elevationArea += signedArea * cell.elevation
-        this.updateClass(cell.landClass, classUnits * BigInt(sign))
+        if (selected) this.selectedArea += signedArea
         if (this.trackExtrema && sign === 1) {
             this.minCellSize = Math.min(this.minCellSize, cellSide(cell))
             this.finestLevel = Math.max(this.finestLevel, cell.level)
@@ -77,8 +72,7 @@ export class AreaSummary {
     addSummary(other: AreaSummary): void {
         if (other.occupiedArea <= 0) return
         this.occupiedArea += other.occupiedArea
-        this.elevationArea += other.elevationArea
-        other.forEachClass((category, units) => this.updateClass(category, units))
+        this.selectedArea += other.selectedArea
         this.minCellSize = Math.min(this.minCellSize, other.minCellSize)
         this.finestLevel = Math.max(this.finestLevel, other.finestLevel)
     }
@@ -86,60 +80,13 @@ export class AreaSummary {
     toField(bounds: Bounds): DisplayField | null {
         if (this.occupiedArea <= 0) return null
         const sampleArea = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
-        let landClass = Infinity
-        let winningUnits = -1n
-        this.forEachClass((category, units) => {
-            if (units > winningUnits ||
-                (units === winningUnits && category < landClass)) {
-                landClass = category
-                winningUnits = units
-            }
-        })
         return {
             bounds,
             occupiedFraction: Math.min(1, Math.max(0, this.occupiedArea / sampleArea)),
             minCellSize: this.minCellSize,
             level: this.finestLevel,
-            elevation: this.elevationArea / this.occupiedArea,
-            landClass,
-        }
-    }
-
-    private adjust(map: Map<number, bigint>, key: number, delta: bigint): void {
-        const next = (map.get(key) ?? 0n) + delta
-        // Each removal uses the same geometric contribution as its insertion.
-        if (next === 0n) map.delete(key)
-        else map.set(key, next)
-    }
-
-    updateClass(key: number, delta: bigint): void {
-        if (delta === 0n) return
-        if (this.multiClasses) {
-            this.adjust(this.multiClasses, key, delta)
-            if (this.multiClasses.size <= 1) {
-                const last = this.multiClasses.entries().next().value as [number, bigint] | undefined
-                this.singleClass = last?.[0]
-                this.singleClassUnits = last?.[1] ?? 0n
-                this.multiClasses = undefined
-            }
-        } else if (this.singleClass === undefined) {
-            this.singleClass = key
-            this.singleClassUnits = delta
-        } else if (this.singleClass === key) {
-            this.singleClassUnits += delta
-            if (this.singleClassUnits === 0n) this.singleClass = undefined
-        } else {
-            this.multiClasses = new Map([[this.singleClass, this.singleClassUnits], [key, delta]])
-            this.singleClass = undefined
-            this.singleClassUnits = 0n
-        }
-    }
-
-    private forEachClass(visit: (category: number, units: bigint) => void): void {
-        if (this.multiClasses) {
-            for (const [category, area] of this.multiClasses) visit(category, area)
-        } else if (this.singleClass !== undefined) {
-            visit(this.singleClass, this.singleClassUnits)
+            elevation: 0,
+            landClass: 0,
         }
     }
 }

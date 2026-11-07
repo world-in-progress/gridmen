@@ -37,16 +37,14 @@ test('one projection RPC accumulates a finite block stream; cancellation drops p
     assert.equal(worker.sent[1].config, undefined)
     assert.deepEqual(worker.sent[1].task, { type: 'prepare', chunks: [chunks[0]] })
     const id = worker.sent[1].id
-    worker.reply({ id, part: { prepared: [{ data: new Float32Array(16), origin: [0, 0], corners: [], worldBounds: [0, 0, 1, 1] }] } })
+    worker.reply({ id, part: { prepared: [{ data: new Float32Array(16), origin: [0, 0], corners: [], worldBounds: [0, 0, 1, 1] }] }, done: true })
     let complete = false
     void preparing.then(() => { complete = true })
     await Promise.resolve()
     assert.equal(complete, false)
-    worker.reply({ id, done: true })
     assert.deepEqual(worker.sent[2].task, { type: 'prepare', chunks: [chunks[1]] })
     assert.equal(complete, false)
-    worker.reply({ id, part: { prepared: [{ data: new Float32Array(16), origin: [0, 0], corners: [], worldBounds: [0, 0, 1, 1] }] } })
-    worker.reply({ id, done: true })
+    worker.reply({ id, part: { prepared: [{ data: new Float32Array(16), origin: [0, 0], corners: [], worldBounds: [0, 0, 1, 1] }] }, done: true })
     assert.equal((await preparing).prepared?.length, 2)
     const cancelled = client.run({ type: 'select', bounds: [0, 0, 2, 2], scale: 1e8 })
     client.dispose()
@@ -71,34 +69,34 @@ test('decode transfers one buffer after each block acknowledgment and keeps empt
     t.after(() => { if (original) Object.defineProperty(globalThis, 'Worker', original); else Reflect.deleteProperty(globalThis, 'Worker') })
     const client = new DisplayGeometryClient({ layers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), origin: [0, 0], definition: JSON.stringify(proj4.defs('EPSG:4326')) })
     const blocks = [0, 1, 2].map(x => {
-        const buffer = new ArrayBuffer(8)
-        new DataView(buffer).setUint32(0, 0x47444e34, false)
+        const buffer = new ArrayBuffer(4)
+        new DataView(buffer).setUint32(0, 0x47444e35, false)
         return { block: { blockLayer: 0, x, y: 0, displayLayer: 0 }, buffer }
     })
-    const meta = { revision: 'rpc', displayLayers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), alignment_origin: [0, 0], grid_info: [[1, 1]], cellCount: 3 } as GridDisplayMeta
-    const decoding = client.run({ type: 'decode', blocks, meta })
+    const meta = { revision: 'rpc', displayLayers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), alignment_origin: [0, 0], grid_info: [[1, 1]] } as GridDisplayMeta
+    const decoding = client.run({ type: 'decode', blocks, meta, knownOriginals: [41] })
     const worker = ManualWorker.instances.at(-1)!
     const id = worker.sent[0].id
     assert.equal(worker.sent.length, 1)
     assert.equal(worker.sent[0].transfers, 1)
-    assert.deepEqual(blocks.map(item => item.buffer.byteLength), [0, 8, 8])
+    assert.deepEqual(blocks.map(item => item.buffer.byteLength), [0, 4, 4])
+    assert.deepEqual((worker.sent[0].task as Extract<DisplayGeometryTask, { type: 'decode' }>).knownOriginals, [41])
     assert.throws(() => client.run({ type: 'decode', blocks: [], meta }), /Concurrent/)
     for (let i = 0; i < 3; i++) {
         const task = worker.sent[i].task
         assert.equal(task.type, 'decode')
         if (task.type !== 'decode') throw new Error('Expected decode input')
         const decoded = task.blocks[0].buffer
-        worker.reply(structuredClone({ id, decoded, part: { prepared: [] } }, { transfer: [decoded] }))
-        assert.equal(worker.sent.length, i + 1)
-        worker.reply({ id, done: true })
+        worker.reply(structuredClone({ id, decoded, part: { prepared: [] }, done: true }, { transfer: [decoded] }))
         assert.equal(worker.sent.length, Math.min(i + 2, 3))
-        assert.deepEqual(blocks.map(item => item.buffer.byteLength), blocks.map((_, index) => index <= i + 1 ? 0 : 8))
+        assert.deepEqual(blocks.map(item => item.buffer.byteLength), blocks.map((_, index) => index <= i + 1 ? 0 : 4))
         if (i < 2) assert.equal(worker.sent[i + 1].id, id)
+        if (i < 2) assert.equal((worker.sent[i + 1].task as Extract<DisplayGeometryTask, { type: 'decode' }>).knownOriginals, undefined)
     }
-    assert.deepEqual((await decoding).chunks?.map(chunk => chunk.key), ['0:0:0:0', '0:1:0:0', '0:2:0:0'])
+    assert.deepEqual((await decoding).decodedBlocks?.map(block => block.chunks), [[], [], []])
     const empty = client.run({ type: 'decode', blocks: [], meta })
     assert.equal(worker.sent.at(-1)?.transfers, 0)
     worker.reply({ id: worker.sent.at(-1)?.id, done: true })
-    assert.deepEqual(await empty, { chunks: [], prepared: [] })
+    assert.deepEqual(await empty, { decodedBlocks: [] })
     client.dispose()
 })

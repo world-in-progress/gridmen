@@ -7,6 +7,7 @@ export interface DisplayCamera {
     bounds: Bounds
     metersPerPixel: number
     zoom: number
+    devicePixelRatio: number
     mercator?: { scale: number; bounds: Bounds }
 }
 
@@ -38,12 +39,13 @@ export function displayCamera(map: MapboxMap, projection: Converter): DisplayCam
     // getCenter alone can differ from the public transform's translation.
     const linear = map.getPitch() === 0 && map.getBearing() === 0 && (name === 'mercator' || name === 'globe' && map.getZoom() >= 6)
     const zoom = map.getZoom()
-    if (!linear) return { bounds, metersPerPixel, zoom }
+    const devicePixelRatio = canvas.width / width
+    if (!linear) return { bounds, metersPerPixel, zoom, devicePixelRatio }
     const world = lngLats.map(p => MercatorCoordinate.fromLonLat([p.lng, p.lat]))
     const worldBounds: Bounds = [world[0][0], world[0][1], world[2][0], world[2][1]]
     const scale = width / (worldBounds[2] - worldBounds[0])
     if (!(scale > 0) || !Number.isFinite(scale)) throw new Error('Invalid Mercator camera scale')
-    return { bounds, metersPerPixel, zoom, mercator: { scale, bounds: worldBounds } }
+    return { bounds, metersPerPixel, zoom, devicePixelRatio, mercator: { scale, bounds: worldBounds } }
 }
 
 export function mercatorPoint(projection: Converter, point: [number, number]): [number, number] {

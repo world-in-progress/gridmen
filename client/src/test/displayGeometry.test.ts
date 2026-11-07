@@ -3,7 +3,7 @@ import test from 'node:test'
 import proj4 from 'proj4'
 import { DisplayGeometrySelector } from '../src/core/grid/displayGeometry'
 import { DisplayGeometryEngine } from '../src/core/grid/displayGeometryEngine'
-import { displayLayer, displayLayers, nodeBounds, nodeRange, projectedRadius, selectDisplayBlocks } from '../src/core/grid/displayHierarchy'
+import { displayLayer, displayLayers, nodeBounds, nodeRange, projectedCorners, projectedRadius, requiredDisplayRadius, selectDisplayBlocks } from '../src/core/grid/displayHierarchy'
 import type { Bounds } from '../src/core/grid/displayTypes'
 import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
 
@@ -105,6 +105,43 @@ test('an exact coarse rejection never overwrites an earlier complete acceptance 
     assert.equal(transforms, 0)
 })
 
+test('DPR 0.5 gives every selected node a physical pixel center, including translated clipped tails', () => {
+    const dpr = 0.5, radius = requiredDisplayRadius(dpr)
+    assert.equal(radius, 1.5)
+    const origin: [number, number] = [0, 0]
+    const bounds: Bounds = [-26, -10, 26, 10]
+    const layers = displayLayers(bounds, [[13, 5], [1, 1]], origin)
+    for (const [tx, ty] of [[0.37, 0.29], [0.91, 1.17], [-0.43, 0.71]]) {
+        const screen = ([x, y]: [number, number]): [number, number] => [1.5 * x + tx, 1.5 * y + ty]
+        const blocks = selectDisplayBlocks(layers, origin, bounds, screen, undefined, radius)
+        assert.ok(blocks.length > 0)
+        const missed = (selection: typeof blocks) => {
+            let count = 0
+            for (const block of selection) {
+                const blockBounds = nodeBounds(displayLayer(layers, block.blockLayer), block.x, block.y, origin)
+                const layer = displayLayer(layers, block.displayLayer)
+                const [x0, y0, x1, y1] = nodeRange(layer, blockBounds, origin)
+                for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+                    const node = nodeBounds(layer, x, y, origin)
+                    const corners = projectedCorners(node, screen)
+                    const [left, bottom] = corners[0], [right, top] = corners[2]
+                    const px = Math.ceil(left * dpr - 0.5) + 0.5
+                    const py = Math.ceil(bottom * dpr - 0.5) + 0.5
+                    if (px > right * dpr + 1e-9 || py > top * dpr + 1e-9) count++
+                }
+            }
+            return count
+        }
+        assert.equal(missed(blocks), 0, `DPR 0.5 selection misses a pixel center at ${tx},${ty}`)
+        assert.ok(missed(selectDisplayBlocks(layers, origin, bounds, screen)) > 0,
+            'the previous CSS-only threshold must expose the regression fixture')
+        const selector = new DisplayGeometrySelector(layers, origin, ([x, y]) => [x, y])
+        assert.deepEqual(selector.select(bounds, 1.5, radius), blocks)
+        assert.deepEqual(selector.select(bounds, 1.5, requiredDisplayRadius(1)),
+            selectDisplayBlocks(layers, origin, bounds, screen))
+    }
+})
+
 const definition = '+proj=tmerc +lat_0=22.3121333333333 +lon_0=114.178555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.243649,-1.158827,-1.094246 +units=m +no_defs'
 
 test('real EPSG2326 metadata near the 0.75 CSS boundary preserves exact per-node choices and DPR identity', () => {
@@ -119,7 +156,11 @@ test('real EPSG2326 metadata near the 0.75 CSS boundary preserves exact per-node
     for (const scale of [9195641.059280677, 13793461.588921, 13793461.6, 18391282.118561]) {
         const screen = (p: [number, number]): [number, number] => { const q = project(p); return [(q[0] - unit[0]) * scale, (q[1] - unit[1]) * scale] }
         const expected = selectDisplayBlocks(layers, origin, bounds, screen)
-        for (const dpr of [1, 2]) { void dpr; assert.deepEqual(selector.select(bounds, scale), expected) }
+        for (const dpr of [1, 2]) {
+            const radius = requiredDisplayRadius(dpr)
+            assert.equal(radius, 0.75)
+            assert.deepEqual(selector.select(bounds, scale, radius), expected)
+        }
     }
 })
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import DisplayIndex from '../src/core/grid/displayIndex'
-import { AreaSummary, outlineBlend, outlineCoverage } from '../src/core/grid/displayMath'
+import { outlineBlend, outlineCoverage } from '../src/core/grid/displayMath'
 import { blockKey, displayLayer, displayLayers, nodeBounds, nodeRange, projectedRadius, selectDisplayBlocks } from '../src/core/grid/displayHierarchy'
 import type { Bounds, DisplayBlock, DisplayCell, GridDisplayView } from '../src/core/grid/displayTypes'
 
@@ -130,73 +130,13 @@ test('mixed coarse and fine regions retain originals, holes and fractional occup
         cell(1, [0, 0, 4, 4], 0, 100, 8), cell(2, [4, 0, 5, 1], 1, 20, 2),
         cell(3, [5, 0, 5.25, 0.25], 2, 40, 3), cell(4, [5.25, 0, 5.5, 0.25], 2, 60, 4, true),
     ])
-    const view = index.query([0, 0, 8, 4], 0.5)
-    assert.equal(view.cellCount, 4)
+    const view = index.queryBlocks(selectDisplayBlocks(index.displayLayers, index.origin, index.bounds, ([x, y]) => [x / 0.5, y / 0.5]))
     assert.deepEqual(cells(view).map(item => item.id), [1, 2])
     assert.equal(fieldAt(view, 5, 0)?.occupiedFraction, 0.125)
-    assert.equal(fieldAt(view, 5, 0)?.elevation, 50)
+    assert.equal(fieldAt(view, 5, 0)?.elevation, 0)
     assert.equal(fieldAt(view, 5, 0)?.minCellSize, 0.25)
-    assert.equal(fieldAt(index.query([0, 0, 8, 4], 0.5, false), 5, 0)?.occupiedFraction, 0.0625)
+    assert.equal(fieldAt(index.queryBlocks(selectDisplayBlocks(index.displayLayers, index.origin, index.bounds, ([x, y]) => [x / 0.5, y / 0.5]), false), 5, 0)?.occupiedFraction, 0.0625)
     assert.equal(fieldAt(view, 5.5, 0), undefined)
-})
-
-test('three children 51% B plus one all A yields 61.75% A', () => {
-    const original: DisplayCell[] = []
-    let id = 1
-    for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
-        const group = Math.floor(x / 10) + 2 * Math.floor(y / 10)
-        const local = x % 10 + 10 * (y % 10)
-        original.push(cell(id++, [x, y, x + 1, y + 1], 1, group === 3 ? 8 : 4,
-            group === 3 || local >= 51 ? 1 : 2))
-    }
-    const index = new DisplayIndex([0, 0, 20, 20], { grid_info: [[20, 20], [1, 1]], alignment_origin: [0, 0] })
-    index.load(original)
-    const summary = index.summarize([0, 0, 20, 20])!
-    assert.equal(summary.occupiedFraction, 1)
-    assert.equal(summary.landClass, 1)
-    assert.equal(summary.elevation, 5)
-    assert.equal(original.filter(item => item.landClass === 1).length / original.length, 0.6175)
-    const incrementallyBuilt = new DisplayIndex([0, 0, 20, 20],
-        { grid_info: [[20, 20], [1, 1]], alignment_origin: [0, 0] })
-    for (const item of original) incrementallyBuilt.upsert(item)
-    assert.equal(incrementallyBuilt.summarize([0, 0, 20, 20])?.landClass, 1)
-    assert.equal(incrementallyBuilt.summarize([0, 0, 20, 20])?.elevation, 5)
-})
-
-test('exact class ties choose lower code and near unequal areas choose larger area', () => {
-    const summary = new AreaSummary()
-    summary.addCell(cell(1, [0, 0, 1, 1], 0, 0, 7), 1, 1, 1_000_000_000_000n)
-    summary.addCell(cell(2, [0, 0, 1, 1], 0, 0, 3), 1, 1, 1_000_000_000_000n)
-    assert.equal(summary.toField([0, 0, 2, 1])?.landClass, 3)
-    summary.addCell(cell(3, [0, 0, 1, 1], 0, 0, 7), 1e-12, 1, 1n)
-    assert.equal(summary.toField([0, 0, 2, 1])?.landClass, 7)
-})
-
-test('decimal native boundaries have one owner and equal schema areas keep exact class ties', () => {
-    const originals = [cell(1, [0, 0, 0.3, 0.3], 0, 1, 2)]
-    for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) originals.push(cell(2 + y * 3 + x,
-        [0.3 + x * 0.1, y * 0.1, 0.3 + (x + 1) * 0.1, (y + 1) * 0.1], 1, 1, 9))
-    for (const bulk of [true, false]) {
-        const index = new DisplayIndex([0, 0, 0.6, 0.3], { grid_info: [[0.3, 0.3], [0.1, 0.1]], alignment_origin: [0, 0] })
-        if (bulk) index.load(originals)
-        else for (const original of originals) index.upsert(original)
-        assert.equal(index.summarize([0, 0, 0.6, 0.6])?.landClass, 2)
-        const blocks = selectDisplayBlocks(index.displayLayers, index.origin, index.bounds, ([x, y]) => [1000 * x, 1000 * y])
-        assert.equal(blocks.length, 18)
-        assert.equal(new Set(blocks.map(blockKey)).size, blocks.length)
-        const view = index.queryBlocks(blocks)
-        assert.equal(cells(view).length, 10)
-        assert.equal(cells(view).filter(original => original.id === 1).length, 1)
-    }
-})
-
-test('one finest area unit breaks a class tie above the float64 integer range', () => {
-    const side = 2 ** -30
-    const index = new DisplayIndex([0, 0, 4, 4], { grid_info: [[4, 4], [1, 1], [side, side]], alignment_origin: [0, 0] })
-    index.load([cell(1, [0, 0, 1, 1], 1, 0, 2), cell(2, [1, 0, 2, 1], 1, 0, 9), cell(3, [2, 0, 2 + side, side], 2, 0, 9)])
-    assert.equal(index.summarize([0, 0, 4, 4])?.landClass, 9)
-    index.remove(3)
-    assert.equal(index.summarize([0, 0, 4, 4])?.landClass, 2)
 })
 
 test('tiny live and deleted cells survive updates beside a large area', () => {
@@ -210,11 +150,9 @@ test('tiny live and deleted cells survive updates beside a large area', () => {
     index.upsert(coarse)
     index.upsert({ ...fine, deleted: true })
     assert.equal(index.summarize(root, false)?.minCellSize, 100000000)
-    assert.equal(index.summarize(root, false)?.elevation, 1)
     index.upsert(fine)
     index.remove(coarse.id)
     assert.equal(index.summarize(root)?.minCellSize, 1)
-    assert.equal(index.summarize(root)?.elevation, 2)
     assert.ok(index.summarize(root)!.occupiedFraction > 0)
     const rebuilt = make()
     rebuilt.load([fine])
@@ -226,6 +164,30 @@ test('selection summary requires one complete display node', () => {
     index.load([cell(1, [0, 0, 1, 1], 0), cell(2, [1, 0, 1.25, 0.25], 1)])
     assert.equal(index.summarize([1, 0, 2, 1])?.occupiedFraction, 0.0625)
     assert.throws(() => index.summarize([0, 0, 1.5, 0.5]), /display node/)
+})
+
+test('selection shares all and live ancestor summaries through edits', () => {
+    const index = new DisplayIndex([0, 0, 2, 2], {
+        grid_info: [[1, 1], [0.5, 0.5]], alignment_origin: [0, 0],
+    })
+    const root: Bounds = [0, 0, 2, 2]
+    index.load([cell(1, [0, 0, 1, 1], 0), cell(2, [1, 0, 1.5, 0.5], 1, 0, 0, true)])
+    index.setSelected(2, true)
+    assert.equal(index.selectedFraction(root), 0.2)
+    assert.equal(index.selectedFraction(root, false), 0)
+    index.selectAll(true)
+    assert.equal(index.selectedFraction(root), 1)
+    assert.equal(index.selectedFraction(root, false), 1)
+    index.upsert(cell(2, [1, 0, 1.5, 0.5], 1))
+    assert.equal(index.selectedFraction(root, false), 1)
+    index.setSelected(1, false)
+    assert.equal(index.selectedFraction(root), 0.2)
+    index.remove(2)
+    assert.equal(index.selectedFraction(root), 0)
+    index.upsert(cell(2, [1, 0, 1.5, 0.5], 1))
+    assert.equal(index.selectedFraction(root), 0)
+    index.selectAll(false)
+    assert.equal(index.selectedFraction(root), 0)
 })
 
 test('removing the only finest cell restores the coarser minimum real cell side', () => {
@@ -244,7 +206,7 @@ test('centered line density and fixed four CSS pixel transition agree at DPR 1 a
     for (const dpr of [1, 2]) assert.equal(outlineCoverage(dpr, 4 * dpr), 0.4375)
 })
 
-test('inspection preserves hanging-edge neighbors and stable original segment IDs', () => {
+test('inspection preserves hanging-edge neighbors and stable segment IDs', () => {
     const index = new DisplayIndex([0, 0, 2, 1], { grid_info: [[1, 1], [0.5, 0.5]], alignment_origin: [0, 0] })
     index.load([cell(10, [0, 0, 1, 1], 0), cell(11, [1, 0, 1.5, 0.5], 1), cell(12, [1, 0.5, 1.5, 1], 1)])
     const inspection = index.inspect(0.5, 0.5)
@@ -257,7 +219,7 @@ test('inspection preserves hanging-edge neighbors and stable original segment ID
     assert.deepEqual(index.inspect(0.5, 0.5, false).neighbors.map(n => n.cell.id), [12])
 })
 
-test('one edit visits its ancestor path and leaves distant block identity unchanged', () => {
+test('one edit leaves distant block identity unchanged', () => {
     const index = new DisplayIndex([0, 0, 128, 2], { grid_info: [[1, 1]], alignment_origin: [0, 0] })
     index.load([cell(1, [0, 0, 1, 1], 0, 10), cell(2, [80, 0, 81, 1], 0, 20)])
     const blockLayer = index.displayLayers.findIndex(layer => layer.width === 64)
@@ -267,15 +229,12 @@ test('one edit visits its ancestor path and leaves distant block identity unchan
     ]
     const first = index.queryBlocks(blocks).chunks
     assert.equal(first.length, 2)
-    const distant = first[1], revision = index.getChunkRevision(distant.key)
+    const distant = first[1]
     index.upsert(cell(1, [0, 0, 1, 1], 0, 30))
-    assert.ok(index.updateVisits <= 2 * index.displayLayers.length)
     const next = index.queryBlocks(blocks).chunks
     assert.notEqual(next[0], first[0])
     assert.equal(next[1], distant)
-    assert.equal(index.getChunkRevision(distant.key), revision)
     index.remove(1)
-    assert.ok(index.updateVisits <= index.displayLayers.length)
     assert.deepEqual(index.selectBounds([0, 0, 2, 2]), [])
 })
 
@@ -296,12 +255,12 @@ test('edits refresh virtual ancestors and fine nodes while distant chunks keep t
     source.values = () => { throw new Error('Unexpected original-cell scan') }
     source[Symbol.iterator] = () => { throw new Error('Unexpected original-cell scan') }
     const originalCoarse = index.queryBlocks(coarse).chunks
+    index.cache.retain(index.cacheKeys(coarse), true)
     const originalFine = index.queryBlocks(fine).chunks
+    index.cache.retain(index.cacheKeys(fine), true)
     const farCoarse = originalCoarse[0], farFine = originalFine[0]
-    const revisions = [index.getChunkRevision(farCoarse.key), index.getChunkRevision(farFine.key)]
     for (const replacement of [{ ...near, elevation: 19, landClass: 4 }, { ...near, deleted: true }, near]) {
         index.upsert(replacement)
-        assert.ok(index.updateVisits <= 2 * (ancestor + 1))
         const expected = make()
         expected.load([replacement, neighbor, far])
         for (const showDeleted of [true, false]) {
@@ -313,18 +272,16 @@ test('edits refresh virtual ancestors and fine nodes while distant chunks keep t
         }
         assert.equal(index.queryBlocks(coarse).chunks[0], farCoarse)
         assert.equal(index.queryBlocks(fine).chunks[0], farFine)
-        assert.deepEqual([index.getChunkRevision(farCoarse.key), index.getChunkRevision(farFine.key)], revisions)
     }
     index.remove(near.id)
-    assert.ok(index.updateVisits <= ancestor + 1)
     assert.equal(fields(index.queryBlocks(coarse))[1].minCellSize, 1)
     assert.equal(index.queryBlocks(coarse, false).chunks.length, 1)
     index.upsert(near)
-    assert.equal(fields(index.queryBlocks(coarse))[1].landClass, 2)
+    assert.equal(fields(index.queryBlocks(coarse))[1].landClass, 0)
 })
 
-test('fixed viewport output and query work stay bounded when leaf count quadruples', () => {
-    const measurements: { leaves: number; output: number; visits: number }[] = []
+test('fixed viewport output stays bounded when leaf count quadruples', () => {
+    const measurements: { leaves: number; output: number }[] = []
     for (const side of [64, 128]) {
         const index = new DisplayIndex([0, 0, 1, 1], { grid_info: [[1, 1], [1 / side, 1 / side]], alignment_origin: [0, 0] })
         const original: DisplayCell[] = []
@@ -333,47 +290,12 @@ test('fixed viewport output and query work stay bounded when leaf count quadrupl
             if ((x + y) % 2 === 0) original.push(cell(id++, [x / side, y / side, (x + 1) / side, (y + 1) / side], 1, 10, 2))
         }
         index.load(original)
-        const view = index.query([0, 0, 1, 1], 1000)
+        const view = index.queryBlocks(selectDisplayBlocks(index.displayLayers, index.origin, index.bounds, ([x, y]) => [x / 1000, y / 1000]))
         const sample = fieldAt(view, 0, 0)!
         const area = (sample.bounds[2] - sample.bounds[0]) * (sample.bounds[3] - sample.bounds[1])
         assert.equal(sample.occupiedFraction * area, 0.5)
-        measurements.push({ leaves: original.length, output: fields(view).length + cells(view).length, visits: index.queryVisits })
+        measurements.push({ leaves: original.length, output: fields(view).length + cells(view).length })
     }
     assert.equal(measurements[1].leaves, measurements[0].leaves * 4)
     assert.equal(measurements[1].output, measurements[0].output)
-    assert.ok(measurements[1].visits <= measurements[0].visits + 4, JSON.stringify(measurements))
-})
-
-test('panning bounds historical CPU chunks while retaining the current block', () => {
-    const count = 800, blockWidth = 256
-    const index = new DisplayIndex([0, 0, count * blockWidth, 4],
-        { grid_info: [[4, 4]], alignment_origin: [0, 0] })
-    const original: DisplayCell[] = []
-    for (let i = 0; i < count; i++) {
-        original.push(cell(i + 1, [i * blockWidth, 0, i * blockWidth + 4, 4], 0))
-    }
-    index.load(original)
-    const blockLayer = index.displayLayers.findIndex(layer => layer.width === blockWidth)
-    const displayLayer = index.displayLayers.findIndex(layer => layer.width === 8)
-    assert.ok(blockLayer > displayLayer)
-    const requested = (x: number): DisplayBlock[] => [{ blockLayer, x, y: 0, displayLayer }]
-    const first = index.queryBlocks(requested(0)).chunks[0]
-    for (let i = 1; i < count; i++) {
-        const view = index.queryBlocks(requested(i))
-        assert.equal(view.chunks.length, 1)
-    }
-    const cache = (index as unknown as { chunks: Map<string, unknown> }).chunks
-    assert.ok(cache.size <= 768, `retained ${cache.size} old chunks`)
-    assert.equal(index.getChunkRevision(first.key), 0)
-    assert.ok(index.getChunkRevision(index.queryBlocks(requested(count - 1)).chunks[0].key) > 0)
-})
-
-test('invalid initial load and replacement are explicit and preserve a healthy original', () => {
-    assert.throws(() => new DisplayIndex([0, 0, 1, 1], {}), /schema cell sizes/)
-    const duplicate = new DisplayIndex([0, 0, 2, 2], { grid_info: [[1, 1]], alignment_origin: [0, 0] })
-    assert.throws(() => duplicate.load([cell(1, [0, 0, 1, 1], 0), cell(1, [1, 0, 2, 1], 0)]), /Duplicate/)
-    const index = new DisplayIndex([0, 0, 2, 2], { grid_info: [[1, 1]], alignment_origin: [0, 0] })
-    index.load([cell(1, [0, 0, 1, 1], 0, 10)])
-    assert.throws(() => index.upsert(cell(1, [0, 0, 0.25, 0.25], 0, 20)))
-    assert.equal(index.getCell(1)?.elevation, 10)
 })

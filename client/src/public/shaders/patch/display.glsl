@@ -25,7 +25,6 @@ void main() {
 #ifdef FRAGMENT_SHADER
 uniform sampler2D paletteTexture;
 uniform int displayAttribute;
-uniform float metersPerPixel;
 uniform float devicePixelRatio;
 uniform vec2 elevationRange;
 uniform vec3 elevationLowColor;
@@ -46,8 +45,8 @@ void main() {
         float category = displayAttribute == 0 ? sampleValues.x : sampleValues.z;
         color = texelFetch(paletteTexture, ivec2(int(mod(category, 256.0)), 0), 0).rgb;
     }
-    float u = min(1.0, metersPerPixel / sampleValues.w);
-    float coverage = 1.0 - (1.0 - u) * (1.0 - u);
+    float u;
+    float coverage;
     if (sampleFlags.x > 0.0) {
         // Grid distance per CSS pixel, from this four-corner node's raster footprint.
         vec2 dx = dFdx(uv) * sampleFlags.xy * devicePixelRatio;

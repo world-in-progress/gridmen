@@ -3,10 +3,11 @@ import test from 'node:test'
 import proj4 from 'proj4'
 import { DisplayGeometrySelector } from '../src/core/grid/displayGeometry'
 import type { DisplayGeometryFootprint } from '../src/core/grid/displayGeometry'
-import { DisplayGeometryEngine } from '../src/core/grid/displayGeometryEngine'
+import { DisplayGeometryEngine, type PreparedDisplayChunk } from '../src/core/grid/displayGeometryEngine'
+import { canonicalDisplayChunks, decodeDisplayBlock } from '../src/core/grid/displayWire'
 import { displayLayer, displayLayers, nodeBounds, nodeRange, projectedRadius, selectDisplayBlocks } from '../src/core/grid/displayHierarchy'
 import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
-import type { Bounds, DisplayChunk } from '../src/core/grid/displayTypes'
+import type { Bounds, DisplayBlock, DisplayChunk, GridDisplayMeta } from '../src/core/grid/displayTypes'
 
 const EARTH = 2 * Math.PI * 6378137
 const config = () => ({ layers: displayLayers([0, 0, 1048576, 512], [[64, 64], [1, 1]], [0, 0]),
@@ -296,4 +297,78 @@ test('rejected ranges do not eagerly project later nodes outside the finite proj
     }
     const selector = new DisplayGeometrySelector(layers, [0, 0], projection)
     assert.deepEqual(selector.select([0, 0, 64, 64], 0.8), selectDisplayBlocks(layers, [0, 0], [0, 0, 64, 64], ([x, y]) => [x * 0.8, y * 0.8]))
+})
+
+test('D4 canonical decode prepares each field and crossing original once with exact geometry', () => {
+    const layers = displayLayers([0, 0, 2, 1], [[1, 1]], [0, 0])
+    const source = { layers, origin: [0, 0] as [number, number], definition: JSON.stringify(proj4.defs('EPSG:3857')) }
+    const meta = { revision: 'd4', displayLayers: layers, alignment_origin: [0, 0], grid_info: [[1, 1]] } as GridDisplayMeta
+    const originals = new Map<number, Bounds>([
+        [1, [0.5, 0, 1.5, 1]], [2, [0.75, 0.25, 1.25, 0.75]], [3, [1.5, 0, 2.5, 1]],
+    ])
+    const wire = (x: number, ids: number[]) => {
+        const buffer = new ArrayBuffer(4 + (4096 + ids.length) * 72), data = new DataView(buffer)
+        data.setUint32(0, 0x47444e35, false)
+        const put = (index: number, id: number, bounds: Bounds) => {
+            const offset = 4 + index * 72, area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
+            data.setBigUint64(offset, BigInt(id), true)
+            bounds.forEach((value, coordinate) => data.setFloat64(offset + 8 + coordinate * 8, value, true))
+            data.setFloat64(offset + 40, area, true)
+            data.setFloat64(offset + 48, area * (id ? id * 1.125 : index / 7), true)
+            data.setFloat64(offset + 56, 1 / 64, true)
+            data.setUint32(offset + 64, 1, true)
+            data.setUint32(offset + 68, id ? id : index % 16, true)
+        }
+        for (let index = 0; index < 4096; index++) {
+            const col = index % 64, row = Math.floor(index / 64)
+            put(index, 0, [x + col / 64, row / 64, x + (col + 1) / 64, (row + 1) / 64])
+        }
+        ids.forEach((id, index) => put(4096 + index, id, originals.get(id)!))
+        return buffer
+    }
+    const blocks: { block: DisplayBlock; buffer: ArrayBuffer }[] = [
+        { block: { blockLayer: 0, x: 0, y: 0, displayLayer: 0 }, buffer: wire(0, [1, 2]) },
+        { block: { blockLayer: 0, x: 1, y: 0, displayLayer: 0 }, buffer: wire(1, [2, 3]) },
+    ]
+    const count = (engine: DisplayGeometryEngine) => {
+        const target = engine as unknown as { prepareChunk(chunk: DisplayChunk): PreparedDisplayChunk }
+        const prepare = target.prepareChunk.bind(engine)
+        const stats = { calls: 0, fields: 0, originals: 0 }
+        target.prepareChunk = chunk => {
+            stats.calls++
+            stats.fields += chunk.fields.length
+            stats.originals += chunk.cells.length
+            return prepare(chunk)
+        }
+        return stats
+    }
+    const baseline = new DisplayGeometryEngine(source), before = count(baseline)
+    const decodeStart = performance.now()
+    const raw = blocks.map(({ block, buffer }) => decodeDisplayBlock(buffer, block, meta))
+    baseline.prepare(raw)
+    const decodeAndPrepareMs = performance.now() - decodeStart
+    const secondStart = performance.now()
+    const canonical = [...new Map(raw.flatMap(canonicalDisplayChunks).map(chunk => [chunk.key, chunk] as const)).values()]
+    const expected = baseline.prepare(canonical)
+    const secondPrepareMs = performance.now() - secondStart
+    const engine = new DisplayGeometryEngine(source), after = count(engine)
+    const canonicalStart = performance.now()
+    const decoded = engine.run({ type: 'decode', blocks, meta }).decodedBlocks!
+    const canonicalMs = performance.now() - canonicalStart
+    const actual = new Map(decoded.flatMap(group => group.chunks.map((chunk, index) => [chunk.key, group.prepared[index]] as const))
+        .filter((entry): entry is readonly [string, PreparedDisplayChunk] => entry[1] !== undefined))
+    assert.deepEqual([...actual.keys()].sort(), canonical.map(chunk => chunk.key).sort())
+    canonical.forEach((chunk, index) => assert.deepEqual(actual.get(chunk.key), expected[index], chunk.key))
+    assert.equal(before.fields, 16384)
+    assert.equal(after.fields, 8192)
+    assert.equal(before.calls, 7)
+    assert.equal(before.originals, 7)
+    assert.equal(after.originals, 3)
+    assert.equal(after.calls, 5)
+    assert.deepEqual(decoded.map(group => group.prepared.map(Boolean)), [[true, true, true], [true, false, true]])
+    console.log(JSON.stringify({ stage: 'D4 canonical', blocks: blocks.length, fieldsPerBlock: 4096,
+        canonicalOriginals: 3, baselinePrepareChunkCalls: before.calls, baselineOriginalPreparations: before.originals,
+        baselineFieldPreparations: before.fields, baselineDecodeAndPrepareMs: decodeAndPrepareMs,
+        baselineSecondPrepareMs: secondPrepareMs, prepareChunkCalls: after.calls,
+        originalPreparations: after.originals, fieldPreparations: after.fields, decodeAndPrepareMs: canonicalMs }))
 })

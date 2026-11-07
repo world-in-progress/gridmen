@@ -2,7 +2,6 @@ import proj4 from 'proj4'
 import * as apis from '@/template/api/apis'
 import Dispatcher from '../message/dispatcher'
 import BoundingBox2D from '../util/boundingBox2D'
-import { MercatorCoordinate } from '../math/mercatorCoordinate'
 import { PatchContext, CellCheckInfo, PatchSaveInfo, MultiCellBaseInfo, CellKeyHashTable } from './types'
 
 const DELETED_FLAG = 1
@@ -31,7 +30,6 @@ export default class PatchCore {
     // Patch metadata
     nodeInfo: string
     levelInfos: PatchLevelInfo[]
-    renderRelativeCenter: Float32Array = new Float32Array([0.0, 0.0])
 
     // Private patch memory cache
     private _lockId: string
@@ -113,13 +111,6 @@ export default class PatchCore {
         // Update proj4 definitions
         apis.proj.getProj4Defs(srcEPSG).then((proj4Defs) => {
             proj4.defs(this.srcCRS, proj4Defs)
-
-            // Calculate bounding box center in mercator coordinates for anti-jitter rendering
-            const bBoxCenter: [number, number] = proj4(this.srcCRS, this.targetCRS, this.bBox.center)
-            const mercatorCenter = MercatorCoordinate.fromLonLat(bBoxCenter)
-            const centerX = encodeFloatToDouble(mercatorCenter[0])
-            const centerY = encodeFloatToDouble(mercatorCenter[1])
-            this.renderRelativeCenter = new Float32Array([...centerX, ...centerY])
 
             // Clear old cells before loading the current patch.
             this._nextStorageId = 0
@@ -370,14 +361,4 @@ export default class PatchCore {
     remove() {
         this._dispatcher.remove()
     }
-}
-
-// Helpers //////////////////////////////////////////////////////////////////////////////////////////////////////
-
-function encodeFloatToDouble(value: number) {
-    const result = new Float32Array(2)
-    result[0] = value
-    const delta = value - result[0]
-    result[1] = delta
-    return result
 }
