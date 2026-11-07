@@ -86,7 +86,9 @@ def prune(source, cache, keep=None):
             except FileNotFoundError:
                 pass  # Another publisher has already removed this generation.
     with _OWNERS:
-        _PENDING.setdefault((source,cache), set()).update(directories)
+        pending = _PENDING.setdefault((source,cache), set())
+        pending.update(directories)
+        pending.discard(keep)
     _collect((source,cache))
 
 

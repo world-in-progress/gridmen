@@ -165,6 +165,29 @@ def test_all_direct_readers_keep_a_retired_generation(tmp_path):
         current.close()
 
 
+def test_borrowed_old_generation_can_become_current_again(sources):
+    grid, paths, directory = sources
+    path = paths['a']/'ne.txt'
+    stat = path.stat()
+    with grid._display('a') as old:
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns+1))
+        with grid._display('a') as replaced:
+            assert replaced.directory != old.directory
+        assert old.directory in cache._PENDING[(paths['a'], directory)]
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        with grid._display('a') as restored:
+            assert restored is not old and restored.directory == old.directory
+            assert restored.inspect(1,1)['cell']['id'] == 1
+        assert not replaced.directory.exists()
+    assert old.cells.closed and not restored.cells.closed
+    cache.close_cache()
+    assert restored.cells.closed and restored.directory.exists()
+    assert restored.directory not in cache._PENDING.get((paths['a'], directory), ())
+    with grid._display('a') as reopened:
+        assert reopened.directory == restored.directory
+        assert reopened.inspect(1,1)['cell']['id'] == 1
+
+
 def test_new_generation_cleans_legacy_versions_only_for_its_source(tmp_path):
     source = write_grid(tmp_path/'source',[((0,0,8,8),1,3)])
     directory = tmp_path/'cache'
