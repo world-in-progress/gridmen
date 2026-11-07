@@ -355,9 +355,9 @@ def _directory_query(db, name, columns, ranges, first_layer, last_layer):
     # One statement per directory, at most nine probes, with no native-level
     # loop. A rectangle can match several fragments; callers deduplicate IDs.
     values = ','.join('(?,?,?,?,?,?,?,?)' for _ in ranges)
-    return db.execute(f'''
+    return json.loads(db.execute(f'''
         WITH search(xh0,xh1,xl0,xl1,yh0,yh1,yl0,yl1) AS (VALUES {values})
-        SELECT {columns}
+        SELECT json_group_array(json_array({columns}))
         FROM search AS s
         CROSS JOIN {name}_bounds AS b
         CROSS JOIN {name}_coords AS c ON c.id=b.entry_id
@@ -366,7 +366,7 @@ def _directory_query(db, name, columns, ranges, first_layer, last_layer):
           AND b.max_yhi >= s.yh0 AND b.min_yhi <= s.yh1
           AND b.max_ylo >= s.yl0 AND b.min_ylo <= s.yl1
           AND b.max_layer >= ? AND b.min_layer <= ?
-    ''', (*[value for interval in ranges for value in interval], first_layer, last_layer))
+    ''', (*[value for interval in ranges for value in interval], first_layer, last_layer)).fetchone()[0])
 
 
 def _tile_rtree(directory, layers, origin, source):
@@ -978,8 +978,8 @@ class GridDisplayIndex:
                                                  np.column_stack(bounds)[selected], box))
 
             if display_layer < max_native:
-                originals = list(_directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
-                                                  search, display_layer+1, max_native))
+                originals = _directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
+                                             search, display_layer+1, max_native)
                 if originals:
                     # Rtree fragments can repeat a cell; emit each ID once.
                     unique, groups, seen = [], defaultdict(list), set()
