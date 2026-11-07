@@ -590,11 +590,11 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     }
     private selectionChanged(ids: Set<number>): void {
         if (!ids.size) return
+        const index = this._index!
         let bounds: Bounds | undefined
         for (const id of ids) {
-            this._index?.setSelected(id, this.hitBuffer.isHit(id))
-            const cell = this._index?.getCell(id)
-            if (!cell) continue
+            index.setSelected(id, this.hitBuffer.isHit(id))
+            const cell = index.getCell(id)!
             if (!bounds) bounds = [...cell.bounds]
             else {
                 bounds[0] = Math.min(bounds[0], cell.bounds[0])
@@ -603,7 +603,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                 bounds[3] = Math.max(bounds[3], cell.bounds[3])
             }
         }
-        if (bounds) this.refreshSelection(bounds)
+        this.refreshSelection(bounds!)
     }
     private refreshSelection(bounds?: Bounds): void {
         this._editVersion++
