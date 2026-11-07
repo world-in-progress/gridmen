@@ -527,6 +527,8 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const prepared = this._prepared.get(chunk)
         if (!prepared) throw new Error('Display chunk geometry is not prepared')
         const { data, origin } = prepared
+        // Immutable sources have no selection; prepared flags already contain zero.
+        if (this._source) return { data, origin }
         chunk.cells.forEach((cell, index) => { data[index * 16 + 14] = this.hitBuffer.isHit(cell.id) ? 1 : 0 })
         chunk.fields.forEach((field, index) => { data[(chunk.cells.length + index) * 16 + 14] = this.fieldSelection(field) })
         return { data, origin }
