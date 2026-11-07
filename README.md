@@ -29,6 +29,8 @@ Source DEM, LULC, and vector data must be supplied with appropriate usage rights
 
 Choose **Check** on an assembled grid or patch to browse it read-only. Select level, elevation, or land class on assembled grids; patches show level. The color legend identifies the displayed values, and darker outlines indicate finer cells. A field-mode indicator appears beside the map when fine cells are shown as a continuous field. Click the map in **Check**, or enable the patch editor's checking tool, to inspect real cells and their coarse/fine neighbors at any scale. Assembled-grid neighbors include their real edge IDs.
 
+If loading an assembled grid fails, choose **Retry** once the source is available again.
+
 ## Quick start
 
 Use Node.js 22.12 or newer and npm, Python 3.12 (the version selected by `server/.python-version`), and `uv`. The backend manifest allows Python 3.10 or newer, subject to the locked dependencies. Native GDAL libraries and Python bindings must match; on macOS the manifest pins GDAL 3.13.1. See the manifests for the complete dependency lists.
