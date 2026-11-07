@@ -135,13 +135,13 @@ function field(bounds: Sample['bounds'], elevation: number): Sample {
 }
 
 const crossing = original(42, [0.5, 0.25, 1.5, 0.75], 12.123456789)
-const known = original(99, [0.75, 0.5, 1.25, 0.875], -4.25)
+const anotherCrossing = original(99, [0.75, 0.5, 1.25, 0.875], -4.25)
 function sampleBlocks() {
     return [
         { block: block(0), buffer: wire([field([0.1250000001, 0.125, 0.375, 0.375], 2.123456789),
-            original(1, [0, 0, 0.125, 0.125], 5), crossing, known]) },
+            original(1, [0, 0, 0.125, 0.125], 5), crossing, anotherCrossing]) },
         { block: block(1), buffer: wire([field([1.125, 0.125, 1.375, 0.375], 3.123456789),
-            original(2, [1.5, 0, 1.625, 0.125], 6), crossing, known]) },
+            original(2, [1.5, 0, 1.625, 0.125], 6), crossing, anotherCrossing]) },
     ]
 }
 
@@ -150,8 +150,8 @@ test('production worker matches in-process canonical decode and exact geometry',
     const client = new DisplayGeometryClient(config())
     t.after(() => client.dispose())
     const blocks = sampleBlocks()
-    const expected = new DisplayGeometryEngine(config()).run({ type: 'decode', blocks, meta, knownOriginals: [99] }).decodedBlocks
-    const actual = (await client.run({ type: 'decode', blocks: sampleBlocks(), meta, knownOriginals: [99] })).decodedBlocks
+    const expected = new DisplayGeometryEngine(config()).run({ type: 'decode', blocks, meta }).decodedBlocks
+    const actual = (await client.run({ type: 'decode', blocks: sampleBlocks(), meta })).decodedBlocks
     const worker = ProductionWorker.instances.at(-1)!
     assert.equal(worker.received.length, 2, 'one acknowledgment per wire input')
     assert.ok(worker.received.every(reply => reply.decoded instanceof ArrayBuffer && !reply.result && !('chunks' in reply.part!)))
@@ -159,10 +159,12 @@ test('production worker matches in-process canonical decode and exact geometry',
     assert.deepEqual(actual?.map(group => group.chunks.map(chunk => chunk.key)), [
         ['0:0:0:0', 'original:42', 'original:99'], ['0:1:0:0', 'original:42', 'original:99'],
     ])
-    assert.deepEqual(actual?.map(group => group.prepared.map(value => !!value)), [[true, true, false], [true, false, false]])
+    assert.deepEqual(actual?.map(group => group.prepared.map(value => !!value)), [[true, true, true], [true, false, false]])
     assert.deepEqual(actual?.[0].chunks[1].bounds, crossing.bounds)
     assert.notEqual(actual?.[0].chunks[0].fields[0].bounds[0], Math.fround(actual![0].chunks[0].fields[0].bounds[0]))
     assert.equal(actual?.[0].chunks[0].fields[0].elevation, expected?.[0].chunks[0].fields[0].elevation)
+    const next = (await client.run({ type: 'decode', blocks: sampleBlocks(), meta })).decodedBlocks
+    assert.deepEqual(next, expected, 'a new RPC prepares its own originals once, without retaining the previous RPC dedup set')
 })
 
 test('production worker rejects malformed GDN5 before accepting another block', async t => {

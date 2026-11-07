@@ -398,7 +398,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                             // HTTP may finish after a different zoom has won.
                             // Do not decode/project an obsolete viewport first.
                             if (!continueAfterBlock()) throw new DOMException('Grid display cancelled', 'AbortError')
-                            const result = await geometry.run({ type: 'decode', blocks: buffers, meta: source.meta, knownOriginals: source.cache.originalIds }, continueAfterBlock)
+                            const result = await geometry.run({ type: 'decode', blocks: buffers, meta: source.meta }, continueAfterBlock)
                             if (request.signal.aborted || generation !== this._generation) throw new DOMException('Grid display cancelled', 'AbortError')
                             if (!result.decodedBlocks) throw new Error('Missing decoded display geometry')
                             return result.decodedBlocks

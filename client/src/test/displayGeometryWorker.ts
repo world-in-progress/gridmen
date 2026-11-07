@@ -21,7 +21,7 @@ export class GeometryWorker {
                 if (input.task.type === 'decode') {
                     if (this.decodeId !== input.id) {
                         this.decodeId = input.id
-                        this.seenOriginals = new Set(input.task.knownOriginals)
+                        this.seenOriginals = new Set()
                     }
                     const [part] = this.engine!.decodeBlocks(input.task.blocks, input.task.meta, this.seenOriginals)
                     const decoded = input.task.blocks[0]?.buffer

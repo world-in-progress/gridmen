@@ -65,11 +65,6 @@ export class DisplayViewCache {
         return next
     }
 
-    get originalIds(): number[] {
-        return [...this.currentChunks.values()].filter(chunk => chunk.key.startsWith('original:') && this.chunks.get(chunk)?.prepared)
-            .map(chunk => chunk.cells[0].id)
-    }
-
     view(keys: string[]): GridDisplayView {
         const chunks = new Map<string, DisplayChunk>()
         for (const key of keys) {

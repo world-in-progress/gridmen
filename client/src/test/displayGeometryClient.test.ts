@@ -74,13 +74,12 @@ test('decode transfers one buffer after each block acknowledgment and keeps empt
         return { block: { blockLayer: 0, x, y: 0, displayLayer: 0 }, buffer }
     })
     const meta = { revision: 'rpc', displayLayers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), alignment_origin: [0, 0], grid_info: [[1, 1]] } as GridDisplayMeta
-    const decoding = client.run({ type: 'decode', blocks, meta, knownOriginals: [41] })
+    const decoding = client.run({ type: 'decode', blocks, meta })
     const worker = ManualWorker.instances.at(-1)!
     const id = worker.sent[0].id
     assert.equal(worker.sent.length, 1)
     assert.equal(worker.sent[0].transfers, 1)
     assert.deepEqual(blocks.map(item => item.buffer.byteLength), [0, 4, 4])
-    assert.deepEqual((worker.sent[0].task as Extract<DisplayGeometryTask, { type: 'decode' }>).knownOriginals, [41])
     assert.throws(() => client.run({ type: 'decode', blocks: [], meta }), /Concurrent/)
     for (let i = 0; i < 3; i++) {
         const task = worker.sent[i].task
@@ -91,7 +90,6 @@ test('decode transfers one buffer after each block acknowledgment and keeps empt
         assert.equal(worker.sent.length, Math.min(i + 2, 3))
         assert.deepEqual(blocks.map(item => item.buffer.byteLength), blocks.map((_, index) => index <= i + 1 ? 0 : 4))
         if (i < 2) assert.equal(worker.sent[i + 1].id, id)
-        if (i < 2) assert.equal((worker.sent[i + 1].task as Extract<DisplayGeometryTask, { type: 'decode' }>).knownOriginals, undefined)
     }
     assert.deepEqual((await decoding).decodedBlocks?.map(block => block.chunks), [[], [], []])
     const empty = client.run({ type: 'decode', blocks: [], meta })

@@ -20,7 +20,7 @@ self.onmessage = (event: MessageEvent<{ id: number; config?: DisplayGeometryConf
                 if (task.type === 'decode') {
                     if (decodeId !== id) {
                         decodeId = id
-                        seenOriginals = new Set(task.knownOriginals)
+                        seenOriginals = new Set()
                     }
                     const [decoded] = engine.decodeBlocks(task.blocks, task.meta, seenOriginals)
                     const wire = task.blocks[0].buffer as ValidatedDisplayBlockBuffer

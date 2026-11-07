@@ -29,7 +29,7 @@ export type DisplayGeometryTask =
     | { type: 'select'; bounds: Bounds; scale: number; requiredRadius?: number }
     | { type: 'publish'; selection: number; stopped: boolean }
     | { type: 'prepare'; chunks: DisplayChunk[] }
-    | { type: 'decode'; blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]; meta: GridDisplayMeta; knownOriginals?: number[] }
+    | { type: 'decode'; blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]; meta: GridDisplayMeta }
 
 interface DisplayVertex { x: number; y: number; world?: [number, number]; references: number }
 interface VertexColumn { points: Map<number, DisplayVertex> }
@@ -68,12 +68,10 @@ export class DisplayGeometryEngine {
             } finally { this.syncVertexReferences() }
         }
         if (task.type === 'prepare') return { prepared: this.prepare(task.chunks) }
-        return { decodedBlocks: this.decodeBlocks(task.blocks, task.meta, new Set(task.knownOriginals)) }
+        return { decodedBlocks: this.decodeBlocks(task.blocks, task.meta, new Set()) }
     }
 
-    /** `seenOriginals` belongs to one decode RPC and spans its acknowledged
-     * input blocks. It is seeded with prepared originals in the view cache.
-     */
+    /** `seenOriginals` belongs to one decode RPC and spans its acknowledged input blocks. */
     decodeBlocks(blocks: { block: DisplayBlock; buffer: ArrayBuffer }[], meta: GridDisplayMeta, seenOriginals: Set<number>): DecodedDisplayBlock[] {
         try {
             return blocks.map(({ buffer, block }) => {

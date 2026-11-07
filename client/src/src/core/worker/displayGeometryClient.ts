@@ -81,10 +81,8 @@ export class DisplayGeometryClient {
     private postNext(pending: NonNullable<DisplayGeometryClient['pending']>, config?: DisplayGeometryConfig): void {
         const input = pending.input!
         if (input.type === 'decode') {
-            const index = pending.next++
-            const block = input.blocks[index]
-            this.worker!.postMessage({ id: pending.id, config, task: { type: 'decode', blocks: [block], meta: input.meta,
-                ...(index === 0 ? { knownOriginals: input.knownOriginals } : {}) } }, [block.buffer])
+            const block = input.blocks[pending.next++]
+            this.worker!.postMessage({ id: pending.id, config, task: { type: 'decode', blocks: [block], meta: input.meta } }, [block.buffer])
         } else {
             this.worker!.postMessage({ id: pending.id, config, task: { type: 'prepare', chunks: [input.chunks[pending.next++]] } })
         }
