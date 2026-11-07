@@ -7,6 +7,19 @@ import { displayLayers } from '@/core/grid/displayHierarchy'
 import { DisplayBlockCache } from '@/core/grid/displayBlockCache'
 
 const API_PREFIX = `/api/grid`
+const MAX_NODE_REQUESTS = 6
+const pendingNodeRequests = new Set<() => void>()
+let activeNodeRequests = 0
+
+function dispatchNodeRequests(): void {
+    while (activeNodeRequests < MAX_NODE_REQUESTS && pendingNodeRequests.size) {
+        const start = pendingNodeRequests.values().next().value!
+        pendingNodeRequests.delete(start)
+        activeNodeRequests++
+        start()
+    }
+}
+
 export class GridDisplayHttpError extends Error {
     constructor(public readonly status: number, message: string) { super(message); this.name = 'GridDisplayHttpError' }
 }
@@ -27,11 +40,39 @@ export async function getGridDisplayMeta(nodeInfo: string, signal?: AbortSignal)
 }
 
 async function loadGridDisplayChunks(nodeInfo: string, meta: GridDisplayMeta, blocks: DisplayBlock[], signal: AbortSignal, decode: DisplayBlockDecoder) {
-    const responses = await Promise.all(blocks.map(async block => {
-        const path = `nodes/${encodeURIComponent(meta.revision)}/${block.blockLayer}/${block.x}/${block.y}/${block.displayLayer}`
-        const response = await requestGridDisplay(nodeInfo, path, { signal })
-        return { block, buffer: await response.arrayBuffer() }
+    signal.throwIfAborted()
+    const waiting = new Map<() => void, (reason: unknown) => void>()
+    const abort = () => {
+        for (const [start, reject] of waiting) {
+            pendingNodeRequests.delete(start)
+            reject(signal.reason)
+        }
+        waiting.clear()
+        signal.removeEventListener('abort', abort)
+    }
+    const requests = blocks.map(block => new Promise<{ block: DisplayBlock; buffer: ArrayBuffer }>((resolve, reject) => {
+        const start = async () => {
+            waiting.delete(start)
+            if (!waiting.size) signal.removeEventListener('abort', abort)
+            try {
+                signal.throwIfAborted()
+                const path = `nodes/${encodeURIComponent(meta.revision)}/${block.blockLayer}/${block.x}/${block.y}/${block.displayLayer}`
+                const response = await requestGridDisplay(nodeInfo, path, { signal })
+                resolve({ block, buffer: await response.arrayBuffer() })
+            } catch (error) {
+                reject(error)
+            } finally {
+                // Keep the shared slot until fetch and body consumption settle, including on abort.
+                activeNodeRequests--
+                dispatchNodeRequests()
+            }
+        }
+        waiting.set(start, reject)
+        pendingNodeRequests.add(start)
     }))
+    if (waiting.size) signal.addEventListener('abort', abort, { once: true })
+    dispatchNodeRequests()
+    const responses = await Promise.all(requests)
     signal.throwIfAborted()
     return decode(responses)
 }

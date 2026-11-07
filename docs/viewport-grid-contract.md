@@ -43,6 +43,10 @@ All routes are below `/api/grid/{node_key}/display`.
 - `GET /nodes/{revision}/{blockLayer}/{x}/{y}/{displayLayer}` returns complete summaries at the selected layer inside that block, plus intersecting originals on coarser native layers. Both layer numbers may address implicit ancestors beyond the stored metadata prefix. The response depends only on this tuple. An outdated revision returns 409; invalid block coordinates or layer selection return 422.
 - `GET /inspect?x={gridX}&y={gridY}` returns the original containing cell, its original neighbors by side, and every original segmented edge ID.
 
+The client shares one nodes queue across sources, revisions, and queries, with a fixed internal limit of six in-flight requests. Each slot remains occupied until the response body finishes or the running request settles after cancellation. Aborting a signal removes its unsent tasks without calling `fetch`; running requests retain that same signal. Other sources' queued tasks remain intact. Metadata and inspection requests bypass this queue and start directly.
+
+Submitting hundreds of nodes to browser `fetch` at once can leave obsolete requests in the browser's connection queue during a rebuild. After a 409 cancels the old view, those requests can still produce a burst of connections alongside fresh metadata. Loopback experiments with macOS `somaxconn=128` showed the kernel resetting connections beyond the effective listener queue limit, including metadata connections before HTTP handling. Keeping unsent nodes in the application queue bounds this burst without retries, delays, or server backlog changes.
+
 Node responses use `application/octet-stream`. The four-byte header is ASCII `GDN5`. The response length determines the record count: `(length - 4) / 72`, which must be an integer. Each 72-byte record is little-endian `<Q7dII`:
 
 | Field | Type | Meaning |
