@@ -8,10 +8,9 @@ from pynoodle import noodle
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from ...core import settings
 from ...schemas.base import BaseResponse
 from ...schemas.grid import GridExportRequest
-from gridmen_backend.display_cache import borrow, close_cache as _close_display_cache
+from gridmen_backend.display_cache import borrow, cache_root, cleanup_building, close_cache as _close_display_cache
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +130,7 @@ def _display_source(node_key: str) -> Path:
 
 @asynccontextmanager
 async def _display_lifespan(app):
+    cleanup_building()
     yield
     _close_display_cache()
 
@@ -144,7 +144,7 @@ def _display(node_key: str):
     except (OSError,ValueError,KeyError) as exc:
         raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
     try:
-        with borrow(source, settings.ROOT_DIR / 'resource' / '.display') as index:
+        with borrow(source, cache_root()) as index:
             yield index
     except (OSError,ValueError,KeyError) as exc:
         raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc

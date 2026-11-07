@@ -21,7 +21,7 @@ def sources(tmp_path, monkeypatch):
     from gridmen_backend.api.endpoints import grid
     paths = {key:write_grid(tmp_path/key,[((0,0,8,8),1,3)]) for key in ('a','b')}
     monkeypatch.setattr(grid, '_display_source', paths.__getitem__)
-    monkeypatch.setattr(grid.settings, 'ROOT_DIR', tmp_path)
+    monkeypatch.chdir(tmp_path)
     cache.close_cache()
     yield grid, paths, tmp_path/'resource'/'.display'
     cache.close_cache()
@@ -271,6 +271,42 @@ def test_cache_shutdown_defers_closing_an_active_request(sources):
     assert index.cells.closed
 
 
+def test_startup_cleans_only_building_directories_at_the_resource_root(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from gridmen_backend.api.endpoints import grid
+
+    source = write_grid(tmp_path/'resource/g/live', [((0,0,8,8),1,3)])
+    directory = tmp_path/'resource/.display'
+    abandoned = [directory/name for name in ('building-first', 'building-second')]
+    for path in abandoned:
+        path.mkdir(parents=True)
+        (path/'partial.bin').write_bytes(b'partial')
+    published = directory/'published'
+    published.mkdir()
+    marker = directory/'building-marker'
+    marker.write_bytes(b'not a directory')
+    other = tmp_path/'other/resource/.display/building-unrelated'
+    other.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(grid, '_display_source', lambda _: source)
+    cache.close_cache()
+    app = FastAPI()
+    app.include_router(grid.router)
+    assert all(path.exists() for path in abandoned)
+    with TestClient(app) as client:
+        assert all(not path.exists() for path in abandoned)
+        assert published.exists() and marker.exists() and other.exists()
+        active = directory/'building-after-startup'
+        active.mkdir()
+        for _ in range(2):
+            assert client.get('/grid/live/display/meta').status_code == 200
+            assert active.exists()
+        index = next(iter(cache._CACHE.values()))
+        assert index.directory.parent == directory
+    assert active.exists() and index.cells.closed
+
+
 def test_cache_eviction_does_not_close_an_active_request(tmp_path):
     directory = tmp_path/'cache'
     paths = [write_grid(tmp_path/str(i), [((0,0,8,8),i,3)]) for i in range(5)]
@@ -320,7 +356,6 @@ def test_uvicorn_entrypoint_unmount_drains_the_live_http_reader(tmp_path,monkeyp
     monkeypatch.setattr(main,'NOODLE_INIT',lambda app:None)
     monkeypatch.setattr(main,'NOODLE_TERMINATE',lambda:None)
     monkeypatch.setattr(grid,'_display_source',lambda key:source)
-    monkeypatch.setattr(grid.settings,'ROOT_DIR',tmp_path)
     entered,release,progress,attempted = [threading.Event() for _ in range(4)]
     retire,rmtree = hook_owner._retire,shutil.rmtree
 

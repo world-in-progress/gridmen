@@ -3,6 +3,7 @@ import types
 import struct
 import json
 import mmap
+import subprocess
 import numpy as np
 import pytest
 from importlib import import_module
@@ -87,6 +88,37 @@ def test_topology_replace_failure_keeps_existing_file(tmp_path, monkeypatch):
             output.write(b'replacement')
     assert output.closed and path.read_bytes() == b'original'
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize('mask,expected', [('022', '0644'), ('027', '0640')])
+@pytest.mark.parametrize('kind', ['cell', 'edge'])
+@pytest.mark.parametrize('existing', [False, True])
+def test_topology_output_uses_normal_file_permissions(tmp_path, mask, expected, kind, existing):
+    path = tmp_path/f'{kind}_topo.bin'
+    script = '''
+import os, stat, sys
+from pathlib import Path
+from templates.grid.assembly import _topology_output
+path = Path(sys.argv[1])
+os.umask(int(sys.argv[2], 8))
+reference = path.with_suffix('.direct')
+reference.write_bytes(b'direct')
+if sys.argv[4] == 'True':
+    path.write_bytes(b'original')
+    path.chmod(0o600)
+with _topology_output(path) as output:
+    output.write(b'replacement')
+assert output.closed
+assert path.read_bytes() == b'replacement'
+actual = stat.S_IMODE(path.stat().st_mode)
+assert actual == stat.S_IMODE(reference.stat().st_mode) == int(sys.argv[3], 8), oct(actual)
+assert sorted(p.name for p in path.parent.iterdir()) == sorted([path.name, reference.name])
+print(f'kind={path.name} umask={sys.argv[2]} mode={actual:04o} existing={sys.argv[4]}')
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(path), mask, expected, str(existing)],
+                            text=True, capture_output=True)
+    print(result.stdout, end='')
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture

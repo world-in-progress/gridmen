@@ -230,7 +230,7 @@ def test_verified_cache_http_revision_gzip_and_304_preserve_source(tmp_path, mon
     index.close()
     cached_files = snapshot(cache)
     monkeypatch.setattr(grid, '_display_source', lambda _: source)
-    monkeypatch.setattr(grid.settings, 'ROOT_DIR', tmp_path)
+    monkeypatch.chdir(tmp_path)
     grid._close_display_cache()
     app = FastAPI()
     app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=1)

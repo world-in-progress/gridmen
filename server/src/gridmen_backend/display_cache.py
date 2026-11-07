@@ -16,6 +16,17 @@ _PENDING = {}
 _COLLECTING = set()
 
 
+def cache_root():
+    return Path.cwd() / 'resource' / '.display'
+
+
+def cleanup_building():
+    """Recover abandoned staging directories before the sole service starts."""
+    for directory in cache_root().glob('building-*'):
+        if directory.is_dir():
+            shutil.rmtree(directory)
+
+
 def register(index):
     index._users = 0
     index._retired = False

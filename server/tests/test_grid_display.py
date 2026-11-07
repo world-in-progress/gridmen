@@ -117,7 +117,7 @@ def test_api_reports_corrupt_grid_and_closes_invalidated_cache(tmp_path,monkeypa
     from gridmen_backend import display_cache
     source = write_grid(tmp_path/'source',[((0,0,8,8),100,9)])
     monkeypatch.setattr(grid,'_display_source',lambda key:source)
-    monkeypatch.setattr(grid.settings,'ROOT_DIR',tmp_path)
+    monkeypatch.chdir(tmp_path)
     grid._close_display_cache()
     app = FastAPI()
     app.include_router(grid.router)

@@ -5,7 +5,7 @@ import tarfile
 import logging
 from pathlib import Path
 from pynoodle import noodle
-from gridmen_backend.display_cache import removing
+from gridmen_backend.display_cache import cache_root, removing
 
 from .assembly import assembly
 from .vector import apply_interventions, load_base_grid, load_interventions, write_ne, write_ns
@@ -139,7 +139,7 @@ def UNMOUNT(node_key: str):
     """
     resource_dir = _resource_dir(node_key)
 
-    with removing(resource_dir, Path.cwd() / 'resource' / '.display'):
+    with removing(resource_dir, cache_root()):
         if resource_dir.exists():
             shutil.rmtree(resource_dir)
             print(f"Grid resource at {resource_dir} unmounted and removed.")

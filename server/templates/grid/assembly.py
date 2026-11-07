@@ -4,7 +4,6 @@ import time
 import math
 import json
 import struct
-import tempfile
 import rasterio
 import numpy as np
 import multiprocessing as mp
@@ -19,6 +18,7 @@ from functools import partial
 from contextlib import contextmanager
 from rasterio.transform import rowcol
 from pyproj import CRS
+from uuid import uuid4
 
 from ._timing import timed, timing_logger, log_debug, record_value
 
@@ -1104,9 +1104,8 @@ def _batch_cell_records_worker(
 def _topology_output(path):
     """Keep existing readers on the old file until the replacement is closed."""
     path = Path(path)
-    with tempfile.NamedTemporaryFile(mode='wb', dir=path.parent,
-                                     prefix=f'.{path.name}-', delete=False) as output:
-        temporary = Path(output.name)
+    temporary = path.with_name(f'.{path.name}-{uuid4().hex}')
+    with temporary.open('xb') as output:
         try:
             yield output
             output.close()
