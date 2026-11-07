@@ -4,6 +4,7 @@ import time
 import math
 import json
 import struct
+import tempfile
 import rasterio
 import numpy as np
 import multiprocessing as mp
@@ -15,6 +16,7 @@ from typing import Callable
 # from crms.patch import Patch
 from icrms.ipatch import IPatch
 from functools import partial
+from contextlib import contextmanager
 from rasterio.transform import rowcol
 from pyproj import CRS
 
@@ -1098,6 +1100,22 @@ def _batch_cell_records_worker(
 
     return records, phase_stats
 
+@contextmanager
+def _topology_output(path):
+    """Keep existing readers on the old file until the replacement is closed."""
+    path = Path(path)
+    with tempfile.NamedTemporaryFile(mode='wb', dir=path.parent,
+                                     prefix=f'.{path.name}-', delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            yield output
+            output.close()
+            temporary.replace(path)
+        finally:
+            output.close()
+            temporary.unlink(missing_ok=True)
+
+
 def _record_cell_topology(
     grid_cache: GridCache,
     meta_bounds: list[float],
@@ -1123,7 +1141,7 @@ def _record_cell_topology(
     num_processes = min(os.cpu_count(), len(batch_args))
     phase_totals = _make_phase_stats()
     with timed("record.cell.pool_total", n_batches=len(batch_args), dem=bool(dem_path), lum=bool(lum_path)):
-        with mp.Pool(processes=num_processes) as pool, open(grid_record_path, 'wb') as f:
+        with mp.Pool(processes=num_processes) as pool, _topology_output(grid_record_path) as f:
             for cell_records_chunk, batch_stats in pool.imap(batch_func, batch_args):
                 f.write(cell_records_chunk)
                 _merge_phase_stats(phase_totals, batch_stats)
@@ -1280,7 +1298,7 @@ def _record_edge_topology(
     num_processes = min(os.cpu_count(), len(batch_args))
     phase_totals = _make_phase_stats()
     with timed("record.edge.pool_total", n_batches=len(batch_args), dem=bool(dem_path), lum=bool(lum_path)):
-        with mp.Pool(processes=num_processes) as pool, open(edge_record_path, 'wb') as f:
+        with mp.Pool(processes=num_processes) as pool, _topology_output(edge_record_path) as f:
             for edge_records_chunk, batch_stats in pool.imap(batch_func, batch_args):
                 f.write(edge_records_chunk)
                 _merge_phase_stats(phase_totals, batch_stats)

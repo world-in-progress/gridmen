@@ -2,6 +2,7 @@ import sys
 import types
 import struct
 import json
+import mmap
 import numpy as np
 import pytest
 from importlib import import_module
@@ -20,6 +21,72 @@ templates_grid_pkg.__path__ = [str(SERVER_ROOT / "templates" / "grid")]
 sys.modules.setdefault("templates.grid", templates_grid_pkg)
 
 assembly = import_module("templates.grid.assembly")
+
+
+@pytest.mark.parametrize('kind', ['cell', 'edge'])
+@pytest.mark.parametrize('failure', [None, RuntimeError, KeyboardInterrupt])
+def test_topology_recording_publishes_closed_files_and_preserves_old_readers(
+        tmp_path, monkeypatch, kind, failure):
+    path = tmp_path / f'{kind}_topo.bin'
+    path.write_bytes(b'original topology')
+
+    class Grid:
+        def __len__(self):
+            return 1
+
+        def slice_cells(self, *args):
+            return b''
+
+        def slice_edges(self, *args):
+            return []
+
+    class Pool:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def imap(self, *args):
+            yield b'new topology', assembly._make_phase_stats()
+            assert path.read_bytes() == b'original topology'
+            if failure:
+                raise failure('recording interrupted')
+
+    monkeypatch.setattr(assembly.mp, 'Pool', Pool)
+    with path.open('rb') as source, mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as reader:
+        def record():
+            if kind == 'cell':
+                assembly._record_cell_topology(Grid(), [0, 0, 1, 1], [], [], path)
+            else:
+                assembly._record_edge_topology([b''], [[None, 0]], [0, 0, 1, 1], path)
+
+        if failure:
+            with pytest.raises(failure, match='recording interrupted'):
+                record()
+        else:
+            record()
+        assert reader[:] == b'original topology'
+    assert path.read_bytes() == (b'original topology' if failure else b'new topology')
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
+
+
+def test_topology_replace_failure_keeps_existing_file(tmp_path, monkeypatch):
+    path = tmp_path / 'cell_topo.bin'
+    path.write_bytes(b'original')
+
+    def denied(*args):
+        raise PermissionError('mapped destination')
+
+    monkeypatch.setattr(Path, 'replace', denied)
+    with pytest.raises(PermissionError, match='mapped destination'):
+        with assembly._topology_output(path) as output:
+            output.write(b'replacement')
+    assert output.closed and path.read_bytes() == b'original'
+    assert list(tmp_path.iterdir()) == [path]
 
 
 @pytest.fixture
