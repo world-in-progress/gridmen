@@ -10,16 +10,12 @@ export interface ChunkBuffer {
     vao: WebGLVertexArrayObject
     origin: [number, number]
     count: number
-    visibleCells: number
-    fieldSamples: number
     minOriginalCellSize: number
-    bytes: number
     source: DisplayChunk
 }
 
 export class ChunkBuffers {
     readonly chunks = new Map<string, ChunkBuffer>()
-    gpuBytes = 0
 
     constructor(private readonly gl: WebGL2RenderingContext) {}
 
@@ -44,7 +40,6 @@ export class ChunkBuffers {
             }
             const resource = this.upload(chunk, data, origin)
             this.chunks.set(chunk.key, resource)
-            this.gpuBytes += resource.bytes
         }
     }
 
@@ -57,7 +52,6 @@ export class ChunkBuffers {
         if (!resource) return
         this.gl.deleteVertexArray(resource.vao)
         this.gl.deleteBuffer(resource.buffer)
-        this.gpuBytes -= resource.bytes
         this.chunks.delete(key)
     }
 
@@ -101,9 +95,8 @@ export class ChunkBuffers {
 
         return {
             buffer, vao, origin, count: data.length / FLOATS_PER_INSTANCE,
-            visibleCells: source.cells.length, fieldSamples: source.fields.length,
             minOriginalCellSize: source.cells.reduce((minimum, cell) => Math.min(minimum, cellSide(cell)), Infinity),
-            bytes: data.byteLength, source,
+            source,
         }
     }
 }

@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import type { DisplayChunk } from '../src/core/grid/displayTypes'
 import { ChunkBuffers } from '../src/views/mapView/topology/chunkBuffers'
+import { readChunkBuffers } from './topologyObservation'
 
 function chunk(key: string, cells = 1, fields = 0): DisplayChunk {
     return {
@@ -27,16 +28,21 @@ function mockGl() {
     const deletedVaos: object[] = []
     const attributes: { location: number; width: number; stride: number; offset: number }[] = []
     const divisors: { location: number; divisor: number }[] = []
+    let boundBuffer: object | null = null
+    const stores = new Map<object, number>()
     const gl = {
-        ARRAY_BUFFER: 34962, STATIC_DRAW: 35044, FLOAT: 5126, NO_ERROR: 0,
+        ARRAY_BUFFER: 34962, ARRAY_BUFFER_BINDING: 34964, BUFFER_SIZE: 34660, STATIC_DRAW: 35044, FLOAT: 5126, NO_ERROR: 0,
         createBuffer: () => ({ id: ++nextId }),
         createVertexArray: () => ({ id: ++nextId }),
-        deleteBuffer: (buffer: object) => deletedBuffers.push(buffer),
+        deleteBuffer: (buffer: object) => { deletedBuffers.push(buffer); stores.delete(buffer) },
         deleteVertexArray: (vao: object) => deletedVaos.push(vao),
-        bindBuffer: () => {}, bindVertexArray: () => {},
+        bindBuffer: (_target: number, buffer: object | null) => { boundBuffer = buffer }, bindVertexArray: () => {},
+        getParameter: () => boundBuffer,
+        getBufferParameter: () => stores.get(boundBuffer!),
         bufferData: (_target: number, data: Float32Array) => {
             if (failUpload) throw new Error('upload failed')
             uploads.push(data.byteLength)
+            stores.set(boundBuffer!, data.byteLength)
         },
         getError: () => { const error = glError; glError = 0; return error },
         enableVertexAttribArray: () => {},
@@ -72,11 +78,11 @@ test('uploads exact instance bytes and preserves unchanged chunk resources', () 
     }
     buffers.sync([a], trackedPrepare)
     const resource = buffers.chunks.get('a')!
-    assert.equal(buffers.gpuBytes, 192)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 192)
     assert.deepEqual(mock.uploads, [192])
     assert.equal(resource.count, 3)
-    assert.equal(resource.visibleCells, 2)
-    assert.equal(resource.fieldSamples, 1)
+    assert.equal(readChunkBuffers(mock.gl, buffers).visibleCells, 2)
+    assert.equal(readChunkBuffers(mock.gl, buffers).fieldSamples, 1)
     assert.deepEqual(mock.attributes, [
         { location: 0, width: 2, stride: 64, offset: 0 },
         { location: 1, width: 2, stride: 64, offset: 8 },
@@ -99,16 +105,16 @@ test('pan evicts hidden chunks and releases their exact bytes', () => {
     const a = chunk('a', 2)
     const b = chunk('b', 1)
     buffers.sync([a, b], prepare)
-    assert.equal(buffers.gpuBytes, 192)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 192)
     const kept = buffers.chunks.get('b')
     buffers.sync([b], prepare)
-    assert.equal(buffers.gpuBytes, 64)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 64)
     assert.equal(buffers.chunks.has('a'), false)
     assert.equal(buffers.chunks.get('b'), kept)
     assert.equal(mock.deletedBuffers.length, 1)
     assert.equal(mock.deletedVaos.length, 1)
     buffers.clear()
-    assert.equal(buffers.gpuBytes, 0)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 0)
     assert.equal(buffers.chunks.size, 0)
     assert.equal(mock.deletedBuffers.length, 2)
     assert.equal(mock.deletedVaos.length, 2)
@@ -125,7 +131,7 @@ test('replacement identities rebuild only edited migration chunks', () => {
     assert.deepEqual(mock.uploads, [64, 64, 64, 64, 64])
     assert.equal(mock.deletedBuffers.length, 2)
     assert.equal(buffers.chunks.get('other'), untouched)
-    assert.equal(buffers.gpuBytes, 192)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 192)
 })
 
 test('same-key replacement rebuilds by object identity', () => {
@@ -134,24 +140,24 @@ test('same-key replacement rebuilds by object identity', () => {
     buffers.sync([chunk('a', 1)], prepare)
     buffers.sync([chunk('a', 3)], prepare)
     assert.deepEqual(mock.uploads, [64, 192])
-    assert.equal(buffers.gpuBytes, 192)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 192)
     assert.equal(buffers.chunks.get('a')?.count, 3)
     assert.equal(mock.deletedBuffers.length, 1)
 })
 
-test('failed replacement leaves no stale resource or byte accounting', () => {
+test('failed replacement leaves no stale resource or GPU allocation', () => {
     const mock = mockGl()
     const buffers = new ChunkBuffers(mock.gl)
     const a = chunk('a')
     buffers.sync([a], prepare)
     assert.throws(() => buffers.sync([{ ...a }], () => { throw new Error('prepare failed') }), /prepare failed/)
     assert.equal(buffers.chunks.has('a'), false)
-    assert.equal(buffers.gpuBytes, 0)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 0)
 
     mock.setFailUpload(true)
     assert.throws(() => buffers.sync([a], prepare), /upload failed/)
     assert.equal(buffers.chunks.size, 0)
-    assert.equal(buffers.gpuBytes, 0)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 0)
     assert.equal(mock.deletedBuffers.length, 2)
     assert.equal(mock.deletedVaos.length, 2)
 
@@ -159,7 +165,7 @@ test('failed replacement leaves no stale resource or byte accounting', () => {
     mock.setGlError(1285)
     assert.throws(() => buffers.sync([a], prepare), /WebGL error 1285/)
     assert.equal(buffers.chunks.size, 0)
-    assert.equal(buffers.gpuBytes, 0)
+    assert.equal(readChunkBuffers(mock.gl, buffers).gpuBytes, 0)
     assert.equal(mock.deletedBuffers.length, 3)
     assert.equal(mock.deletedVaos.length, 3)
 })

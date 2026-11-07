@@ -3,7 +3,7 @@ import proj4 from 'proj4'
 import type { Converter } from 'proj4/dist/lib/core'
 import PatchCore, { type PatchCellChange } from '../../../core/grid/patchCore'
 import DisplayIndex from '../../../core/grid/displayIndex'
-import type { Bounds, DisplayAttribute, DisplayBlock, DisplayCell, DisplayChunk, DisplayField, DisplayStats, GridDisplayView, GridInspection, ReadOnlyGridSource } from '../../../core/grid/displayTypes'
+import type { Bounds, DisplayAttribute, DisplayBlock, DisplayCell, DisplayChunk, DisplayField, GridDisplayView, GridInspection, ReadOnlyGridSource } from '../../../core/grid/displayTypes'
 import { ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, OUTLINE_DARKENING } from '../../../core/grid/displayColors'
 import type { CellCheckInfo, MultiCellBaseInfo } from '../../../core/grid/types'
 import VibrantColorGenerator from '../../../core/util/vibrantColorGenerator'
@@ -54,7 +54,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _buffers?: ChunkBuffers
     private _program: WebGLProgram | null = null
     private _palette: WebGLTexture | null = null
-    private _textureBytes = 0
     private _gpuInitPromise?: Promise<void>
     private _gpuEpoch = 0
     private _patchCore: PatchCore | null = null
@@ -92,14 +91,13 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _updateFieldIndicator = () => {
         if (!this._fieldIndicator) return
         this._fieldIndicator.textContent = i18n.t('gridDisplay:fieldActive')
-        this._fieldIndicator.style.display = this.visible && this._stats.fieldMode ? 'block' : 'none'
+        this._fieldIndicator.style.display = this.visible && this._fieldMode ? 'block' : 'none'
     }
     private _resizeObserver?: ResizeObserver
     private _renderSampleListeners = new Set<RenderSampleListener>()
     private _error: unknown | null = null
     private _errorListeners = new Set<(error: unknown | null) => void>()
-    private _displayListeners = new Set<(stats: DisplayStats) => void>()
-    private _stats: DisplayStats = { gpuBytes: 0, visibleChunks: 0, visibleCells: 0, fieldSamples: 0, fieldMode: false, ready: false }
+    private _fieldMode = false
     private _benchmarkSubdivideChildGroups = new Map<number, number[]>()
     private _benchmarkDeletedGroups = new Map<number, number[]>()
     private _cameraChanged = () => {
@@ -117,7 +115,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _keyDown = (event: KeyboardEvent) => {
         if (event.key === 'A' && this._patchCore && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) this.executePickAllCells()
     }
-    private _contextLost = () => { this._contextUnavailable = true; this.cancelView(); this.releaseGPU(); this.emitStats() }
+    private _contextLost = () => { this._contextUnavailable = true; this.cancelView(); this.releaseGPU(); this.updateFieldMode() }
     private _contextRestored = () => {
         void this.initGPUResource().then(() => {
             if (!this.initialized || this._removed) return
@@ -187,11 +185,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         return this._index!.inspect(x, y, this._showDeletedCells)
     }
 
-    getDisplayStats(): DisplayStats { return { ...this._stats } }
-    addDisplayStatsListener(listener: (stats: DisplayStats) => void): () => void {
-        this._displayListeners.add(listener)
-        return () => this._displayListeners.delete(listener)
-    }
     addErrorListener(listener: (error: unknown | null) => void): () => void {
         this._errorListeners.add(listener)
         listener(this._error)
@@ -275,10 +268,8 @@ export default class TopologyLayer implements NHCustomLayerInterface {
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, alignment)
             gl.bindTexture(gl.TEXTURE_2D, null)
             if (gl.getError() !== gl.NO_ERROR) throw new Error('Unable to upload grid palette')
-            this._textureBytes = this.paletteColorList.byteLength
             this.initialized = true
             this.syncGPU()
-            this.emitStats()
         })().catch(error => { if (epoch === this._gpuEpoch) this.releaseGPU(); throw error })
         return this._gpuInitPromise
     }
@@ -367,7 +358,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                 const request = new AbortController()
                 this._request = request
                 this._loading = true
-                this.emitStats()
                 let superseded = false
                 try {
                     const source = this._source
@@ -471,7 +461,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
             this._viewPromise = undefined
             this._request = undefined
             this._loading = false
-            this.emitStats()
+            this.updateFieldMode()
             // A publish acknowledgment may arrive after the repaint requested
             // by syncGPU. Deliver a frame with the final ready state as well.
             this.map.triggerRepaint()
@@ -495,7 +485,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private syncGPU(): void {
         if (!this.initialized || !this._buffers || !this._projection) return
         this._buffers.sync(this.visibleChunks(), chunk => this.prepareChunk(chunk))
-        this.emitStats()
+        this.updateFieldMode()
     }
     private updateCameraScale(): void {
         if (!this._projection) return
@@ -504,7 +494,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         const scale = this._camera.metersPerPixel
         if (scale === this._metersPerPixel) return
         this._metersPerPixel = scale
-        this.emitStats()
+        this.updateFieldMode()
     }
     private prepareChunk(chunk: DisplayChunk): { data: Float32Array; origin: [number, number] } {
         const prepared = this.viewCache.getPrepared(chunk)
@@ -527,13 +517,13 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         return this.cameraSignature(camera) === this.cameraSignature(current)
             || !!camera.mercator && !!current.mercator && camera.zoom === current.zoom && camera.devicePixelRatio === current.devicePixelRatio
     }
-    private emitStats(): void {
-        const resources = [...(this._buffers?.chunks.values() ?? [])]
-        const fieldSamples = resources.reduce((sum, chunk) => sum + chunk.fieldSamples, 0)
-        const next: DisplayStats = { gpuBytes: (this._buffers?.gpuBytes ?? 0) + this._textureBytes, visibleChunks: resources.length, visibleCells: resources.reduce((sum, chunk) => sum + chunk.visibleCells, 0), fieldSamples, fieldMode: fieldSamples > 0 || resources.some(chunk => chunk.minOriginalCellSize / this._metersPerPixel < CELL_PIXEL_THRESHOLD), ready: this.isReady }
-        if (Object.keys(next).some(key => next[key as keyof DisplayStats] !== this._stats[key as keyof DisplayStats])) {
-            this._stats = next
-            for (const listener of this._displayListeners) listener({ ...next })
+    private updateFieldMode(): void {
+        this._fieldMode = false
+        for (const chunk of this._buffers?.chunks.values() ?? []) {
+            if (chunk.source.fields.length > 0 || chunk.minOriginalCellSize / this._metersPerPixel < CELL_PIXEL_THRESHOLD) {
+                this._fieldMode = true
+                break
+            }
         }
         this._updateFieldIndicator()
     }
@@ -958,7 +948,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._buffers?.clear()
         this._view = { chunks: [] }
         if (this._overlayCanvas) this._overlayCanvas.style.display = 'none'
-        this.emitStats()
+        this.updateFieldMode()
         this.map.triggerRepaint()
     }
     private cancelView(): void {
@@ -1000,7 +990,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._benchmarkSubdivideChildGroups.clear()
         this._benchmarkDeletedGroups.clear()
         this._buffers?.clear()
-        this.emitStats()
+        this.updateFieldMode()
     }
     private releaseGPU(): void {
         this._gpuEpoch++
@@ -1010,7 +1000,6 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         if (this._program) this._gl.deleteProgram(this._program)
         this._palette = null
         this._program = null
-        this._textureBytes = 0
         this.initialized = false
         this._gpuInitPromise = undefined
     }
@@ -1034,7 +1023,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._overlayCanvas?.remove()
         this._overlayCanvas = null
         this._overlayCtx = null
-        this.emitStats()
+        this.updateFieldMode()
     }
     private resizeOverlay(): void {
         if (!this._overlayCanvas) return

@@ -90,13 +90,3 @@ export interface DecodedDisplayBlock {
 }
 
 export type DisplayBlockDecoder = (blocks: { block: DisplayBlock; buffer: ArrayBuffer }[]) => Promise<DecodedDisplayBlock[]>
-
-export interface DisplayStats {
-    /** Bytes allocated by this renderer's buffers and textures. */
-    gpuBytes: number
-    visibleChunks: number
-    visibleCells: number
-    fieldSamples: number
-    fieldMode: boolean
-    ready: boolean
-}
