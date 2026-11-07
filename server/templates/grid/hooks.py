@@ -5,6 +5,7 @@ import tarfile
 import logging
 from pathlib import Path
 from pynoodle import noodle
+from gridmen_backend.display_cache import removing
 
 from .assembly import assembly
 from .vector import apply_interventions, load_base_grid, load_interventions, write_ne, write_ns
@@ -138,12 +139,11 @@ def UNMOUNT(node_key: str):
     """
     resource_dir = _resource_dir(node_key)
 
-    if resource_dir.exists():
-        try:
+    with removing(resource_dir, Path.cwd() / 'resource' / '.display'):
+        if resource_dir.exists():
             shutil.rmtree(resource_dir)
             print(f"Grid resource at {resource_dir} unmounted and removed.")
-        except Exception as e:
-            print(f"Error unmounting grid {node_key}: {e}")
+
 
 def PRIVATIZATION(node_key: str, mount_params: dict | None = None) -> dict:
     """

@@ -5,6 +5,7 @@ import logging
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
         version=settings.APP_VERSION,
         lifespan=lifespan,
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=1)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,

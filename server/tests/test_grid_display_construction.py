@@ -3,7 +3,6 @@ import hashlib
 import io
 import json
 import os
-import sqlite3
 import struct
 from pathlib import Path
 
@@ -11,6 +10,59 @@ import pytest
 
 import gridmen_backend.grid_display as display
 from test_grid_display import decode_nodes, write_grid
+
+
+def test_fingerprint_stats_only_four_display_sources_once(tmp_path, monkeypatch):
+    source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
+    original = Path.stat
+    calls = []
+
+    def stat(path, *args, **kwargs):
+        calls.append(path.name)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'stat', stat)
+    result = display.fingerprint(source)
+    assert calls == list(display.FILES) == ['grid.meta.json', 'cell_topo.bin', 'edge_topo.bin', 'ne.txt']
+    assert all(len(entry) == 3 for entry in result)
+
+
+def test_ns_is_neither_parsed_nor_part_of_revision(tmp_path):
+    source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
+    cache = tmp_path/'cache'
+    (source/'ns.txt').write_text('not display data')
+    index = display.GridDisplayIndex(source, cache)
+    revision = index.revision
+    assert set(index.meta) == {'revision', 'epsg', 'bounds', 'alignment_origin',
+                               'grid_info', 'elevationRange', 'landClasses'}
+    assert set(index.manifest) == {'source', 'meta', 'layers', 'layerTiles', 'rootHistograms'}
+    assert not list(index.directory.glob('hist-*'))
+    assert not list(cache.glob('*.current.json'))
+    assert not (index.directory/'identity.json').exists()
+    index.close()
+    (source/'ns.txt').unlink()
+    reopened = display.GridDisplayIndex(source, cache)
+    try:
+        assert reopened.revision == revision
+        assert reopened.inspect(1,1)['cell']['landClass'] == 3
+    finally:
+        reopened.close()
+
+
+def test_layers_follow_shared_canonical_vectors():
+    vectors = json.loads((Path(__file__).resolve().parents[2]/'docs/display-hierarchy-vectors.json').read_text())
+    total = 0
+    for case in vectors['cases']:
+        actual = []
+        for spec in display.layer_specs(case['meta']):
+            fields = dict(zip(('width','height','x0','y0','nx','ny'), spec[:6]))
+            fields.update(nativeLevel=spec[6] if spec[6] > 0 else None,
+                          xLayout=spec[7][0] if len(spec) == 8 else None,
+                          yLayout=spec[7][1] if len(spec) == 8 else None)
+            actual.append([fields[key] for key in vectors['layerFields']])
+        assert actual == case['layers'], case['name']
+        total += len(actual)
+    assert len(vectors['cases']) == 7 and total == 60
 
 
 def snapshot(source):
@@ -21,8 +73,6 @@ def snapshot(source):
 @pytest.mark.parametrize('name,column,value', [
     ('ne.txt', 0, '1.0'), ('ne.txt', 1, '1e0'),
     ('ne.txt', -1, '3.0'), ('ne.txt', -1, '256'),
-    ('ns.txt', 0, '1.0'), ('ns.txt', 1, '2e0'),
-    ('ns.txt', -1, '7.0'), ('ns.txt', -1, '-1'),
 ])
 def test_csv_integer_fields_remain_strict(tmp_path, name, column, value):
     source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
@@ -50,7 +100,7 @@ def test_csv_preserves_uint64_topology_identifiers(tmp_path, identifier, trailin
     assert int(values[0]) == identifier
 
 
-@pytest.mark.parametrize('name', ['ne.txt', 'ns.txt'])
+@pytest.mark.parametrize('name', ['ne.txt'])
 @pytest.mark.parametrize('change', ['extra-column', 'missing-row', 'extra-row', 'blank-row'])
 def test_csv_record_and_column_counts_are_checked(tmp_path, name, change):
     source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
@@ -147,46 +197,6 @@ def test_hanging_segments_accept_unsorted_ids_and_keep_true_extrema(tmp_path):
     assert snapshot(source) == before
 
 
-def test_bad_spatial_directory_is_rejected_before_publication(tmp_path, monkeypatch):
-    source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
-    original = display._tile_rtree
-
-    def corrupt(*args):
-        result = original(*args)
-        with sqlite3.connect(args[0]/'tile-rtree.sqlite') as db:
-            db.execute('UPDATE original_coords SET x=x+1')
-        return result
-
-    monkeypatch.setattr(display, '_tile_rtree', corrupt)
-    with pytest.raises(ValueError, match='Invalid original display directory'):
-        display.GridDisplayIndex(source, tmp_path/'cache')
-    assert not list((tmp_path/'cache').glob('*/manifest.json'))
-
-
-@pytest.mark.parametrize('field', ['classes', 'original-count', 'fragments'])
-def test_manifest_stat_change_rebuilds_validated_artifacts(tmp_path, field):
-    source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
-    cache = tmp_path/'cache'
-    index = display.GridDisplayIndex(source, cache)
-    path = index.directory/'manifest.json'
-    index.close()
-    manifest = json.loads(path.read_text())
-    if field == 'classes':
-        manifest['meta']['landClasses'] = [2]
-    elif field == 'original-count':
-        manifest['originalDirectoryCount'] += 1
-    else:
-        manifest['directoryFragments']['original'] += 1
-    path.write_text(json.dumps(manifest))
-    rebuilt = display.GridDisplayIndex(source, cache)
-    try:
-        assert rebuilt.meta['landClasses'] == [3]
-        assert rebuilt.manifest['originalDirectoryCount'] == 1
-        assert rebuilt.inspect(1,1)['cell']['landClass'] == 3
-    finally:
-        rebuilt.close()
-
-
 def test_source_stat_change_rebuilds_and_rejects_bad_grid(tmp_path):
     source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
     cache = tmp_path/'cache'
@@ -200,73 +210,35 @@ def test_source_stat_change_rebuilds_and_rejects_bad_grid(tmp_path):
         display.GridDisplayIndex(source, cache)
 
 
-def test_cached_reopen_does_not_scan_sqlite(tmp_path, monkeypatch):
+def test_cached_reopen_does_not_revalidate_sources(tmp_path, monkeypatch):
     source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
     cache = tmp_path/'cache'
     index = display.GridDisplayIndex(source, cache)
     index.close()
 
     def no_scan(*args, **kwargs):
-        raise AssertionError('Cached reopen rescanned SQLite')
+        raise AssertionError('Cached reopen revalidated sources')
 
-    monkeypatch.setattr(sqlite3, 'connect', no_scan)
+    monkeypatch.setattr(display, 'checked_meta', no_scan)
+    monkeypatch.setattr(display, '_read_cells', no_scan)
+    monkeypatch.setattr(display, '_read_edges', no_scan)
     index = display.GridDisplayIndex(source, cache)
     index.close()
 
 
-def test_build_records_hashes_of_all_raw_source_bytes(tmp_path):
-    source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
-    for name in ('ne.txt','ns.txt'):
-        path = source/name
-        path.write_bytes(path.read_bytes().replace(b'\n',b'\r\n'))
-    index = display.GridDisplayIndex(source,tmp_path/'cache')
-    try:
-        for name in display.FILES:
-            path = source/name
-            recorded = index.manifest['sourceIdentity'][name]
-            assert recorded == {'size':path.stat().st_size,'mtimeNs':path.stat().st_mtime_ns,
-                                'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
-    finally:
-        index.close()
-
-
-def test_source_mtime_change_rebuilds_without_changing_content_hash(tmp_path):
+def test_source_mtime_change_changes_deterministic_revision(tmp_path):
     source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
     cache = tmp_path/'cache'
     index = display.GridDisplayIndex(source,cache)
     previous_directory = index.directory
-    previous_hash = index.manifest['sourceIdentity']['ne.txt']['sha256']
     index.close()
+    before = snapshot(source)
     path = source/'ne.txt'
     stat = path.stat()
     os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns+1))
     rebuilt = display.GridDisplayIndex(source,cache)
     try:
         assert rebuilt.directory != previous_directory
-        assert rebuilt.manifest['sourceIdentity']['ne.txt']['sha256'] == previous_hash
-        assert rebuilt.manifest['sourceIdentity']['ne.txt']['mtimeNs'] == stat.st_mtime_ns+1
+        assert snapshot(source) == before
     finally:
-        rebuilt.close()
-
-
-def test_stat_rebuild_keeps_live_readers_on_their_immutable_generation(tmp_path):
-    source = write_grid(tmp_path/'source', [((0,0,8,8), 1, 3)])
-    cache = tmp_path/'cache'
-    previous = display.GridDisplayIndex(source,cache)
-    directory = previous.directory
-    path = directory/'offsets.bin'
-    stat = path.stat()
-    os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns+1))
-    rebuilt = display.GridDisplayIndex(source,cache)
-    try:
-        assert rebuilt.directory != directory
-        assert rebuilt.revision != previous.revision
-        assert directory.exists()
-        # Neither reader mapped the native layer before the replacement.
-        # Both SQLite and lazy layer reads must still use their own paths.
-        for index in (previous,rebuilt):
-            assert decode_nodes(index.nodes(0,0,0,0))[0][0] == 1
-            assert index.inspect(1,1)['cell']['id'] == 1
-    finally:
-        previous.close()
         rebuilt.close()

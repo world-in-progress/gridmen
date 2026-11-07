@@ -10,14 +10,10 @@ import hashlib
 import json
 import math
 import mmap
-import os
+import errno
 import sqlite3
 import struct
-import sys
 import tempfile
-import threading
-import time
-import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing, contextmanager
@@ -26,8 +22,10 @@ from pathlib import Path
 
 import numpy as np
 
-FILES = ('grid.meta.json', 'cell_topo.bin', 'edge_topo.bin', 'ne.txt', 'ns.txt')
-VERSION = 10
+from . import display_cache
+
+FILES = ('grid.meta.json', 'cell_topo.bin', 'edge_topo.bin', 'ne.txt')
+VERSION = 11
 TILE = 64
 CELL = struct.Struct('!QdddddBBBBB')
 EDGE = struct.Struct('!IQBddddQQdi')
@@ -37,7 +35,6 @@ DISPLAY_DTYPE = np.dtype([('id', '<u8'), ('bounds', '<f8', (4,)),
                           ('level', '<u4'), ('land', '<u4')])
 NODE = np.dtype([('id', '<u8'), ('area', '<f8'), ('z', '<f8'),
                  ('min', '<f8'), ('level', '<u2'), ('land', 'u1')])
-_LOCK = threading.Lock()
 
 
 def require(ok, message):
@@ -46,49 +43,16 @@ def require(ok, message):
 
 
 def fingerprint(source: Path):
-    return [(name, (source / name).stat().st_size, (source / name).stat().st_mtime_ns)
-            for name in FILES]
-
-
-def _file_stat(path):
-    stat = path.stat()
-    return [stat.st_size, stat.st_mtime_ns]
-
-
-def _cache_reusable(directory, source, revision):
-    """Validated build artifacts are immutable; opening compares stat only."""
-    if directory is None:
-        return False
-    try:
-        identity = json.loads((directory/'identity.json').read_text())
-        files = identity['files']
-        if (identity['version'] != VERSION or identity['source'] != str(source)
-                or identity['fingerprint'] != [list(entry) for entry in revision]
-                or not isinstance(files, dict) or 'manifest.json' not in files):
-            return False
-        return all(isinstance(name,str) and Path(name).name == name
-                   and name not in ('.','..') and _file_stat(directory/name) == expected
-                   for name,expected in files.items())
-    except (FileNotFoundError, ValueError, KeyError, TypeError):
-        return False
-
-
-def _current_directory(cache, key):
-    try:
-        pointer = json.loads((cache/f'{key}.current.json').read_text())
-        name = pointer['directory']
-        if (pointer['version'] == VERSION and isinstance(name,str) and len(name) == 24
-                and all(value in '0123456789abcdef' for value in name)):
-            return cache/name
-    except (FileNotFoundError, ValueError, KeyError, TypeError):
-        pass
-    return None
+    result = []
+    for name in FILES:
+        stat = (source / name).stat()
+        result.append((name, stat.st_size, stat.st_mtime_ns))
+    return result
 
 
 def checked_meta(source):
     raw = json.loads((source / 'grid.meta.json').read_text())
-    meta = {key: raw[key] for key in ('epsg', 'bounds', 'grid_info', 'level_info',
-                                    'subdivide_rules', 'alignment_origin')}
+    meta = {key: raw[key] for key in ('epsg', 'bounds', 'grid_info', 'alignment_origin')}
     b, origin, sizes = meta['bounds'], meta['alignment_origin'], meta['grid_info']
     require(len(b) == 4 and all(math.isfinite(x) for x in b)
             and b[2] > b[0] and b[3] > b[1], 'Invalid metadata bounds')
@@ -101,17 +65,6 @@ def checked_meta(source):
             ratios = [sizes[i - 1][j] / size[j] for j in (0, 1)]
             require(all(r >= 1 and math.isclose(r, round(r), abs_tol=1e-9) for r in ratios)
                     and max(ratios) > 1, 'grid_info must describe nested integer lattices')
-    require(len(meta['level_info']) == len(sizes) + 1
-            and len(meta['subdivide_rules']) == len(sizes) + 1, 'Invalid schema level metadata')
-    for i, info in enumerate(meta['level_info']):
-        require(all(isinstance(info[k], int) and info[k] > 0 for k in ('width', 'height')),
-                'Invalid level_info')
-        rule = meta['subdivide_rules'][i]
-        require(len(rule) == 2 and all(isinstance(v, int) and v > 0 for v in rule),
-                'Invalid subdivide_rules')
-        if i and i < len(sizes):
-            require(all(math.isclose(sizes[i-1][j] / sizes[i][j], rule[j]) for j in (0, 1)),
-                    'subdivide_rules disagree with grid_info')
     return meta
 
 
@@ -142,6 +95,8 @@ class Layer(Lattice):
         self.tile_bytes = TILE*TILE*self.dtype.itemsize
         size = self.path.stat().st_size if self.path.exists() else 0
         self.capacity = size//self.tile_bytes
+        if mode == 'r' and size:
+            self.mapping = np.memmap(self.path, dtype='u1', mode='r')
 
     def tile(self, tx, ty, create=False):
         key = (int(tx),int(ty))
@@ -273,9 +228,10 @@ def _histograms(directory, layers):
         previous = {(tx, ty): (offset, length)
                     for tx, ty, offset, length in tile_indexes[i-1]}
         previous_path = directory / f'hist-{i-1}.bin'
-        previous_data = previous_path.read_bytes() if previous else b''
         cursor = 0
-        with (directory / f'hist-{i}.bin').open('wb') as output:
+        with ExitStack() as files:
+            previous_file = files.enter_context(previous_path.open('rb')) if previous else None
+            output = files.enter_context((directory / f'hist-{i}.bin').open('wb'))
             for (ux, uy), child_tiles in sorted(sources.items()):
                 node = parent.tile(ux, uy)
                 areas = {}
@@ -293,7 +249,8 @@ def _histograms(directory, layers):
                     if (tx, ty) not in previous:
                         continue
                     start, length = previous[(tx, ty)]
-                    entries = json.loads(previous_data[start:start+length])
+                    previous_file.seek(start)
+                    entries = json.loads(previous_file.read(length))
                     x = np.array([entry[0] for entry in entries], dtype=np.int64)+tx*TILE
                     y = np.array([entry[1] for entry in entries], dtype=np.int64)+ty*TILE
                     bounds = child.bounds(x, y, (0, 0))
@@ -339,7 +296,16 @@ def _histograms(directory, layers):
                     output.write(payload)
                     tile_indexes[i].append([ux, uy, cursor, len(payload)])
                     cursor += len(payload)
-    return tile_indexes
+        previous_path.unlink(missing_ok=True)
+    roots = []
+    root_path = directory / f'hist-{len(layers)-1}.bin'
+    with root_path.open('rb') as source:
+        for tx, ty, offset, length in tile_indexes[-1]:
+            source.seek(offset)
+            roots.extend([tx*TILE+x, ty*TILE+y, category, count]
+                         for x, y, category, count in json.loads(source.read(length)))
+    root_path.unlink()
+    return roots
 
 
 def _coordinate_ranges(lo, hi):
@@ -433,7 +399,6 @@ def _tile_rtree(directory, layers, origin, source):
         # standalone originals. Index their exact validated binary geometry,
         # so sparse holes cannot make coarse-tile searches scale with the
         # length of a block boundary.
-        count = 0
         offsets = np.memmap(directory/'offsets.bin', dtype='<u8', mode='r')
         try:
             with (source/'cell_topo.bin').open('rb') as cell_file:
@@ -452,67 +417,11 @@ def _tile_rtree(directory, layers, origin, source):
                                 insert('original', cid, number, (x0, y0, x1, y1))
                                 db.execute('INSERT INTO original_coords VALUES (?, ?, ?, ?)',
                                            (cid, number, int(local_x)+tx*TILE, int(local_y)+ty*TILE))
-                                count += 1
                 finally:
                     cells.close()
         finally:
             offsets._mmap.close()
         db.commit()
-    return count, fragments
-
-
-def _checksum(path):
-    digest = hashlib.sha256()
-    with path.open('rb') as source:
-        for chunk in iter(lambda: source.read(1024*1024), b''):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _content_files(layers):
-    return ['offsets.bin', 'tile-rtree.sqlite'] + [
-        layer.path.name for layer in layers if layer.tiles
-    ] + [f'hist-{i}.bin' for i in range(1, len(layers))]
-
-
-def _validate_spatial_directory(directory, layers, manifest):
-    # Relational/integrity checks belong exclusively to construction. Opens
-    # trust these invariants while source and artifact stats remain unchanged.
-    with closing(sqlite3.connect(f'file:{directory}/tile-rtree.sqlite?mode=ro', uri=True)) as db:
-        require(db.execute('SELECT count(*) FROM tile_bounds').fetchone()[0]
-                    == manifest['directoryFragments']['tile']
-                and db.execute('SELECT count(*) FROM original_bounds').fetchone()[0]
-                    == manifest['directoryFragments']['original']
-                and db.execute('SELECT count(*) FROM tile_coords').fetchone()[0]
-                    == sum(len(layer.tiles) for layer in layers)
-                and db.execute('SELECT count(*) FROM original_coords').fetchone()[0]
-                    == manifest['originalDirectoryCount']
-                and db.execute('PRAGMA quick_check').fetchone()[0] == 'ok',
-                'Invalid display tile directory')
-        cursor = db.execute('SELECT id, layer, x, y FROM original_coords')
-        while rows := cursor.fetchmany(65536):
-            records = np.asarray(rows, dtype=np.int64)
-            require(np.all((records[:,0] >= 1) & (records[:,0] <= manifest['meta']['cellCount']))
-                    and np.all((records[:,1] > 0) & (records[:,1] < len(layers))),
-                    'Invalid original display directory')
-            for number in np.unique(records[:,1]):
-                layer = layers[number]
-                require(layer.level > 0, 'Invalid original display directory')
-                selected = records[records[:,1] == number]
-                ids,x,y = selected[:,[0,2,3]].T
-                require(np.all((x >= layer.x0) & (x < layer.x0+layer.nx)
-                               & (y >= layer.y0) & (y < layer.y0+layer.ny)),
-                        'Invalid original display directory')
-                tx,ty = x//TILE,y//TILE
-                order = np.lexsort((tx,ty))
-                breaks = np.r_[0,np.flatnonzero((np.diff(tx[order]) != 0)
-                                                | (np.diff(ty[order]) != 0))+1,len(order)]
-                for start,end in pairwise(breaks):
-                    indices = order[start:end]
-                    tile = layer.tile(int(tx[indices[0]]),int(ty[indices[0]]))
-                    require(tile is not None and np.array_equal(
-                        tile['id'][y[indices]%TILE,x[indices]%TILE],ids[indices]),
-                        'Invalid original display directory')
 
 
 def layer_specs(meta):
@@ -571,12 +480,11 @@ def _at(data, dtype, offsets):
                       buffer=data, strides=(1,))[offsets]
 
 
-def _text_chunks(source, digest):
+def _text_chunks(source):
     """Finish records within bounded reads, with universal newline handling."""
     tail = b''
     while True:
         chunk = source.read(4*1024*1024)
-        digest.update(chunk)
         if not chunk:
             if tail:
                 yield tail
@@ -593,8 +501,8 @@ def _text_chunks(source, digest):
             tail = data
 
 
-def _text_batches(path, trailing_floats, digest=None):
-    """One CSV reader for both topology files, including variable-length ne rows.
+def _text_batches(path, trailing_floats):
+    """Read variable-length ne rows in bounded batches.
 
     Flatten only within bounded IO batches. Row delimiters retain the exact
     column counts; Arrow's C tokenizer rejects incomplete/malformed numbers.
@@ -604,9 +512,8 @@ def _text_batches(path, trailing_floats, digest=None):
     import pyarrow as pa
     import pyarrow.csv as csv
 
-    digest = hashlib.sha256() if digest is None else digest
     with path.open('rb') as source:
-        for data in _text_chunks(source, digest):
+        for data in _text_chunks(source):
             data = data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
             raw = np.frombuffer(data, dtype='u1')
             delimiters = np.flatnonzero((raw == 44) | (raw == 10))
@@ -704,11 +611,9 @@ def _put_originals(layer, x, y, values):
 
 def _read_cells(source, directory, meta, native, edges, seen):
     count, offset, zmin, zmax, categories = 0, 0, math.inf, -math.inf, set()
-    binary_digest, text_digest = hashlib.sha256(), hashlib.sha256()
     with (source/'cell_topo.bin').open('rb') as cell_file, (directory/'offsets.bin').open('wb') as output:
-        require(os.fstat(cell_file.fileno()).st_size > 0, 'Empty cell_topo.bin')
         with mmap.mmap(cell_file.fileno(), 0, access=mmap.ACCESS_READ) as cells:
-            for values, starts, widths in _text_batches(source/'ne.txt', 3, text_digest):
+            for values, starts, widths in _text_batches(source/'ne.txt', 3):
                 lengths = CELL_HEADER.itemsize+8*(widths-9)
                 offsets = offset+np.r_[0, np.cumsum(lengths[:-1])]
                 require(np.all(widths >= 13) and np.all(offsets+CELL_HEADER.itemsize <= len(cells))
@@ -764,21 +669,17 @@ def _read_cells(source, directory, meta, native, edges, seen):
                 np.asarray(offsets, dtype='<u8').tofile(output)
                 count += len(starts)
                 end = int(offsets[-1]+lengths[-1])
-                binary_digest.update(memoryview(cells)[offset:end])
                 offset = end
                 zmin, zmax = min(zmin, float(attrs[:,2].min())), max(zmax, float(attrs[:,2].max()))
                 categories.update(map(int, np.unique(attrs[:,3])))
             require(offset == len(cells) and count > 0, 'ne.txt: missing cell records')
-    return count, zmin, zmax, categories, binary_digest.hexdigest(), text_digest.hexdigest()
+    return count, zmin, zmax, categories
 
 
-def _read_edges(source, edges):
-    start, greatest_cell = 0, 0
-    binary_digest, text_digest = hashlib.sha256(), hashlib.sha256()
-    for values, starts, widths in _text_batches(source/'ns.txt', 4, text_digest):
-        require(np.all(widths == 11) and start+len(starts) <= len(edges), 'ns.txt: wrong record/column count')
-        e = edges[start:start+len(starts)]
-        binary_digest.update(e)
+def _read_edges(edges):
+    greatest_cell = 0
+    for start in range(0, len(edges), 65536):
+        e = edges[start:start+65536]
         ids = np.arange(start+1, start+len(e)+1, dtype=np.uint64)
         direction, a, b = e['direction'], e['a'], e['b']
         require(np.all(e['length'] == EDGE.size-4) and np.array_equal(e['id'], ids)
@@ -791,17 +692,7 @@ def _read_edges(source, edges):
         require(np.all(np.where(direction == 0,
                     (box[:,0] == box[:,2]) & (box[:,3] > box[:,1]),
                     (box[:,1] == box[:,3]) & (box[:,2] > box[:,0]))), 'Invalid edge geometry')
-        row = values.reshape(-1,11)
-        expected = np.column_stack((ids, np.where(direction,1,2).astype(np.uint64), np.where(direction,0,a),
-                                   np.where(direction,0,b), np.where(direction,b,0), np.where(direction,a,0)))
-        require(np.array_equal(row[:,:6], expected), 'ns.txt: topology mismatch')
-        require(np.all((row[:,10] >= 0) & (row[:,10] <= 255)), 'Invalid ns.txt attributes')
-        geometry = np.column_stack((np.where(direction,box[:,2]-box[:,0],box[:,3]-box[:,1]),
-                                    (box[:,0]+box[:,2])/2, (box[:,1]+box[:,3])/2))
-        require(np.all(np.abs(row[:,6:9]-geometry) <= 1e-6), 'ns.txt geometry mismatch')
-        start += len(e)
-    require(start == len(edges), 'ns.txt: missing edge records')
-    return greatest_cell, binary_digest.hexdigest(), text_digest.hexdigest()
+    return greatest_cell
 
 
 def _check_edge_references(edges, seen, count, greatest_cell):
@@ -820,150 +711,101 @@ def _build(source, directory, initial_fingerprint):
 
 
 def _build_into(source, directory, initial_fingerprint, resources):
-    started = time.perf_counter()
     meta = checked_meta(source)
     specs = layer_specs(meta)
     layers = [Layer(directory, i, spec, 'w+') for i, spec in enumerate(specs)]
     for layer in layers:
         resources.callback(layer.close)
     native = {layer.level: layer for layer in layers if layer.level > 0}
-    edges_size = (source / 'edge_topo.bin').stat().st_size
+    edges_size = next(size for name, size, _ in initial_fingerprint if name == 'edge_topo.bin')
     require(edges_size and edges_size % EDGE.size == 0, 'Truncated edge_topo.bin')
     edge_count = edges_size // EDGE.size
     seen = np.memmap(directory / 'edge-seen.tmp', mode='w+', dtype='<u4', shape=(edge_count,))
     resources.callback(seen._mmap.close)
     edges = np.memmap(source/'edge_topo.bin', dtype=EDGE_RECORD, mode='r')
     resources.callback(edges._mmap.close)
-    # The two text sources and immutable binary edges are independent inputs.
+    # Cell text and immutable binary edges are independent inputs.
     # One background reader overlaps C tokenization with batch validation;
     # only the cell reader writes layers and reference counts. Join before
     # checking all reciprocal counts or publishing any derived artifact.
     with ThreadPoolExecutor(max_workers=1) as readers:
-        edge_validation = readers.submit(_read_edges, source, edges)
-        count, zmin, zmax, categories, cell_hash, ne_hash = _read_cells(source, directory, meta, native, edges, seen)
-        greatest_cell, edge_hash, ns_hash = edge_validation.result()
+        edge_validation = readers.submit(_read_edges, edges)
+        count, zmin, zmax, categories = _read_cells(source, directory, meta, native, edges, seen)
+        greatest_cell = edge_validation.result()
     _check_edge_references(edges, seen, count, greatest_cell)
     edges._mmap.close()
     seen._mmap.close()
     (directory / 'edge-seen.tmp').unlink()
     for child,parent in pairwise(layers):
         _rollup(child,parent)
-    histogram_tiles = _histograms(directory,layers)
-    original_count, fragments = _tile_rtree(directory,layers,meta['alignment_origin'],source)
+    root_histograms = _histograms(directory,layers)
+    _tile_rtree(directory,layers,meta['alignment_origin'],source)
     layer_tiles = [[[x,y,slot] for (x,y),slot in sorted(layer.tiles.items())] for layer in layers]
-    meta.update(cellCount=count, landClasses=sorted(categories), attributes=['level','elevation','landClass'], elevationRange=[zmin,zmax])
-    manifest = {'version':VERSION,'meta':meta,'layers':specs,'layerTiles':layer_tiles,
-                'tileDirectory':'float64-i32-v1','originalDirectoryCount':original_count,
-                'directoryFragments':fragments,
-                'histogramFormat':'exact-unit-json-v1',
-                'histogramTiles':histogram_tiles,'source':str(source),
-                'fingerprint':initial_fingerprint, 'edgeCount':edge_count,
-                'peakRssBytes':_peak_rss()}
-    _validate_spatial_directory(directory, layers, manifest)
+    meta.update(cellCount=count, landClasses=sorted(categories), elevationRange=[zmin,zmax])
+    manifest = {'meta':meta, 'layers':specs, 'layerTiles':layer_tiles,
+                'rootHistograms':root_histograms, 'source':str(source)}
     for layer in layers:
         layer.close()
-    hashes = {'grid.meta.json':_checksum(source/'grid.meta.json'),
-              'cell_topo.bin':cell_hash, 'edge_topo.bin':edge_hash,
-              'ne.txt':ne_hash, 'ns.txt':ns_hash}
-    manifest['sourceIdentity'] = {name:{'size':size,'mtimeNs':mtime,'sha256':hashes[name]}
-                                  for name,size,mtime in initial_fingerprint}
     require(fingerprint(source) == initial_fingerprint, 'Grid changed during display index construction')
-    manifest['buildSeconds'] = time.perf_counter()-started
-    manifest['peakRssBytes'] = _peak_rss()
-    (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2))
-    # Publish the manifest's own identity only after every immutable artifact
-    # is closed. No checksum or record/SQLite scan is needed on later opens.
-    identity = {'version':VERSION,'source':str(source),'fingerprint':initial_fingerprint,
-                'files':{name:_file_stat(directory/name)
-                         for name in ['manifest.json',*_content_files(layers)]}}
-    (directory/'identity.json').write_text(json.dumps(identity))
+    (directory / 'manifest.json').write_text(json.dumps(manifest, separators=(',', ':')))
     return manifest
 
 
-def _peak_rss():
-    if sys.platform == 'win32':
-        import ctypes
-        from ctypes import wintypes
-        class MemoryCounters(ctypes.Structure):
-            _fields_ = [('cb',wintypes.DWORD),('faults',wintypes.DWORD)] + [
-                (name,ctypes.c_size_t) for name in (
-                    'peakWorkingSet','workingSet','peakPaged','paged',
-                    'peakNonpaged','nonpaged','pagefile','peakPagefile')]
-        counters = MemoryCounters()
-        counters.cb = ctypes.sizeof(counters)
-        kernel,psapi = ctypes.WinDLL('kernel32'),ctypes.WinDLL('psapi')
-        kernel.GetCurrentProcess.restype = wintypes.HANDLE
-        psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE,ctypes.POINTER(MemoryCounters),wintypes.DWORD]
-        if not psapi.GetProcessMemoryInfo(kernel.GetCurrentProcess(),ctypes.byref(counters),counters.cb):
-            raise ctypes.WinError()
-        return counters.peakWorkingSet
-    import resource
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == 'darwin' else 1024)
-
-
 class GridDisplayIndex:
-    def __init__(self, source: Path, cache: Path):
+    def __init__(self, source: Path, cache: Path, revision=None):
         self.source = Path(source).resolve()
         cache = Path(cache).resolve()
-        revision = fingerprint(self.source)
-        identity = [VERSION,str(self.source),revision]
-        key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
-        with _LOCK:
-            directory = _current_directory(cache,key)
-            if not _cache_reusable(directory, self.source, revision):
-                cache.mkdir(parents=True, exist_ok=True)
-                # SQLite serializes cold construction and stat-triggered
-                # replacement across processes. Existing readers retain their
-                # immutable files while a replacement is built and validated.
-                with closing(sqlite3.connect(cache/'build-lock.sqlite',timeout=3600)) as connection, connection:
-                    connection.execute('BEGIN IMMEDIATE')
-                    directory = _current_directory(cache,key)
-                    if not _cache_reusable(directory, self.source, revision):
-                        with tempfile.TemporaryDirectory(prefix='building-', dir=cache) as temp:
-                            staging = Path(temp)
-                            _build(self.source, staging, revision)
-                            directory = cache/uuid.uuid4().hex[:24]
-                            staging.rename(directory)
-                            # Publish a new immutable generation atomically;
-                            # live readers keep their existing directory paths.
-                            pointer = directory/'publish.json'
-                            pointer.write_text(json.dumps({'version':VERSION,'directory':directory.name}))
-                            pointer.replace(cache/f'{key}.current.json')
-            self.manifest = json.loads((directory/'manifest.json').read_text())
-        require(self.manifest['version'] == VERSION
-                and self.manifest['source'] == str(self.source)
-                and self.manifest['fingerprint'] == [list(entry) for entry in revision],
-                'Invalid display manifest')
-        specs = self.manifest['layers']
+        self.fingerprint = fingerprint(self.source) if revision is None else revision
+        identity = [VERSION,str(self.source),self.fingerprint]
+        self.revision = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
+        directory = cache / self.revision
+        if not directory.exists():
+            cache.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix='building-', dir=cache) as temp:
+                staging = Path(temp)
+                _build(self.source, staging, self.fingerprint)
+                try:
+                    staging.rename(directory)
+                except OSError as exc:
+                    if exc.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                        raise
+        self.manifest = json.loads((directory/'manifest.json').read_text())
         self.directory = directory
-        self.revision = directory.name
-        self.meta = dict(self.manifest['meta'], revision=self.revision, displayLayers=[{
-            'width':spec[0], 'height':spec[1], 'x0':spec[2], 'y0':spec[3],
-            'nx':spec[4], 'ny':spec[5], 'nativeLevel':spec[6] if spec[6] > 0 else None,
-            'xLayout':spec[7][0] if len(spec) == 8 else None,
-            'yLayout':spec[7][1] if len(spec) == 8 else None,
-        } for spec in specs])
+        self.meta = {key:self.manifest['meta'][key] for key in (
+            'epsg', 'bounds', 'alignment_origin', 'grid_info', 'elevationRange', 'landClasses')}
+        self.meta['revision'] = self.revision
         self.origin = self.meta['alignment_origin']
-        self.layers = [Layer(directory,i,spec,tiles=tiles) for i,(spec,tiles) in enumerate(zip(self.manifest['layers'],self.manifest['layerTiles']))]
+        self.layers = []
         self.offsets = self.cells = self.edges = None
         self._cell_file = self._edge_file = None
         self._directory_db = None
-        self._query_lock = threading.Lock()
+        self._closed = False
+        display_cache.register(self)
         try:
+            for i, (spec, tiles) in enumerate(zip(self.manifest['layers'],self.manifest['layerTiles'])):
+                self.layers.append(Layer(directory,i,spec,tiles=tiles))
             self.offsets = np.memmap(directory / 'offsets.bin',dtype='<u8',mode='r')
             self._cell_file = (self.source / 'cell_topo.bin').open('rb')
             self._edge_file = (self.source / 'edge_topo.bin').open('rb')
             self.cells = mmap.mmap(self._cell_file.fileno(),0,access=mmap.ACCESS_READ)
             self.edges = mmap.mmap(self._edge_file.fileno(),0,access=mmap.ACCESS_READ)
+            # Keep every immutable file open for the generation's lifetime.
+            # Independent cursors need independent statements when threads
+            # overlap; Python's connection statement cache is not shared here.
+            self._directory_db = sqlite3.connect(
+                f'file:{directory}/tile-rtree.sqlite?mode=ro&immutable=1', uri=True,
+                check_same_thread=False, cached_statements=0)
             self._roots = self._root_summaries()
-        except Exception:
+            display_cache.prune(self.source, cache, directory)
+        except BaseException:
             self.close()
             raise
 
     def close(self):
+        if self._closed:
+            return
         if self._directory_db is not None:
             self._directory_db.close()
-            self._directory_db = None
         for mapping in (self.cells,self.edges):
             if mapping is not None:
                 mapping.close()
@@ -974,6 +816,8 @@ class GridDisplayIndex:
             layer.close()
         if self.offsets is not None:
             self.offsets._mmap.close()
+        self._closed = True
+        display_cache.closed(self)
 
     def _cell(self, cid):
         offset = int(self.offsets[cid-1]) + 4
@@ -1051,11 +895,8 @@ class GridDisplayIndex:
         """At most four storage roots, retaining every class's exact weight."""
         root = self.layers[-1]
         histograms = defaultdict(dict)
-        with (self.directory/f'hist-{len(self.layers)-1}.bin').open('rb') as source:
-            for tx,ty,offset,length in self.manifest['histogramTiles'][-1]:
-                source.seek(offset)
-                for x,y,category,count in json.loads(source.read(length)):
-                    histograms[(tx*TILE+x,ty*TILE+y)][category] = int(count,16)
+        for x,y,category,count in self.manifest['rootHistograms']:
+            histograms[(x,y)][category] = int(count,16)
         roots = []
         for y in range(root.y0,root.y0+root.ny):
             for x in range(root.x0,root.x0+root.nx):
@@ -1075,21 +916,13 @@ class GridDisplayIndex:
                 'Display block outside grid')
 
     def nodes(self, block_layer, x, y, display_layer):
-        """Return one camera-independent block in the GDN4 wire format."""
+        """Return one camera-independent block in the GDN5 wire format."""
         self.validate_nodes(block_layer, x, y, display_layer)
         return self._nodes(block_layer, x, y, display_layer)
 
     @contextmanager
     def _directory(self):
-        # Reuse this immutable generation's read-only connection and prepared
-        # statements. Serialize its use across FastAPI worker threads; opening
-        # an existing index still does stat-only validation and no SQL scan.
-        with self._query_lock:
-            if self._directory_db is None:
-                path = self.directory/'tile-rtree.sqlite'
-                self._directory_db = sqlite3.connect(f'file:{path}?mode=ro', uri=True,
-                                                     check_same_thread=False)
-            yield self._directory_db
+        yield self._directory_db
 
     def _records(self, nodes, bounds, box):
         """Pack selected nodes together, retaining original binary geometry."""
@@ -1115,13 +948,9 @@ class GridDisplayIndex:
         if display_layer >= len(self.layers):
             return self._ancestor_nodes(block_layer,x,y,display_layer)
         records = []
-        visited = 0
-        tile_scans = 0
-        directory_queries = 0
         search = _rectangle_ranges(box)
         max_native = max(i for i, layer in enumerate(self.layers) if layer.level > 0)
         with self._directory() as db:
-            directory_queries += 1
             tiles = _directory_query(db, 'tile', 'c.tx, c.ty', search,
                                      display_layer, display_layer)
             layer = self.layers[display_layer]
@@ -1131,8 +960,6 @@ class GridDisplayIndex:
                     continue
                 seen_tiles.add((tx, ty))
                 tile = layer.tile(tx, ty)
-                tile_scans += 1
-                visited += TILE*TILE
                 sy, sx = np.nonzero(tile['area'] > 0)
                 if not len(sx):
                     continue
@@ -1150,12 +977,10 @@ class GridDisplayIndex:
                                                  np.column_stack(bounds)[selected], box))
 
             if display_layer < max_native:
-                directory_queries += 1
                 originals = list(_directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
                                                   search, display_layer+1, max_native))
                 if originals:
-                    # Rtree fragments can repeat a cell. Preserve the cursor's
-                    # first-occurrence order so the wire output stays stable.
+                    # Rtree fragments can repeat a cell; emit each ID once.
                     unique, groups, seen = [], defaultdict(list), set()
                     for cid, i, gx, gy in originals:
                         if cid not in seen:
@@ -1163,20 +988,13 @@ class GridDisplayIndex:
                             groups[(i, gx//TILE, gy//TILE)].append(len(unique))
                             unique.append((gx, gy))
                     entries = np.array(unique, dtype=np.int64)
-                    visited += len(entries)
                     nodes = np.empty(len(entries), dtype=NODE)
                     for (i, tx, ty), positions in groups.items():
                         selected = np.asarray(positions, dtype=np.intp)
                         tile = self.layers[i].tile(tx, ty)
-                        tile_scans += 1
                         nodes[selected] = tile[entries[selected,1]%TILE, entries[selected,0]%TILE]
                     records.append(self._records(nodes, np.zeros((len(nodes),4)), box))
-        self.last_query_nodes = visited
-        self.last_query_tiles = tile_scans
-        self.last_query_directory_queries = directory_queries
-        count = sum(len(part)//DISPLAY_RECORD.size for part in records)
-        require(count <= 0xffffffff, 'Display block has too many records')
-        return b'GDN4' + struct.pack('<I', count) + b''.join(records)
+        return b'GDN5' + b''.join(records)
 
     def _ancestor_nodes(self, block_layer, x, y, display_layer):
         layer = self._layer(display_layer)
@@ -1200,6 +1018,4 @@ class GridDisplayIndex:
                 sum(float(node['z']) for node,_ in children),
                 min(float(node['min']) for node,_ in children),
                 max(int(node['level']) for node,_ in children),winner))
-        self.last_query_nodes = len(self._roots)
-        self.last_query_tiles = self.last_query_directory_queries = 0
-        return b'GDN4' + struct.pack('<I',len(records)) + b''.join(records)
+        return b'GDN5' + b''.join(records)

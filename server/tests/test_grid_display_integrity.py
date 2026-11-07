@@ -19,57 +19,16 @@ def snapshot(directory):
         for path in directory.rglob('*') if path.is_file()}
 
 
-@pytest.mark.parametrize('damage', [
-    'duplicate-id', 'zero-summary', 'histogram', 'sqlite', 'sqlite-coords', 'sqlite-header'
-])
-def test_same_size_stat_changes_rebuild_and_preserve_source(tmp_path, damage):
-    source = write_grid(tmp_path/'source', [
-        ((0, 0, 8, 8), 1, 3), ((8, 0, 16, 8), 2, 4)
-    ], sizes=((8, 8),), bounds=(0, 0, 16, 8))
-    original_source = snapshot(source)
-    cache = tmp_path/'cache'
-    index = display.GridDisplayIndex(source, cache)
-    directory = index.directory
-    index.close()
-    if damage in ('sqlite', 'sqlite-coords'):
-        path = directory/'tile-rtree.sqlite'
-        size = path.stat().st_size
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute('UPDATE tile_bounds SET max_layer=max_layer+1 WHERE id=1'
-                       if damage == 'sqlite' else 'UPDATE tile_coords SET tx=tx+1 WHERE id=1')
-        assert path.stat().st_size == size
-    elif damage == 'sqlite-header':
-        path = directory/'tile-rtree.sqlite'
-        data = bytearray(path.read_bytes())
-        data[0] ^= 1
-        path.write_bytes(data)
-    else:
-        path = (directory/'layer-0.bin' if damage == 'duplicate-id' else
-                directory/'layer-1.bin' if damage == 'zero-summary' else
-                next(p for p in directory.glob('hist-*.bin') if p.stat().st_size))
-        data = bytearray(path.read_bytes())
-        if damage == 'duplicate-id':
-            struct.pack_into('<Q', data, 0, 2)
-        elif damage == 'zero-summary':
-            data[:] = bytes(len(data))
-        else:
-            data[0] ^= 1
-        path.write_bytes(data)
-    rebuilt = display.GridDisplayIndex(source, cache)
-    try:
-        assert rebuilt.inspect(1,1)['cell']['id'] == 1
-        assert rebuilt.inspect(9,1)['cell']['id'] == 2
-        assert decode_nodes(rebuilt.nodes(len(rebuilt.layers)-1,0,0,len(rebuilt.layers)-1))[0][5] == 128
-    finally:
-        rebuilt.close()
-    assert snapshot(source) == original_source
-
-
 def measured_nodes(index, selection, monkeypatch):
     """Observe real source unpacking, mapped tile access, and SQLite VM work."""
-    counts = dict(cells=0, tiles=0, sql_steps=0)
+    counts = dict(cells=0, tiles=0, sql_steps=0, queries=0)
     original_cell, original_at = display.CELL, display._at
     original_tile, original_connect = display.Layer.tile, sqlite3.connect
+    original_query = display._directory_query
+
+    def query(*args, **kwargs):
+        counts['queries'] += 1
+        return original_query(*args, **kwargs)
 
     def unpack(*args):
         counts['cells'] += 1
@@ -98,13 +57,12 @@ def measured_nodes(index, selection, monkeypatch):
         patch.setattr(display, '_at', gather)
         patch.setattr(display.Layer, 'tile', tile)
         patch.setattr(sqlite3, 'connect', connect)
-        if index._directory_db is not None:
-            index._directory_db.set_progress_handler(step, 1)
+        patch.setattr(display, '_directory_query', query)
+        index._directory_db.set_progress_handler(step, 1)
         try:
             records = decode_nodes(index.nodes(*selection))
         finally:
-            if index._directory_db is not None:
-                index._directory_db.set_progress_handler(None, 0)
+            index._directory_db.set_progress_handler(None, 0)
     return records, counts
 
 
@@ -122,12 +80,10 @@ def test_far_fine_empty_block_does_not_read_unrelated_coarse_cells(tmp_path, mon
             records, counts = measured_nodes(index, (0, 2048000080, 2048000080, 0), monkeypatch)
             assert records == []
             assert counts['cells'] == counts['tiles'] == 0
-            assert index.last_query_nodes == index.last_query_tiles == 0
-            assert index.last_query_directory_queries == 2
+            assert counts['queries'] == 2
             measurements.append(counts)
         finally:
             index.close()
-    (tmp_path/'measurements.json').write_text(json.dumps(measurements))
     assert measurements[-1]['sql_steps'] <= measurements[0]['sql_steps']+100
 
 
@@ -146,12 +102,10 @@ def test_far_fine_empty_block_does_not_map_unrelated_tiles(tmp_path, monkeypatch
             records, counts = measured_nodes(index, (0, q, q, 0), monkeypatch)
             assert records == []
             assert counts['cells'] == counts['tiles'] == 0
-            assert index.last_query_nodes == index.last_query_tiles == 0
-            assert index.last_query_directory_queries == 1
+            assert counts['queries'] == 1
             measurements.append(counts)
         finally:
             index.close()
-    (tmp_path/'measurements.json').write_text(json.dumps(measurements))
     assert measurements[-1]['sql_steps'] <= measurements[0]['sql_steps']+100
 
 
@@ -174,7 +128,7 @@ def test_precise_coarse_originals_and_half_open_edges(tmp_path, monkeypatch, far
             records, counts = measured_nodes(index, (0, x+dx, x, 0), monkeypatch)
             expected = (far+(cid-1)*unit, far, far+cid*unit, far+unit)
             assert records == [(cid, *expected, unit*unit, z*unit*unit, unit, 1, land)]
-            assert counts['cells'] == counts['tiles'] == index.last_query_nodes == 1
+            assert counts['cells'] == counts['tiles'] == 1
         records, counts = measured_nodes(index, (0, x+4, x, 0), monkeypatch)
         assert records == [] and counts['cells'] == counts['tiles'] == 0
     finally:
@@ -236,7 +190,6 @@ def test_cached_open_and_queries_do_not_hash_or_scan(tmp_path, monkeypatch):
     def no_scan(*args, **kwargs):
         raise AssertionError('Cached open/query scanned validated files')
 
-    monkeypatch.setattr(display, '_checksum', no_scan)
     original_at = display._at
     gathers = []
 
@@ -248,10 +201,7 @@ def test_cached_open_and_queries_do_not_hash_or_scan(tmp_path, monkeypatch):
 
     monkeypatch.setattr(display, '_at', selected_original)
     monkeypatch.setattr(display, 'checked_meta', no_scan)
-    monkeypatch.setattr(display, '_validate_spatial_directory', no_scan)
-    with monkeypatch.context() as context:
-        context.setattr(sqlite3, 'connect', no_scan)
-        reopened = display.GridDisplayIndex(source, cache)
+    reopened = display.GridDisplayIndex(source, cache)
     try:
         for _ in range(3):
             assert decode_nodes(reopened.nodes(0, 0, 0, 0))[0][0] == 1
@@ -265,6 +215,7 @@ def test_cached_open_and_queries_do_not_hash_or_scan(tmp_path, monkeypatch):
 def test_verified_cache_http_revision_gzip_and_304_preserve_source(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from starlette.middleware.gzip import GZipMiddleware
     from gridmen_backend.api.endpoints import grid
 
     cells = [((0, 0, 32, 32), 19, 9)] + [
@@ -282,6 +233,7 @@ def test_verified_cache_http_revision_gzip_and_304_preserve_source(tmp_path, mon
     monkeypatch.setattr(grid.settings, 'ROOT_DIR', tmp_path)
     grid._close_display_cache()
     app = FastAPI()
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=1)
     app.include_router(grid.router, prefix='/api')
     path = f'/api/grid/test/display/nodes/{revision}/{top}/0/0/0'
     with TestClient(app) as client:

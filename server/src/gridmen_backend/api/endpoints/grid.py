@@ -2,21 +2,16 @@ import os
 import json
 import shutil
 import logging
-import gzip
-from collections import OrderedDict
 from contextlib import asynccontextmanager, contextmanager
-import threading
 from pathlib import Path
 from pynoodle import noodle
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
-from fastapi.routing import APIRoute
+from fastapi.responses import Response
 
 from ...core import settings
 from ...schemas.base import BaseResponse
 from ...schemas.grid import GridExportRequest
-from ...grid_display import GridDisplayIndex, fingerprint
+from ...display_cache import borrow, close_cache as _close_display_cache
 
 logger = logging.getLogger(__name__)
 
@@ -134,17 +129,6 @@ def _display_source(node_key: str) -> Path:
     return Path(params['resource_space']).resolve()
 
 
-_DISPLAY_CACHE = OrderedDict()
-_DISPLAY_LOCK = threading.RLock()
-
-
-def _close_display_cache():
-    with _DISPLAY_LOCK:
-        for index in _DISPLAY_CACHE.values():
-            index.close()
-        _DISPLAY_CACHE.clear()
-
-
 @asynccontextmanager
 async def _display_lifespan(app):
     yield
@@ -159,67 +143,20 @@ def _display(node_key: str):
         source = _display_source(node_key)
     except (OSError,ValueError,KeyError) as exc:
         raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
-    # Hold ownership while the index is in use so invalidation/eviction cannot
-    # unmap another thread's query. Each worker has its own cache.
-    with _DISPLAY_LOCK:
-        try:
-            key = (source,tuple(fingerprint(source)))
-            for old in list(_DISPLAY_CACHE):
-                if old[0] == source and old != key:
-                    _DISPLAY_CACHE.pop(old).close()
-            if key not in _DISPLAY_CACHE:
-                index = GridDisplayIndex(source,settings.ROOT_DIR / 'resource' / '.display')
-                _DISPLAY_CACHE[key] = index
-                if len(_DISPLAY_CACHE) > 4:
-                    _,evicted = _DISPLAY_CACHE.popitem(last=False)
-                    evicted.close()
-            _DISPLAY_CACHE.move_to_end(key)
-        except (OSError,ValueError,KeyError) as exc:
-            raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
-        yield _DISPLAY_CACHE[key]
+    try:
+        with borrow(source, settings.ROOT_DIR / 'resource' / '.display') as index:
+            yield index
+    except (OSError,ValueError,KeyError) as exc:
+        raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
 
 
-class DisplayRoute(APIRoute):
-    def get_route_handler(self):
-        handler = super().get_route_handler()
-
-        async def checked(request):
-            try:
-                return await handler(request)
-            except RequestValidationError as exc:
-                # FastAPI's default error echoes nonfinite JSON inputs, which
-                # JSONResponse cannot serialize. Keep explicit, JSON-safe errors.
-                return JSONResponse(status_code=422, content={'detail':[
-                    {key:error[key] for key in ('loc','msg','type')}
-                    for error in exc.errors()
-                ]})
-        return checked
-
-
-display_router = APIRouter(route_class=DisplayRoute,lifespan=_display_lifespan)
+display_router = APIRouter(lifespan=_display_lifespan)
 
 
 @display_router.get('/{node_key}/display/meta')
 def display_meta(node_key: str):
     with _display(node_key) as index:
         return index.meta
-
-
-def _accepts_gzip(value):
-    # An explicit gzip refusal overrides a wildcard, including q=0.
-    qualities = {}
-    for entry in value.lower().split(','):
-        coding,*parameters = entry.strip().split(';')
-        quality = 1.0
-        for parameter in parameters:
-            name,separator,number = parameter.strip().partition('=')
-            if name == 'q' and separator:
-                try:
-                    quality = float(number)
-                except ValueError:
-                    quality = 0.0
-        qualities[coding] = quality
-    return 0 < qualities.get('gzip',qualities.get('*',0)) <= 1
 
 
 @display_router.get('/{node_key}/display/nodes/{revision}/{block_layer}/{x}/{y}/{display_layer}')
@@ -233,15 +170,11 @@ def display_nodes(node_key: str, revision: str, block_layer: int, x: int, y: int
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         etag = f'W/"{revision}:{block_layer}:{x}:{y}:{display_layer}"'
-        headers = {'ETag':etag, 'Cache-Control':'public, max-age=31536000, immutable',
-                   'Vary':'Accept-Encoding'}
+        headers = {'ETag':etag, 'Cache-Control':'public, max-age=31536000, immutable'}
         validators = {value.strip() for value in request.headers.get('if-none-match','').split(',')}
         if '*' in validators or etag in validators:
             return Response(status_code=304, headers=headers)
         payload = index._nodes(block_layer, x, y, display_layer)
-    if len(payload) >= 1000 and _accepts_gzip(request.headers.get('accept-encoding','')):
-        payload = gzip.compress(payload,compresslevel=1,mtime=0)
-        headers['Content-Encoding'] = 'gzip'
     return Response(payload,media_type='application/octet-stream',headers=headers)
 
 

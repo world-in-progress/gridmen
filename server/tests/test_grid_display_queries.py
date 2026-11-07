@@ -1,15 +1,102 @@
-"""Batched reads must preserve the fixed v10 scalar wire contract."""
+"""Compare block queries with a geometric scan of every original cell."""
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import json
+import math
 import sqlite3
-import threading
 
 import pytest
 
 import gridmen_backend.grid_display as display
-from test_grid_display import write_grid
-from v10_query_reference import v10_nodes
+from test_grid_display import decode_nodes, query_work, write_grid
+
+
+def brute_nodes(meta, specs, cells, selection):
+    """No tile, node, histogram, Rtree, or production query reads."""
+    block_number, bx, by, selected = selection
+    origin, sizes = meta['alignment_origin'], meta['grid_info']
+
+    def spec(number):
+        if number < len(specs):
+            return specs[number]
+        last = specs[-1]
+        factor = 2**(number-len(specs)+1)
+        return [last[0]*factor, last[1]*factor, 0, 0, 0, 0, 0]
+
+    def axis(index, size, layout):
+        if layout is None:
+            return index*size, (index+1)*size
+        period, count = layout
+        group, local = divmod(index, count)
+        return group*period+local*size, group*period+min((local+1)*size, period)
+
+    def position(value, size, layout):
+        if layout is None:
+            return math.floor(value/size)
+        period, count = layout
+        group = math.floor(value/period)
+        return group*count+min(math.floor((value-group*period)/size), count-1)
+
+    def box(number, x, y):
+        entry = spec(number)
+        layout = entry[7] if len(entry) == 8 else [None, None]
+        x0, x1 = axis(x, entry[0], layout[0])
+        y0, y1 = axis(y, entry[1], layout[1])
+        return (origin[0]+x0, origin[1]+y0, origin[0]+x1, origin[1]+y1)
+
+    def locate(number, bounds):
+        entry = spec(number)
+        layout = entry[7] if len(entry) == 8 else [None, None]
+        return tuple(position((bounds[i]+bounds[i+2])/2-origin[i], entry[i], layout[i])
+                     for i in (0,1))
+
+    block_box = box(block_number, bx, by)
+    native_numbers = {entry[6]: i for i, entry in enumerate(specs) if entry[6] > 0}
+    units = [1]*len(sizes)
+    for i in range(len(sizes)-2,-1,-1):
+        units[i] = units[i+1]*round(sizes[i][0]/sizes[i+1][0])*round(sizes[i][1]/sizes[i+1][1])
+    originals, groups = [], defaultdict(list)
+    for cid, (bounds, z, land) in enumerate(cells, 1):
+        native = next(i for i, (w,h) in enumerate(sizes)
+                      if math.isclose(w,bounds[2]-bounds[0],rel_tol=0,abs_tol=1e-7)
+                      and math.isclose(h,bounds[3]-bounds[1],rel_tol=0,abs_tol=1e-7))
+        w,h = sizes[native]
+        record = (cid, *bounds, w*h, z*w*h, min(w,h), native+1, land)
+        if native_numbers[native+1] >= selected:
+            # A native sample owns one block by its midpoint. Larger originals
+            # can span blocks and retain exact half-open binary intersections.
+            owned = (native_numbers[native+1] > selected
+                     or locate(block_number, bounds) == (bx,by))
+            if (owned and bounds[0] < block_box[2] and bounds[2] > block_box[0]
+                    and bounds[1] < block_box[3] and bounds[3] > block_box[1]):
+                originals.append(record)
+        else:
+            groups[locate(selected, bounds)].append((record,units[native]))
+    for (x,y), children in groups.items():
+        bounds = box(selected, x,y)
+        if locate(block_number, bounds) != (bx,by):
+            continue
+        weights = defaultdict(int)
+        for record, weight in children:
+            weights[record[9]] += weight
+        originals.append((0, *bounds,
+            math.fsum(r[5] for r,_ in children), math.fsum(r[6] for r,_ in children),
+            min(r[7] for r,_ in children), max(r[8] for r,_ in children),
+            min(weights, key=lambda category: (-weights[category],category))))
+    return originals
+
+
+def assert_records(actual, expected, context=None):
+    def keyed(records):
+        result = {(r[0], *r[1:5]): r for r in records}
+        assert len(result) == len(records), 'duplicate geometry/ID'
+        return result
+    actual, expected = keyed(actual), keyed(expected)
+    assert actual.keys() == expected.keys(), context
+    for key, record in actual.items():
+        assert record[5:8] == pytest.approx(expected[key][5:8])
+        assert record[8:] == expected[key][8:]
 
 
 @pytest.mark.parametrize('cells,origin,sizes,bounds', [
@@ -31,72 +118,52 @@ from v10_query_reference import v10_nodes
      (-2**40,0,-2**40+2**-8,2**-10)),
     ([((0,0,.3,.3),1,9), ((.3,0,.4,.1),2,3), ((.4,0,.5,.1),2,3),
       ((.5,0,.6,.1),2,3)], (0,0), ((.3,.3),(.1,.1)), (0,0,.6,.3)),
-])
-def test_all_small_blocks_match_frozen_v10_bytes(tmp_path,cells,origin,sizes,bounds):
+], ids=['mixed','decimal-holes','cross-origin','nonbinary','far-positive','far-negative','decimal-mixed'])
+def test_all_small_blocks_match_original_cell_scan(tmp_path,cells,origin,sizes,bounds):
     source = write_grid(tmp_path/'source',cells,origin=origin,sizes=sizes,bounds=bounds)
     index = display.GridDisplayIndex(source,tmp_path/'cache')
+    meta = json.loads((source/'grid.meta.json').read_text())
     try:
-        # All native and clipped-dyadic blocks, then implicit ancestor layers.
         for block_number in range(len(index.layers)+3):
             block = index._layer(block_number)
             for y in range(block.y0,block.y0+block.ny):
                 for x in range(block.x0,block.x0+block.nx):
                     for selected in range(block_number+1):
-                        assert index.nodes(block_number,x,y,selected) == v10_nodes(
-                            index,block_number,x,y,selected)
+                        selection = (block_number,x,y,selected)
+                        assert_records(decode_nodes(index.nodes(*selection)),
+                                       brute_nodes(meta,index.manifest['layers'],cells,selection),selection)
     finally:
         index.close()
 
 
-def test_readonly_directory_connection_is_lazy_reused_and_closed(tmp_path,monkeypatch):
+def test_query_cursors_overlap_on_readonly_generation(tmp_path):
     source = write_grid(tmp_path/'source',[((0,0,8,8),1,3)])
     index = display.GridDisplayIndex(source,tmp_path/'cache')
-    calls = []
-    connect = sqlite3.connect
-
-    def tracked_connect(*args,**kwargs):
-        calls.append((args,kwargs))
-        return connect(*args,**kwargs)
-
-    monkeypatch.setattr(sqlite3,'connect',tracked_connect)
-    assert index._directory_db is None
+    connection = index._directory_db
     try:
-        expected = v10_nodes(index,0,0,0,0)
-        calls.clear()
-        with ThreadPoolExecutor(max_workers=4) as workers:
-            payloads = list(workers.map(lambda _:index.nodes(0,0,0,0),range(16)))
-        assert payloads == [expected]*16
-        assert len(calls) == 1
-        connection = index._directory_db
-        assert calls[0][1] == {'uri':True,'check_same_thread':False}
-        assert '?mode=ro' in calls[0][0][0]
         with pytest.raises(sqlite3.OperationalError,match='readonly'):
             connection.execute('CREATE TABLE forbidden(value)')
+        expected = index.nodes(0,0,0,0)
+        with ThreadPoolExecutor(max_workers=8) as workers:
+            payloads = list(workers.map(lambda _:index.nodes(0,0,0,0),range(256)))
+        assert payloads == [expected]*256
     finally:
         index.close()
     with pytest.raises(sqlite3.ProgrammingError,match='closed'):
         connection.execute('SELECT 1')
 
 
-def test_coarse_reads_count_actual_tile_gathers(tmp_path,monkeypatch):
+def test_coarse_reads_gather_one_tile_for_all_originals(tmp_path,monkeypatch):
     cells = [((x*8,0,(x+1)*8,8),x,x%3) for x in range(64)]
     source = write_grid(tmp_path/'source',cells,sizes=((8,8),(4,4)),bounds=(0,0,512,8))
     index = display.GridDisplayIndex(source,tmp_path/'cache')
     try:
         block = len(index.layers)
         assert index._layer(block).w == 512
-        expected = v10_nodes(index,block,0,0,0)
-        calls = []
-        tile = display.Layer.tile
-
-        def tracked_tile(layer,tx,ty,*args,**kwargs):
-            calls.append((layer.level,tx,ty))
-            return tile(layer,tx,ty,*args,**kwargs)
-
-        monkeypatch.setattr(display.Layer,'tile',tracked_tile)
-        assert index.nodes(block,0,0,0) == expected
-        assert len(calls) == index.last_query_tiles == 1
-        assert index.last_query_nodes == len(cells)
+        payload, work = query_work(index,(block,0,0,0),monkeypatch)
+        assert work == dict(tiles=1,queries=2)
+        assert_records(decode_nodes(payload),brute_nodes(json.loads((source/'grid.meta.json').read_text()),
+                       index.manifest['layers'],cells,(block,0,0,0)))
     finally:
         index.close()
 
@@ -137,35 +204,3 @@ def test_display_source_uses_one_registered_node_read(tmp_path,monkeypatch,exist
         assert error.value.status_code == 404
         assert error.value.detail == 'Grid node test not found'
     assert len(connections) == len(statements) == 1
-
-
-def test_source_resolution_overlaps_a_live_index_lease(tmp_path,monkeypatch):
-    from gridmen_backend.api.endpoints import grid
-
-    source = write_grid(tmp_path/'source',[((0,0,8,8),1,3)])
-    resolved = threading.Event()
-
-    def resolve(key):
-        if key == 'second':
-            resolved.set()
-        return source
-
-    monkeypatch.setattr(grid,'_display_source',resolve)
-    monkeypatch.setattr(grid.settings,'ROOT_DIR',tmp_path)
-    grid._close_display_cache()
-
-    def request():
-        with grid._display('second') as index:
-            return index.nodes(0,0,0,0)
-
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            with grid._display('first') as index:
-                expected = index.nodes(0,0,0,0)
-                future = pool.submit(request)
-                assert resolved.wait(3)
-                assert not future.done()
-                assert not index.cells.closed
-            assert future.result(timeout=5) == expected
-    finally:
-        grid._close_display_cache()

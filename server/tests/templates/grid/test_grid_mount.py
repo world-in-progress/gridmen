@@ -548,3 +548,73 @@ def test_crest_multiline_round_caps_and_inclusive_corridor_boundary(tmp_path):
     ]})
     grid, _ = _run_crest(tmp_path, {'node_key': key, 'dem': {'type': 'crest'}}, path)
     assert grid.cell_z.tolist() == [7, 2]
+
+
+def test_unmount_drains_display_readers_before_deleting_resource(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from gridmen_backend import display_cache
+    from test_grid_display import write_grid
+
+    source = write_grid(tmp_path/'resource/g/live', [((0,0,8,8),1,3)])
+    other = write_grid(tmp_path/'resource/g/other', [((0,0,8,8),2,4)])
+    cache = tmp_path/'resource/.display'
+    retiring = threading.Event()
+    retire, rmtree = display_cache._retire, hooks.shutil.rmtree
+    deleted = []
+
+    def mark(index):
+        retiring.set()
+        return retire(index)
+
+    def windows_delete(path, *args, **kwargs):
+        if Path(path) in (source, index.directory):
+            assert index.cells.closed and index.edges.closed
+            assert index._cell_file.closed and index._edge_file.closed
+            deleted.append(Path(path))
+        return rmtree(path, *args, **kwargs)
+
+    display_cache.close_cache()
+    try:
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            with display_cache.borrow(source, cache) as index:
+                monkeypatch.setattr(display_cache, '_retire', mark)
+                monkeypatch.setattr(hooks.shutil, 'rmtree', windows_delete)
+                removal = workers.submit(hooks.UNMOUNT,'.g.live')
+                assert retiring.wait(5)
+                assert not removal.done() and source.exists() and not index.cells.closed
+                assert index.nodes(0,0,0,0).startswith(b'GDN5')
+                with display_cache.borrow(other, cache) as unrelated:
+                    assert unrelated.inspect(1,1)['cell']['landClass'] == 4
+            removal.result(timeout=5)
+        assert deleted == [index.directory, source]
+        assert not index.directory.exists() and not source.exists()
+        assert unrelated.directory.exists() and other.exists()
+    finally:
+        display_cache.close_cache()
+
+
+def test_unmount_propagates_failed_cleanup_before_removing_resource(tmp_path, monkeypatch):
+    from gridmen_backend import display_cache
+    from test_grid_display import write_grid
+
+    source = write_grid(tmp_path/'resource/g/live', [((0,0,8,8),1,3)])
+    cache = tmp_path/'resource/.display'
+    display_cache.close_cache()
+    with display_cache.borrow(source, cache) as index:
+        pass
+    rmtree = hooks.shutil.rmtree
+
+    def denied(path, *args, **kwargs):
+        if Path(path) == index.directory:
+            assert index.cells.closed and index.edges.closed
+            raise PermissionError('foreign mapped generation')
+        return rmtree(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(hooks.shutil, 'rmtree', denied)
+        with pytest.raises(PermissionError, match='foreign mapped generation'):
+            hooks.UNMOUNT('.g.live')
+    assert source.exists() and index.directory.exists()
+    assert not display_cache._REMOVING
+    display_cache.prune(source,cache)
