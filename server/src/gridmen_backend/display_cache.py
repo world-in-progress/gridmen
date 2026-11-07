@@ -9,8 +9,7 @@ import threading
 
 _OWNERS = threading.Condition()
 _CACHE = OrderedDict()
-_BUILDING = set()
-_REMOVING = set()
+_BUILDING = {}  # One build or removal owns each source/cache key.
 _OPEN = set()
 _PENDING = {}
 _COLLECTING = set()
@@ -99,7 +98,8 @@ def _retire(index):
 
 def close_cache():
     with _OWNERS:
-        _OWNERS.wait_for(lambda: not _BUILDING)
+        # A remover may be draining a reader that calls close_cache before exit.
+        _OWNERS.wait_for(lambda: 'build' not in _BUILDING.values())
         closing = [old for index in _CACHE.values() if (old := _retire(index)) is not None]
         _CACHE.clear()
     for index in closing:
@@ -113,8 +113,8 @@ def borrow(source, cache):
     source, cache = Path(source).resolve(), Path(cache).resolve()
     key = source, cache
     with _OWNERS:
-        _OWNERS.wait_for(lambda: key not in _BUILDING and key not in _REMOVING)
-        _BUILDING.add(key)
+        _OWNERS.wait_for(lambda: key not in _BUILDING)
+        _BUILDING[key] = 'build'
     closing = []
     try:
         revision = fingerprint(source)
@@ -142,7 +142,7 @@ def borrow(source, cache):
                     closing.append(old)
     finally:
         with _OWNERS:
-            _BUILDING.remove(key)
+            del _BUILDING[key]
             _OWNERS.notify_all()
     try:
         for old in closing:
@@ -162,11 +162,10 @@ def removing(source, cache):
     source, cache = Path(source).resolve(), Path(cache).resolve()
     key = source, cache
     with _OWNERS:
-        _OWNERS.wait_for(lambda: key not in _REMOVING)
-        _REMOVING.add(key)
+        _OWNERS.wait_for(lambda: key not in _BUILDING)
+        _BUILDING[key] = 'remove'
     try:
         with _OWNERS:
-            _OWNERS.wait_for(lambda: key not in _BUILDING)
             index = _CACHE.pop(key, None)
             close = _retire(index) if index is not None else None
         if close is not None:
@@ -178,5 +177,5 @@ def removing(source, cache):
         yield
     finally:
         with _OWNERS:
-            _REMOVING.remove(key)
+            del _BUILDING[key]
             _OWNERS.notify_all()

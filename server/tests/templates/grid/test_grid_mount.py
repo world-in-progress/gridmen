@@ -616,5 +616,5 @@ def test_unmount_propagates_failed_cleanup_before_removing_resource(tmp_path, mo
         with pytest.raises(PermissionError, match='foreign mapped generation'):
             hooks.UNMOUNT('.g.live')
     assert source.exists() and index.directory.exists()
-    assert not display_cache._REMOVING
+    assert not display_cache._BUILDING
     display_cache.prune(source,cache)

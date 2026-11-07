@@ -294,6 +294,102 @@ def test_cache_shutdown_defers_closing_an_active_request(sources):
     assert index.cells.closed
 
 
+@pytest.mark.parametrize('operation', ['remove', 'close'])
+def test_removal_and_close_wait_for_an_in_progress_builder(sources, monkeypatch, operation):
+    _, paths, directory = sources
+    entered, release, waiting = [threading.Event() for _ in range(3)]
+    local = threading.local()
+    build, wait_for = display._build, cache._OWNERS.wait_for
+
+    def blocked(*args):
+        entered.set()
+        assert release.wait(5)
+        return build(*args)
+
+    def observed_wait(predicate, timeout=None):
+        if getattr(local, 'changing', False) and not predicate():
+            waiting.set()
+        return wait_for(predicate, timeout)
+
+    def request():
+        with cache.borrow(paths['a'], directory) as index:
+            return index.inspect(1,1)['cell']['id']
+
+    def change():
+        local.changing = True
+        if operation == 'remove':
+            with cache.removing(paths['a'], directory):
+                pass
+        else:
+            cache.close_cache()
+
+    monkeypatch.setattr(display, '_build', blocked)
+    monkeypatch.setattr(cache._OWNERS, 'wait_for', observed_wait)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        reader = workers.submit(request)
+        try:
+            assert entered.wait(5)
+            changing = workers.submit(change)
+            assert waiting.wait(5) and not changing.done()
+        finally:
+            release.set()
+        assert reader.result(timeout=5) == 1
+        changing.result(timeout=5)
+    assert not cache._BUILDING
+
+
+def test_borrow_waits_for_a_same_source_removal(sources, monkeypatch):
+    _, paths, directory = sources
+    waiting = threading.Event()
+    local = threading.local()
+    wait_for = cache._OWNERS.wait_for
+
+    def observed_wait(predicate, timeout=None):
+        if getattr(local, 'borrowing', False) and not predicate():
+            waiting.set()
+        return wait_for(predicate, timeout)
+
+    def request():
+        local.borrowing = True
+        with cache.borrow(paths['a'], directory) as index:
+            return index.inspect(1,1)['cell']['id']
+
+    monkeypatch.setattr(cache._OWNERS, 'wait_for', observed_wait)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with cache.removing(paths['a'], directory):
+            reader = workers.submit(request)
+            assert waiting.wait(5) and not reader.done()
+        assert reader.result(timeout=5) == 1
+    assert not cache._BUILDING
+
+
+def test_close_returns_while_removal_drains_its_calling_reader(sources, monkeypatch):
+    _, paths, directory = sources
+    retiring = threading.Event()
+    retire = cache._retire
+
+    def mark(index):
+        result = retire(index)
+        retiring.set()
+        return result
+
+    def remove():
+        with cache.removing(paths['a'], directory):
+            pass
+
+    monkeypatch.setattr(cache, '_retire', mark)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        with cache.borrow(paths['a'], directory) as index:
+            removal = workers.submit(remove)
+            assert retiring.wait(5)
+            workers.submit(cache.close_cache).result(timeout=5)
+            assert not removal.done() and not index.cells.closed
+            assert index.inspect(1,1)['cell']['id'] == 1
+        removal.result(timeout=5)
+    assert index.cells.closed and not index.directory.exists()
+    assert not cache._BUILDING
+
+
 def test_startup_cleans_only_building_directories_at_the_resource_root(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
