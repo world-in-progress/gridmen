@@ -1,10 +1,10 @@
 import proj4 from 'proj4'
 import type { Bounds } from '@/core/grid/displayTypes'
 import { getProj4Defs } from '@/template/api/proj'
-import { gridDisplayI18n } from '@/i18n/gridDisplay'
+import i18n from '@/i18n'
 
 export async function displayBoundsOn4326(bounds: Bounds, epsg: number): Promise<Bounds> {
-    const invalid = () => new Error(gridDisplayI18n.t('boundsTransformError'))
+    const invalid = () => new Error(i18n.t('gridDisplay:boundsTransformError'))
     if (!bounds.every(Number.isFinite) || bounds[0] >= bounds[2] || bounds[1] >= bounds[3]) throw invalid()
     if (epsg === 4326) return [...bounds]
     const definition = await getProj4Defs(epsg)

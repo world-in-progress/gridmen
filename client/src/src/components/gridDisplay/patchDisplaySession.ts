@@ -9,11 +9,11 @@ import { layerOrderCoordinator } from '@/views/mapView/layerOrderCoordinator'
 import { ensureTopologyLayerInitialized, getOrCreatePerPatchTopology, removePerPatchTopology } from '@/views/mapView/topology/topologyLayerManager'
 import { waitForDisplayMap } from './mapReady'
 import { displayBoundsOn4326 } from './displayBounds'
-import { gridDisplayI18n } from '@/i18n/gridDisplay'
+import i18n from '@/i18n'
 
 async function releasePatchLock(nodeInfo: string, lockId: string) {
     const response = await unlinkNode(nodeInfo, lockId)
-    if (!response.success) throw new Error(gridDisplayI18n.t('patchUnlockError', { message: response.message }))
+    if (!response.success) throw new Error(i18n.t('gridDisplay:patchUnlockError', { message: response.message }))
 }
 
 async function acquirePatchLock(node: ResourceNode, access: 'r' | 'w', signal: AbortSignal) {
@@ -35,7 +35,7 @@ async function acquirePatchLock(node: ResourceNode, access: 'r' | 'w', signal: A
     if (signal.aborted || node.lockId) {
         await releasePatchLock(node.nodeInfo, response.lock_id)
         signal.throwIfAborted()
-        throw new Error(gridDisplayI18n.t('patchLockChanged'))
+        throw new Error(i18n.t('gridDisplay:patchLockChanged'))
     }
     node.lockId = response.lock_id
     return response.lock_id

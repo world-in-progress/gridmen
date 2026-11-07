@@ -223,7 +223,7 @@ export default function PatchEdit({ node, context }: PatchEditProps) {
     const setPatchCheckMode = useCallback((mode: boolean) => {
         pageContext.current.isChecking = mode
         setCheckSwitchOn(mode)
-        pageContext.current.topologyLayer?.setCheckMode(mode)
+        pageContext.current.topologyLayer?.setCheckMode()
     }, [])
 
     const clearUploadedFeaturePreview = useCallback((options: { repaint?: boolean } = {}) => {

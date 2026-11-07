@@ -71,13 +71,11 @@ function assertLocked(fixture: ReturnType<typeof camera>) {
     assert.deepEqual(map.jumps, [{ pitch: 0, bearing: 0 }])
 }
 
-test('constructor locks pitch/bearing and mouse/touch pitch without disabling pan or zoom', () => {
+test('constructor overrides style pitch/bearing and the shared lock preserves pan and zoom', () => {
     const options: MapOptions = { container: 'map', ...lockedMapCameraOptions }
     assert.equal(options.pitch, 0)
     assert.equal(options.bearing, 0)
-    assert.equal(options.pitchWithRotate, false)
-    assert.equal(options.dragRotate, false)
-    assert.equal(options.touchPitch, false)
+    assert.deepEqual(lockedMapCameraOptions, { pitch: 0, bearing: 0 })
     for (const name of ['dragPan', 'scrollZoom', 'doubleClickZoom', 'touchZoomRotate', 'keyboard'] as const) {
         assert.notEqual(options[name], false, `${name} must retain Mapbox's enabled default`)
     }

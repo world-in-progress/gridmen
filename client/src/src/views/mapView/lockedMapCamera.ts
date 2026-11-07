@@ -4,9 +4,6 @@ import type { CameraOptions, Map, MapOptions } from 'mapbox-gl'
 export const lockedMapCameraOptions = {
     pitch: 0,
     bearing: 0,
-    pitchWithRotate: false,
-    dragRotate: false,
-    touchPitch: false,
 } satisfies Partial<MapOptions>
 
 type LockedMapCamera = {

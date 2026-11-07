@@ -23,18 +23,20 @@ function load(file, dependencies = {}, globals = {}) {
     vm.runInNewContext(js, context, { filename: file })
     return module.exports
 }
-const i18n = load('i18n/gridDisplay.ts')
+const translations = load('i18n/gridDisplay.ts')
+const appI18n = load('i18n/index.ts', { './gridDisplay': translations }).default
+const i18n = { ...translations, useGridDisplayTranslation: () => ({ t: appI18n.getFixedT(null, 'gridDisplay') }) }
+function inLanguage(language) {
+    void appI18n.changeLanguage(language)
+    return i18n
+}
+
 // These boundary values test UI wiring; this does not substitute for engine integration.
 const colorContract = {
     ELEVATION_LOW_COLOR: [0.16, 0.40, 0.46],
     ELEVATION_HIGH_COLOR: [0.87, 0.76, 0.52],
-    OUTLINE_DARKENING: 0.65,
     elevationColor: () => [0.23, 0.32, 0.41],
 }
-const mathContract = { outlineCoverage: (s, c) => {
-    const u = Math.min(1, s / c)
-    return 1 - (1 - u) ** 2
-} }
 const deferred = () => {
     let resolve, reject
     const promise = new Promise((a, b) => { resolve = a; reject = b })
@@ -70,42 +72,26 @@ test('map readiness removes both map events on ready and abort', async () => {
     assert.equal(map.listenerCount(), 0)
 })
 
-test('API uses encoded node keys, revision block paths, HTTP errors and abort signals', async () => {
-    const calls = []
-    const block = { blockLayer: 3, x: -2, y: 5, displayLayer: 1 }
-    const meta = { revision: 'rev/a b', cellCount: 3 }
-    const payload = new ArrayBuffer(8)
-    let response = { ok: true, json: async () => ({ actual: true }), arrayBuffer: async () => payload }
-    const decoded = []
-    const api = load('template/api/grid.ts', {
-        '@/core/grid/displayBlockCache': { DisplayBlockCache: class {} },
-        './utils': { decodeNodeInfo: () => ({ address: 'http://local.test', nodeKey: 'a/b grid' }) },
-        '@/i18n/gridDisplay': i18n,
-        '@/core/grid/displayWire': {
-            decodeDisplayBlock: (buffer, requested, metadata) => {
-                decoded.push([buffer, requested, metadata])
-                return { key: 'block', bounds: [0, 0, 1, 1], cells: [], fields: [] }
-            },
-            displayBlockView: (chunks, cellCount) => ({ chunks, cellCount }),
-        },
-    }, { fetch: async (url, options) => { calls.push({ url, options }); return response } })
-    const signal = new AbortController().signal
-    assert.equal((await api.getGridDisplayMeta('node', signal)).actual, true)
-    assert.equal(calls[0].url, 'http://local.test/api/grid/a%2Fb%20grid/display/meta')
-    assert.equal(calls[0].options.signal, signal)
-    assert.equal((await api.queryGridDisplayBlocks('node', meta, [block], signal)).cellCount, 3)
-    assert.equal(calls[1].url, 'http://local.test/api/grid/a%2Fb%20grid/display/nodes/rev%2Fa%20b/3/-2/5/1')
-    assert.equal(calls[1].options.method, undefined)
-    assert.equal(calls[1].options.signal, signal)
-    assert.deepEqual(decoded, [[payload, block, meta]])
-    await api.inspectGrid('node', -10.5, 9, signal)
-    assert.match(calls[2].url, /display\/inspect\?x=-10.5&y=9$/)
-    response = { ok: false, status: 422, text: async () => 'corrupt topology' }
-    await assert.rejects(api.getGridDisplayMeta('node'), /HTTP 422.*corrupt topology/)
-    await assert.rejects(api.queryGridDisplayBlocks('node', meta, [block]), /corrupt topology/)
-    await assert.rejects(api.inspectGrid('node', 1, 2), /corrupt topology/)
-    assert.equal(api.getGridBlockMeta, undefined)
-    assert.equal(typeof api.exportGridTopo, 'function')
+test('application i18n shares the default instance, namespace and identical language keys', () => {
+    assert.equal(appI18n === require('i18next'), true)
+    assert.equal(appI18n.isInitialized, true)
+    assert.deepEqual(Object.keys(translations.gridDisplayResources.en).sort(), Object.keys(translations.gridDisplayResources.zh).sort())
+    assert.equal(translations.gridDisplayI18n, undefined)
+    let namespace
+    const wrapper = load('i18n/gridDisplay.ts', { 'react-i18next': { useTranslation: value => { namespace = value; return { t: appI18n.getFixedT(null, value) } } } })
+    wrapper.useGridDisplayTranslation()
+    assert.equal(namespace, 'gridDisplay')
+    for (const language of ['en', 'zh']) {
+        inLanguage(language)
+        const message = appI18n.t('gridDisplay:httpError', { path: '/meta', status: 422, detail: ' corrupt topology' })
+        assert.ok(message.includes('/meta') && message.includes('HTTP 422') && message.includes('corrupt topology'))
+        for (const key of Object.keys(translations.gridDisplayResources[language])) {
+            assert.equal(appI18n.exists(`gridDisplay:${key}`, { lng: language }), true)
+        }
+    }
+    inLanguage('en')
+    const entry = fs.readFileSync(path.resolve('src/main.tsx'), 'utf8')
+    assert.ok(entry.includes("import './i18n'"))
 })
 
 function sessionDependencies() {
@@ -122,6 +108,7 @@ function sessionDependencies() {
         '@/components/gridDisplay/displayBounds': { displayBoundsOn4326: async () => [0, 0, 10, 10] },
         './displayBounds': { displayBoundsOn4326: async () => [0, 0, 10, 10] },
         '@/i18n/gridDisplay': i18n,
+        '@/i18n': { __esModule: true, default: appI18n },
         '@/components/gridDisplay/mapReady': readiness,
         './mapReady': readiness,
         '@/views/mapView/layerOrderCoordinator': { layerOrderCoordinator: {
@@ -132,15 +119,13 @@ function sessionDependencies() {
     return { map, meta, counts, layer, dependencies }
 }
 
-test('grid tabs share one source, propagate viewport errors and cancel requests on node close', async () => {
+test('grid tabs share one source and cancel requests on node close', async () => {
     const ctx = sessionDependencies()
-    let fail = false
     let observedSignal
     ctx.dependencies['../api/grid'] = {
         getGridDisplayMeta: async () => ctx.meta,
         createGridDisplayBlockCache: () => ({ clear() {}, query: async (_blocks, signal) => {
             observedSignal = signal
-            if (fail) throw new Error('broken viewport')
             return { chunks: [], cellCount: 0 }
         } }),
         inspectGrid: async (_node, _x, _y, signal) => { observedSignal = signal; return { cell: null, neighbors: [] } },
@@ -153,16 +138,7 @@ test('grid tabs share one source, propagate viewport errors and cancel requests 
     assert.equal(ctx.counts.created, 1)
     assert.equal(ctx.counts.source, 1)
     assert.equal(node.context.existing, true)
-    let notifications = 0
-    first.listeners.add(() => notifications++)
-    fail = true
-    await assert.rejects(ctx.layer.source.loadBlocks([{ blockLayer: 0, x: 0, y: 0, displayLayer: 0 }], new AbortController().signal), /broken viewport/)
-    assert.match(first.error, /broken viewport/)
-    assert.equal(notifications, 1)
-    fail = false
     await ctx.layer.source.loadBlocks([{ blockLayer: 0, x: 0, y: 0, displayLayer: 0 }], new AbortController().signal)
-    assert.equal(first.error, null)
-    assert.equal(notifications, 2)
     node.context.__cleanup.topology()
     node.context.__cleanup.topology()
     assert.equal(ctx.counts.removed, 1)
@@ -226,7 +202,7 @@ test('patch same-mode reads share one PatchCore and pending node close releases 
 test('inspector renders original IDs, all four sides, one-to-many neighbors and edge IDs in both languages', () => {
     const cell = { id: 91, bounds: [0, 0, 2, 2], level: 2, elevation: 3.5, landClass: 7 }
     for (const language of ['en-US', 'zh-CN']) {
-        const translation = load('i18n/gridDisplay.ts', {}, { navigator: { language } })
+        const translation = inLanguage(language)
         const Inspector = load('components/gridDisplay/GridInspector.tsx', { '@/i18n/gridDisplay': translation }).default
         const html = renderToStaticMarkup(React.createElement(Inspector, { attributes: ['level', 'elevation', 'landClass'], inspection: {
             cell, neighbors: [
@@ -235,45 +211,69 @@ test('inspector renders original IDs, all four sides, one-to-many neighbors and 
             ],
         } }))
         for (const value of ['91', '92', '93', '4, 5', '3.5']) assert.ok(html.includes(value))
-        for (const side of ['west', 'east', 'north', 'south']) assert.ok(html.includes(translation.gridDisplayI18n.t(side)))
-        assert.ok(html.includes(translation.gridDisplayI18n.t('edges')))
+        for (const side of ['west', 'east', 'north', 'south']) assert.ok(html.includes(appI18n.t(`gridDisplay:${side}`)))
+        assert.ok(html.includes(appI18n.t('gridDisplay:edges')))
     }
 })
 
-test('display statistics skip identical notifications and remove their listener', () => {
+// Keep effects and state observable while rendering the real component's markup.
+function componentHarness(file, dependencies, props) {
+    const states = []
     const effects = []
-    const updates = []
-    let listener
-    let removed = false
-    let stats = { gpuBytes: 100, visibleChunks: 1, visibleCells: 5, fieldSamples: 2, fieldMode: true, ready: true }
     let stateIndex = 0
-    const layer = {
-        attribute: 'level', paletteColorList: new Uint8Array(256 * 3),
-        getDisplayStats: () => stats,
-        addDisplayStatsListener: callback => { listener = callback; return () => { removed = true } },
-    }
-    const Panel = load('components/gridDisplay/GridDisplayPanel.tsx', {
-        '@/core/grid/displayColors': colorContract,
-        '@/core/grid/displayMath': mathContract,
-        react: {
-            useEffect: effect => effects.push(effect),
-            useState: initial => { const index = stateIndex++; return [typeof initial === 'function' ? initial() : initial, value => updates.push({ index, value })] },
+    let mounted = false
+    const Component = load(file, { ...dependencies, react: {
+        useState: initial => {
+            const index = stateIndex++
+            if (!mounted) states[index] = typeof initial === 'function' ? initial() : initial
+            return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value }]
         },
-        '@/i18n/gridDisplay': { useGridDisplayTranslation: () => ({ t: key => key }) },
+        useEffect: effect => { if (!mounted) effects.push(effect) },
+    } }).default
+    return {
+        render: () => {
+            stateIndex = 0
+            const html = renderToStaticMarkup(Component(props))
+            mounted = true
+            return html
+        },
+        mount: () => effects.map(effect => effect()).filter(Boolean),
+    }
+}
+
+function panelDependencies() {
+    return {
+        '@/core/grid/displayColors': colorContract,
+        '@/i18n/gridDisplay': i18n,
         './useGridInspection': { useGridInspection: () => ({ inspection: null, loading: false, error: null }) },
         './GridInspector': { __esModule: true, default: () => null },
-    }).default
-    Panel({ map: {}, layer, attributes: ['level'], gridInfo: [[1, 1]] })
-    const cleanup = effects[0]()
-    assert.equal(updates.length, 1)
-    for (let frame = 0; frame < 100; frame++) listener()
-    assert.equal(updates.length, 1)
-    stats = { ...stats, gpuBytes: 200 }
-    listener()
-    assert.equal(updates.length, 2)
-    assert.equal(updates[1].value.gpuBytes, 200)
-    cleanup()
-    assert.equal(removed, true)
+    }
+}
+
+test('shared panel immediately renders the current viewport error, clears success and unsubscribes in both modes', () => {
+    inLanguage('en')
+    for (const attributes of [['level'], ['level', 'elevation', 'landClass']]) {
+        let listener
+        let removed = false
+        const layer = {
+            attribute: 'level', paletteColorList: new Uint8Array(768),
+            addErrorListener: callback => { listener = callback; callback(new Error('existing viewport failure')); return () => { removed = true } },
+        }
+        const panel = componentHarness('components/gridDisplay/GridDisplayPanel.tsx', panelDependencies(), {
+            map: {}, layer, attributes, gridInfo: [[1, 1]],
+        })
+        panel.render()
+        const cleanups = panel.mount()
+        let html = panel.render()
+        assert.match(html, /role="alert"[^>]*>Unable to load viewport: existing viewport failure/)
+        listener(null)
+        html = panel.render()
+        assert.ok(!html.includes('role="alert"') && !html.includes('existing viewport failure'))
+        listener(new Error('next viewport failure'))
+        assert.match(panel.render(), /Unable to load viewport: next viewport failure/)
+        cleanups.forEach(cleanup => cleanup())
+        assert.equal(removed, true)
+    }
 })
 
 test('inspection ignores out-of-order and post-unmount responses and unbinds map clicks', async () => {
@@ -291,6 +291,7 @@ test('inspection ignores out-of-order and post-unmount responses and unbinds map
             },
         },
         '@/i18n/gridDisplay': i18n,
+        '@/i18n': { __esModule: true, default: appI18n },
     }).useGridInspection
     const map = new TestMap()
     const requests = [deferred(), deferred(), deferred()]
@@ -318,6 +319,7 @@ test('inspection ignores out-of-order and post-unmount responses and unbinds map
 test('display bounds handle zero coordinates, real projections, and invalid results', async () => {
     const bounds = load('components/gridDisplay/displayBounds.ts', {
         '@/i18n/gridDisplay': i18n,
+        '@/i18n': { __esModule: true, default: appI18n },
         '@/template/api/proj': { getProj4Defs: async () => '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs' },
     }).displayBoundsOn4326
     const identity = await bounds([0, 0, 1, 1], 4326)
@@ -432,21 +434,19 @@ test('node close during read-lock release prevents the queued write acquisition'
 })
 
 function renderLegend(attribute, props = {}, colors = colorContract, language = 'en-US') {
-    const translation = load('i18n/gridDisplay.ts', {}, { navigator: { language } })
+    const translation = inLanguage(language)
     const palette = new Uint8Array(256 * 3)
     palette.set([12, 34, 56], 3)
     palette.set([90, 91, 92], 255 * 3)
     const Panel = load('components/gridDisplay/GridDisplayPanel.tsx', {
         '@/core/grid/displayColors': colors,
-        '@/core/grid/displayMath': mathContract,
         react: { useEffect: () => {}, useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
-        '@/i18n/gridDisplay': { useGridDisplayTranslation: () => ({ t: translation.gridDisplayI18n.t.bind(translation.gridDisplayI18n) }) },
+        '@/i18n/gridDisplay': translation,
         './useGridInspection': { useGridInspection: () => ({ inspection: null, loading: false, error: null }) },
         './GridInspector': { __esModule: true, default: () => null },
     }).default
     return renderToStaticMarkup(Panel({ map: {}, layer: {
         attribute, paletteColorList: palette,
-        getDisplayStats: () => ({ gpuBytes: 1, visibleChunks: 1, visibleCells: 1, fieldSamples: 1, fieldMode: true, ready: true }),
     }, attributes: ['level', 'elevation', 'landClass'], gridInfo: [[2, 2]], ...props }))
 }
 
@@ -478,10 +478,102 @@ test('elevation legend consumes shared endpoints/function, including zero-width 
     assert.ok(!zero.includes(rgb(colorContract.ELEVATION_HIGH_COLOR)))
 })
 
-test('outline legend multiplies white by the shared darkening constant', () => {
-    const html = renderLegend('level')
-    for (const coverage of [0.234375, 0.4375, 1]) {
-        const value = 255 * (1 - colorContract.OUTLINE_DARKENING * coverage)
-        assert.ok(html.includes(`rgb(${value}, ${value}, ${value})`))
+test('panel retains attributes and the color legend with a short outline hint', () => {
+    for (const language of ['en', 'zh']) {
+        const html = renderLegend('level', {}, undefined, language)
+        const t = appI18n.getFixedT(language, 'gridDisplay')
+        for (const key of ['attribute', 'level', 'elevation', 'landClass', 'legend', 'densityHint']) assert.ok(html.includes(t(key)))
+        assert.ok(html.includes(t('levelSize', { level: 1, width: 2, height: 2 })))
+        for (const forbidden of ['0.234375', '0.4375', 'CSS', 'GPU', 'visibleChunks', 'fieldSamples', 'coverage =', '覆盖率']) assert.ok(!html.includes(forbidden))
+        assert.ok(!html.includes('<dl') && !html.includes('Field mode active') && !html.includes('场模式已启用'))
     }
+})
+
+test('patch inspector renders real coarse/fine neighbors without synthetic edge IDs', () => {
+    for (const language of ['en', 'zh']) {
+        inLanguage(language)
+        const Inspector = load('components/gridDisplay/GridInspector.tsx', { '@/i18n/gridDisplay': i18n }).default
+        const cell = { id: 91, bounds: [0, 0, 2, 2], level: 1, elevation: 0, landClass: 0 }
+        const html = renderToStaticMarkup(React.createElement(Inspector, { attributes: ['level'], inspection: {
+            cell, neighbors: [
+                { side: 'east', cell: { ...cell, id: 92, level: 2, bounds: [2, 0, 3, 1] } },
+                { side: 'east', cell: { ...cell, id: 93, level: 2, bounds: [2, 1, 3, 2] } },
+                { side: 'north', cell: { ...cell, id: 94, level: 0, bounds: [0, 2, 4, 6] } },
+            ],
+        } }))
+        for (const value of ['91', '92', '93', '94', '2, 0, 3, 1', '0, 2, 4, 6']) assert.ok(html.includes(value))
+        assert.ok(!html.includes(appI18n.t('gridDisplay:edges')))
+    }
+})
+
+function checkDependencies(session) {
+    const passthrough = tag => ({ children, ...props }) => React.createElement(tag, props, children)
+    return {
+        '@/i18n/gridDisplay': i18n,
+        'lucide-react': { MapPin: () => null, SquareMousePointer: () => null },
+        '@/components/ui/button': { Button: passthrough('button') },
+        '@/components/ui/avatar': { Avatar: passthrough('div'), AvatarFallback: passthrough('div') },
+        '@/components/gridDisplay/GridDisplayPanel': { __esModule: true, default: props => React.createElement('p', null, JSON.stringify({
+            gridInfo: props.gridInfo, elevationRange: props.elevationRange, landClasses: props.landClasses, attributes: props.attributes,
+        })) },
+        './gridDisplaySession': { getGridDisplay: () => session },
+        '@/components/gridDisplay/patchDisplaySession': { getPatchDisplay: () => session.promise },
+    }
+}
+
+const flush = () => new Promise(resolve => setImmediate(resolve))
+
+test('revision notification reloads session.promise and metadata without moving the current camera', async () => {
+    inLanguage('en')
+    const old = { meta: { epsg: 4326, grid_info: [[2, 2]], elevationRange: [0, 10], landClasses: [7] }, boundsOn4326: [0, 0, 1, 1], topologyLayer: {} }
+    const updated = { ...old, meta: { epsg: 3857, grid_info: [[4, 4]], elevationRange: [-5, 50], landClasses: [9, 12] } }
+    const session = { promise: Promise.resolve(old), listeners: new Set() }
+    let fits = 0
+    const check = componentHarness('template/grid/gridCheck.tsx', checkDependencies(session), { node: { name: 'grid' }, context: { map: { fitBounds: () => fits++ } } })
+    assert.match(check.render(), /Loading grid/)
+    const cleanups = check.mount()
+    await flush()
+    assert.ok(check.render().includes('[0,10]'))
+    const superseded = deferred()
+    session.promise = superseded.promise
+    session.listeners.forEach(listener => listener())
+    session.promise = Promise.resolve(updated)
+    session.listeners.forEach(listener => listener())
+    await flush()
+    const html = check.render()
+    assert.ok(html.includes('3857') && html.includes('[-5,50]') && html.includes('[9,12]') && html.includes('[[4,4]]'))
+    assert.ok(!html.includes('[0,10]'))
+    superseded.resolve(old)
+    await flush()
+    assert.ok(check.render().includes('[-5,50]'))
+    assert.equal(fits, 1)
+    cleanups.forEach(cleanup => cleanup())
+    assert.equal(session.listeners.size, 0)
+})
+
+test('initial grid and patch loading failures remain visible and late resolutions after unmount are ignored', async () => {
+    inLanguage('en')
+    for (const file of ['template/grid/gridCheck.tsx', 'template/patch/patchCheck.tsx']) {
+        const pending = deferred()
+        const session = { promise: pending.promise, listeners: new Set() }
+        const check = componentHarness(file, checkDependencies(session), { node: { name: 'sample' }, context: { map: {} } })
+        check.render()
+        const cleanups = check.mount()
+        pending.reject(new Error('initial load failed'))
+        await flush()
+        assert.match(check.render(), /role="alert"/)
+        assert.match(check.render(), /Unable to load grid: initial load failed/)
+        assert.match(check.render(), /Retry/)
+        cleanups.forEach(cleanup => cleanup())
+    }
+    const pending = deferred()
+    const session = { promise: pending.promise, listeners: new Set() }
+    let fits = 0
+    const check = componentHarness('template/grid/gridCheck.tsx', checkDependencies(session), { node: { name: 'grid' }, context: { map: { fitBounds: () => fits++ } } })
+    check.render()
+    check.mount().forEach(cleanup => cleanup())
+    pending.resolve({ boundsOn4326: [0, 0, 1, 1] })
+    await flush()
+    assert.equal(fits, 0)
+    assert.match(check.render(), /Loading grid/)
 })

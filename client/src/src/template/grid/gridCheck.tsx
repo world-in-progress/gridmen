@@ -17,7 +17,6 @@ export default function GridCheck({ node, context }: { node: IResourceNode; cont
     const map = (context as MapViewContext).map!
     const [display, setDisplay] = useState<Display | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [viewError, setViewError] = useState<string | null>(null)
     const [revision, setRevision] = useState(0)
 
     useEffect(() => {
@@ -25,17 +24,28 @@ export default function GridCheck({ node, context }: { node: IResourceNode; cont
         setDisplay(null)
         setError(null)
         const session = getGridDisplay(node as ResourceNode, map)
-        const updateError = () => { if (active) setViewError(session.error) }
-        session.listeners.add(updateError)
-        updateError()
-        void session.promise.then(result => {
-            if (!active) return
-            setDisplay(result)
-            map.fitBounds(result.boundsOn4326, { padding: 100, duration: 1000 })
-        }).catch(cause => { if (active) setError(errorMessage(cause)) })
+        let currentPromise: typeof session.promise
+        let positioned = false
+        const updateDisplay = () => {
+            const promise = session.promise
+            currentPromise = promise
+            void promise.then(result => {
+                if (!active || currentPromise !== promise) return
+                setDisplay(result)
+                setError(null)
+                if (!positioned) {
+                    positioned = true
+                    map.fitBounds(result.boundsOn4326, { padding: 100, duration: 1000 })
+                }
+            }).catch(cause => {
+                if (active && currentPromise === promise) setError(errorMessage(cause))
+            })
+        }
+        session.listeners.add(updateDisplay)
+        updateDisplay()
         return () => {
             active = false
-            session.listeners.delete(updateError)
+            session.listeners.delete(updateDisplay)
         }
     }, [node, map, revision])
 
@@ -55,10 +65,9 @@ export default function GridCheck({ node, context }: { node: IResourceNode; cont
             {error ? <div role='alert' className='text-sm text-red-400 break-words'>
                 <p>{t('loadError', { message: error })}</p><Button variant='outline' onClick={() => setRevision(value => value + 1)}>{t('retry')}</Button>
             </div> : !display && <p role='status'>{t('loading')}</p>}
-            {viewError && <p role='alert' className='text-sm text-red-400 break-words'>{t('viewError', { message: viewError })}</p>}
             {display && <>
                 <p className='text-sm'>{t('epsg')}: {display.meta.epsg}</p>
-                <GridDisplayPanel map={map} layer={display.topologyLayer} attributes={display.meta.attributes}
+                <GridDisplayPanel map={map} layer={display.topologyLayer} attributes={['level', 'elevation', 'landClass']}
                     gridInfo={display.meta.grid_info} elevationRange={display.meta.elevationRange} landClasses={display.meta.landClasses} />
             </>}
         </div>

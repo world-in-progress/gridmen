@@ -26,9 +26,9 @@ export default function GridInspector({ inspection, attributes }: {
                 return <section key={side} className='border-t border-gray-700 pt-2 space-y-2'>
                     <h4 className='font-semibold'>{t(side)}</h4>
                     {neighbors.length === 0 ? <p className='text-gray-300'>{t('noNeighbors')}</p> :
-                        <ul className='space-y-2'>{neighbors.map(neighbor => <li key={`${neighbor.cell.id}:${neighbor.edgeIds.join(',')}`}>
+                        <ul className='space-y-2'>{neighbors.map(neighbor => <li key={neighbor.cell.id}>
                             {cellValues(neighbor.cell)}
-                            <p className='break-words'>{t('edges')}: {neighbor.edgeIds.join(', ')}</p>
+                            {neighbor.edgeIds && neighbor.edgeIds.length > 0 && <p className='break-words'>{t('edges')}: {neighbor.edgeIds.join(', ')}</p>}
                         </li>)}</ul>}
                 </section>
             })}

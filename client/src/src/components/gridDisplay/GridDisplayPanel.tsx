@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Map as MapboxMap } from 'mapbox-gl'
 import type { DisplayAttribute, GridDisplayMeta } from '@/core/grid/displayTypes'
-import { ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, OUTLINE_DARKENING, elevationColor } from '@/core/grid/displayColors'
-import { outlineCoverage } from '@/core/grid/displayMath'
+import { ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, elevationColor } from '@/core/grid/displayColors'
 import type TopologyLayer from '@/views/mapView/topology/TopologyLayer'
-import { useGridDisplayTranslation } from '@/i18n/gridDisplay'
+import { errorMessage, useGridDisplayTranslation } from '@/i18n/gridDisplay'
 import GridInspector from './GridInspector'
 import { useGridInspection } from './useGridInspection'
 
@@ -36,22 +35,12 @@ function elevationGradient(range: GridDisplayMeta['elevationRange']) {
 export default function GridDisplayPanel({ map, layer, attributes, gridInfo, elevationRange, landClasses, inspectEnabled = true }: Props) {
     const { t } = useGridDisplayTranslation()
     const [attribute, setAttribute] = useState<DisplayAttribute>(layer.attribute)
-    const [stats, setStats] = useState(() => layer.getDisplayStats())
+    const [error, setError] = useState<string | null>(null)
     const inspection = useGridInspection(map, layer, inspectEnabled)
 
-    useEffect(() => {
-        let previous: ReturnType<TopologyLayer['getDisplayStats']> | null = null
-        const update = () => {
-            const next = { ...layer.getDisplayStats() }
-            if (previous && previous.gpuBytes === next.gpuBytes && previous.visibleChunks === next.visibleChunks &&
-                previous.visibleCells === next.visibleCells && previous.fieldSamples === next.fieldSamples &&
-                previous.fieldMode === next.fieldMode && previous.ready === next.ready) return
-            previous = next
-            setStats(next)
-        }
-        update()
-        return layer.addDisplayStatsListener(update)
-    }, [layer])
+    useEffect(() => layer.addErrorListener((cause: unknown) => {
+        setError(cause === null ? null : errorMessage(cause))
+    }), [layer])
 
     const changeAttribute = (next: DisplayAttribute) => {
         layer.attribute = next
@@ -86,25 +75,8 @@ export default function GridDisplayPanel({ map, layer, attributes, gridInfo, ele
                 {t('landClassLabel', { category })}
             </li>)}</ul>
         </section>}
-        <section className='space-y-1'>
-            <h2 className='font-bold text-base'>{t('density')}</h2>
-            <div className='h-3 bg-white flex' aria-hidden='true'>{[8, 4, 1].map(pixels => {
-                const coverage = outlineCoverage(1, pixels)
-                const channel = 1 - OUTLINE_DARKENING * coverage
-                return <span key={coverage} className='flex-1' style={{ backgroundColor: normalizedColor([channel, channel, channel]) }} />
-            })}</div>
-            <div className='flex justify-between text-xs'><span>0.234375</span><span>0.4375</span><span>1</span></div>
-            <p>{t('densityHint')}</p><p className='text-xs text-gray-300'>{t('densityFormula')}</p><p className='text-xs text-gray-300'>{t('densityThreshold')}</p>
-        </section>
-        <section className='space-y-1' aria-live='polite'>
-            <p className='font-semibold'>{t(!stats.ready ? 'preparing' : stats.fieldMode ? 'fieldActive' : 'cellActive')}</p>
-            <dl className='grid grid-cols-2 gap-x-2 gap-y-1'>
-                <dt>{t('visibleCells')}</dt><dd>{stats.visibleCells.toLocaleString()}</dd>
-                <dt>{t('fieldSamples')}</dt><dd>{stats.fieldSamples.toLocaleString()}</dd>
-                <dt>{t('visibleChunks')}</dt><dd>{stats.visibleChunks.toLocaleString()}</dd>
-                <dt>{t('gpuBytes')}</dt><dd>{stats.gpuBytes.toLocaleString()}</dd>
-            </dl>
-        </section>
+        <p>{t('densityHint')}</p>
+        {error && <p role='alert' className='text-red-400 break-words'>{t('viewError', { message: error })}</p>}
         <p className='text-gray-300'>{t(inspectEnabled ? 'inspectTip' : 'checkEnabledTip')}</p>
         {inspection.loading && <p role='status'>{t('loadingInspection')}</p>}
         {inspection.error && <p role='alert' className='text-red-400 break-words'>{t('inspectError', { message: inspection.error })}</p>}
