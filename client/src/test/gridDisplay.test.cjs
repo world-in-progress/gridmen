@@ -98,7 +98,7 @@ function sessionDependencies() {
     const map = new TestMap()
     const meta = { revision: 'test', displayLayers: [], bounds: [0, 0, 10, 10], epsg: 4326, grid_info: [[1, 1]], subdivide_rules: [[2, 2]] }
     const counts = { created: 0, removed: 0, source: 0, core: 0, unregister: 0, link: 0, unlink: 0 }
-    const layer = { setReadOnlySource: async source => { layer.source = source; counts.source++ } }
+    const layer = { addErrorListener(listener) { listener(null); return () => {} }, setReadOnlySource: async source => { layer.source = source; counts.source++ } }
     const manager = {
         getOrCreatePerPatchTopology: () => { counts.created++; return { clgId: 'layer', topologyLayer: layer } },
         ensureTopologyLayerInitialized: async () => {},
