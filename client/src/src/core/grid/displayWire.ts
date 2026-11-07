@@ -4,19 +4,34 @@ import { blockKey, displayLayer, nodeBounds } from './displayHierarchy'
 const HEADER_BYTES = 8
 const RECORD_BYTES = 72
 
+declare const validatedDisplayBlock: unique symbol
+/** Only a decode worker's successful reply may carry this internal capability. */
+export type ValidatedDisplayBlockBuffer = ArrayBuffer & { readonly [validatedDisplayBlock]: true }
+
 /** Decode and validate once, at the HTTP boundary. All geometry/attributes stay float64. */
 export function decodeDisplayBlock(buffer: ArrayBuffer, block: DisplayBlock, meta: GridDisplayMeta): DisplayChunk {
-    if (buffer.byteLength < HEADER_BYTES) throw new Error('Truncated grid display header')
+    return readDisplayBlock(buffer, block, meta, true)
+}
+
+/** Restore one acknowledged block from the worker, which already validated and
+ * prepared these exact transferred bytes. Never use for network input.
+ */
+export function restoreDisplayBlock(buffer: ValidatedDisplayBlockBuffer, block: DisplayBlock, meta: GridDisplayMeta): DisplayChunk {
+    return readDisplayBlock(buffer, block, meta, false)
+}
+
+function readDisplayBlock(buffer: ArrayBuffer, block: DisplayBlock, meta: GridDisplayMeta, validate: boolean): DisplayChunk {
+    if (validate && buffer.byteLength < HEADER_BYTES) throw new Error('Truncated grid display header')
     const data = new DataView(buffer)
-    if (data.getUint32(0, false) !== 0x47444e34) throw new Error('Invalid grid display format')
+    if (validate && data.getUint32(0, false) !== 0x47444e34) throw new Error('Invalid grid display format')
     const count = data.getUint32(4, true)
-    if (buffer.byteLength !== HEADER_BYTES + RECORD_BYTES * count) throw new Error('Invalid grid display record count')
+    if (validate && buffer.byteLength !== HEADER_BYTES + RECORD_BYTES * count) throw new Error('Invalid grid display record count')
     const chunk: DisplayChunk = { key: blockKey(block), bounds: nodeBounds(displayLayer(meta.displayLayers, block.blockLayer), block.x, block.y, meta.alignment_origin), cells: [], fields: [] }
-    const ids = new Set<number>()
+    const ids = validate ? new Set<number>() : undefined
     for (let i = 0; i < count; i++) {
         const offset = HEADER_BYTES + i * RECORD_BYTES
         const rawId = data.getBigUint64(offset, true)
-        if (rawId > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Grid cell ID exceeds the exact integer range')
+        if (validate && rawId > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Grid cell ID exceeds the exact integer range')
         const id = Number(rawId)
         const bounds: [number, number, number, number] = [0, 1, 2, 3].map(k => data.getFloat64(offset + 8 + k * 8, true)) as [number, number, number, number]
         const occupiedArea = data.getFloat64(offset + 40, true)
@@ -24,13 +39,13 @@ export function decodeDisplayBlock(buffer: ArrayBuffer, block: DisplayBlock, met
         const minCellSize = data.getFloat64(offset + 56, true)
         const level = data.getUint32(offset + 64, true), landClass = data.getUint32(offset + 68, true)
         const area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
-        if (!bounds.every(Number.isFinite) || !(bounds[2] > bounds[0] && bounds[3] > bounds[1])
+        if (validate && (!bounds.every(Number.isFinite) || !(bounds[2] > bounds[0] && bounds[3] > bounds[1])
             || !(occupiedArea > 0 && Number.isFinite(occupiedArea)) || occupiedArea > area * (1 + 1e-10)
             || !Number.isFinite(elevationArea) || !(minCellSize > 0 && Number.isFinite(minCellSize))
-            || level < 1 || level > meta.grid_info.length || landClass > 255 || (id && ids.has(id))) throw new Error('Invalid grid display node')
+            || level < 1 || level > meta.grid_info.length || landClass > 255 || (id && ids!.has(id)))) throw new Error('Invalid grid display node')
         const sample = { bounds, level, elevation: elevationArea / occupiedArea, landClass }
-        if (!Number.isFinite(sample.elevation)) throw new Error('Invalid grid display elevation')
-        if (id) { ids.add(id); chunk.cells.push({ ...sample, id }) }
+        if (validate && !Number.isFinite(sample.elevation)) throw new Error('Invalid grid display elevation')
+        if (id) { ids?.add(id); chunk.cells.push({ ...sample, id }) }
         else chunk.fields.push({ ...sample, occupiedFraction: Math.min(1, occupiedArea / area), minCellSize })
     }
     return chunk

@@ -70,7 +70,11 @@ test('decode transfers one buffer after each block acknowledgment and keeps empt
     Object.defineProperty(globalThis, 'Worker', { value: ManualWorker, configurable: true })
     t.after(() => { if (original) Object.defineProperty(globalThis, 'Worker', original); else Reflect.deleteProperty(globalThis, 'Worker') })
     const client = new DisplayGeometryClient({ layers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), origin: [0, 0], definition: JSON.stringify(proj4.defs('EPSG:4326')) })
-    const blocks = [0, 1, 2].map(x => ({ block: { blockLayer: 0, x, y: 0, displayLayer: 0 }, buffer: new ArrayBuffer(8) }))
+    const blocks = [0, 1, 2].map(x => {
+        const buffer = new ArrayBuffer(8)
+        new DataView(buffer).setUint32(0, 0x47444e34, false)
+        return { block: { blockLayer: 0, x, y: 0, displayLayer: 0 }, buffer }
+    })
     const meta = { revision: 'rpc', displayLayers: displayLayers([0, 0, 3, 1], [[1, 1]], [0, 0]), alignment_origin: [0, 0], grid_info: [[1, 1]], cellCount: 3 } as GridDisplayMeta
     const decoding = client.run({ type: 'decode', blocks, meta })
     const worker = ManualWorker.instances.at(-1)!
@@ -80,14 +84,18 @@ test('decode transfers one buffer after each block acknowledgment and keeps empt
     assert.deepEqual(blocks.map(item => item.buffer.byteLength), [0, 8, 8])
     assert.throws(() => client.run({ type: 'decode', blocks: [], meta }), /Concurrent/)
     for (let i = 0; i < 3; i++) {
-        worker.reply({ id, part: { chunks: [{ key: String(i), bounds: [i, 0, i + 1, 1], cells: [], fields: [] }], prepared: [] } })
+        const task = worker.sent[i].task
+        assert.equal(task.type, 'decode')
+        if (task.type !== 'decode') throw new Error('Expected decode input')
+        const decoded = task.blocks[0].buffer
+        worker.reply(structuredClone({ id, decoded, part: { prepared: [] } }, { transfer: [decoded] }))
         assert.equal(worker.sent.length, i + 1)
         worker.reply({ id, done: true })
         assert.equal(worker.sent.length, Math.min(i + 2, 3))
         assert.deepEqual(blocks.map(item => item.buffer.byteLength), blocks.map((_, index) => index <= i + 1 ? 0 : 8))
         if (i < 2) assert.equal(worker.sent[i + 1].id, id)
     }
-    assert.deepEqual((await decoding).chunks?.map(chunk => chunk.key), ['0', '1', '2'])
+    assert.deepEqual((await decoding).chunks?.map(chunk => chunk.key), ['0:0:0:0', '0:1:0:0', '0:2:0:0'])
     const empty = client.run({ type: 'decode', blocks: [], meta })
     assert.equal(worker.sent.at(-1)?.transfers, 0)
     worker.reply({ id: worker.sent.at(-1)?.id, done: true })

@@ -1,7 +1,8 @@
-import type { DisplayGeometryConfig, DisplayGeometryTask, DisplayGeometryEngine, PreparedDisplayChunk } from '../grid/displayGeometryEngine'
+import type { DisplayGeometryConfig, DisplayGeometryTask, PreparedDisplayChunk } from '../grid/displayGeometryEngine'
 import type { DisplayChunk } from '../grid/displayTypes'
+import { restoreDisplayBlock } from '../grid/displayWire'
+import type { DisplayGeometryReply, DisplayGeometryResult as Result } from './displayGeometryProtocol'
 
-type Result = ReturnType<DisplayGeometryEngine['run']>
 type StreamTask = Extract<DisplayGeometryTask, { type: 'prepare' | 'decode' }>
 
 /** Dedicated projection worker: one active RPC, no pending camera/job queue. A
@@ -20,11 +21,16 @@ export class DisplayGeometryClient {
         if (!this.worker) {
             this.worker = new Worker(new URL('./displayGeometry.worker.ts', import.meta.url), { type: 'module' })
             config = this.config
-            this.worker.onmessage = (event: MessageEvent<{ id: number; result: Result; part?: Result; done?: boolean; error?: string }>) => {
+            this.worker.onmessage = (event: MessageEvent<DisplayGeometryReply>) => {
                 if (event.data.id !== this.pending?.id) return
                 const pending = this.pending
+                if (pending.input?.type === 'decode' && event.data.decoded) {
+                    try {
+                        const { block } = pending.input.blocks[pending.next - 1]
+                        pending.chunks.push(restoreDisplayBlock(event.data.decoded, block, pending.input.meta))
+                    } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); return }
+                }
                 if (event.data.part) {
-                    if (event.data.part.chunks) pending.chunks.push(...event.data.part.chunks)
                     if (event.data.part.prepared) pending.prepared.push(...event.data.part.prepared)
                     if (!event.data.done) return
                 }
@@ -48,7 +54,7 @@ export class DisplayGeometryClient {
                 this.pending = undefined
                 if (event.data.error !== undefined) pending.reject(new Error(event.data.error))
                 else if (event.data.done) pending.resolve({ chunks: pending.chunks, prepared: pending.prepared })
-                else pending.resolve(event.data.result)
+                else pending.resolve(event.data.result!)
             }
             this.worker.onerror = event => this.fail(new Error(event.message))
             this.worker.onmessageerror = () => this.fail(new Error('Invalid display geometry message'))

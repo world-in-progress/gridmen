@@ -11,7 +11,10 @@ import TopologyLayer from '../src/views/mapView/topology/TopologyLayer'
 import { MercatorCoordinate } from '../src/core/math/mercatorCoordinate'
 import { displayLayers } from '../src/core/grid/displayHierarchy'
 import { DisplayGeometryClient } from '../src/core/worker/displayGeometryClient'
-import type { DisplayGeometryConfig, DisplayGeometryTask, DisplayGeometryEngine, PreparedDisplayChunk } from '../src/core/grid/displayGeometryEngine'
+import { decodeDisplayBlock } from '../src/core/grid/displayWire'
+import type { DisplayGeometryReply } from '../src/core/worker/displayGeometryProtocol'
+import { DisplayGeometryEngine, type DisplayGeometryConfig, type DisplayGeometryTask, type PreparedDisplayChunk } from '../src/core/grid/displayGeometryEngine'
+import { DisplayBlockCache } from '../src/core/grid/displayBlockCache'
 import type { DisplayBlock, DisplayCell, DisplayChunk, GridDisplayMeta, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
 
 const root = process.cwd()
@@ -19,7 +22,8 @@ const output = process.env.GRID_TEST_EVIDENCE ? resolve(process.env.GRID_TEST_EV
 const modulePath = resolve(output, 'displayGeometry.worker.mjs')
 const shimPath = resolve(output, 'worker-shim.mjs')
 let buildPromise: Promise<void> | undefined
-type WorkerReply = { id: number; part?: ReturnType<DisplayGeometryEngine['run']>; result?: ReturnType<DisplayGeometryEngine['run']>; done?: boolean; error?: string }
+type WorkerReply = DisplayGeometryReply
+type TransferObservation = { id: number; before: number[]; after: number[]; wire: number; prepared: number[] }
 
 function buildWorker(): Promise<void> {
     return buildPromise ??= (async () => {
@@ -28,7 +32,13 @@ function buildWorker(): Promise<void> {
         await build({ entryPoints: [resolve(root, 'src/core/worker/displayGeometry.worker.ts')], outfile: modulePath,
             bundle: true, platform: 'node', format: 'esm', logLevel: 'silent' })
         await writeFile(shimPath, `import { parentPort } from 'node:worker_threads'
-globalThis.self = { postMessage: (message, transfer) => parentPort.postMessage(message, transfer), onmessage: null }
+globalThis.self = { postMessage(message, transfer = []) {
+    const before = transfer.map(buffer => buffer.byteLength)
+    const wire = transfer.indexOf(message.decoded)
+    const prepared = message.part?.prepared?.map(chunk => transfer.indexOf(chunk.data.buffer)) ?? []
+    parentPort.postMessage(message, transfer)
+    parentPort.postMessage({ kind: 'transfer', id: message.id, before, after: transfer.map(buffer => buffer.byteLength), wire, prepared })
+}, onmessage: null }
 parentPort.on('message', data => globalThis.self.onmessage?.({ data }))
 await import('./displayGeometry.worker.mjs')
 `)
@@ -43,12 +53,14 @@ class ProductionWorker {
     readonly sent: { id: number; config?: DisplayGeometryConfig; task: DisplayGeometryTask; transfers: number }[] = []
     readonly received: WorkerReply[] = []
     readonly heldDone: WorkerReply[] = []
+    readonly transferObservations: TransferObservation[] = []
     holdDone = true
     terminated = false
     private readonly thread = new ThreadWorker(shimPath, { type: 'module' })
     constructor() {
         ProductionWorker.instances.push(this)
-        this.thread.on('message', (data: WorkerReply) => {
+        this.thread.on('message', (data: WorkerReply | TransferObservation & { kind: 'transfer' }) => {
+            if ('kind' in data) { this.transferObservations.push(data); return }
             this.received.push(data)
             if (data.done && this.holdDone) this.heldDone.push(data)
             else this.onmessage?.({ data })
@@ -107,11 +119,169 @@ function gdn4(id: number, x: number): ArrayBuffer {
 const chunk = (x: number): DisplayChunk => ({ key: String(x), bounds: [x, 0, x + 1, 1],
     cells: [{ id: x + 1, bounds: [x, 0, x + 1, 1], level: 1, elevation: x + 10, landClass: x }], fields: [] })
 
+function richWire(): ArrayBuffer {
+    const count = 4098, buffer = new ArrayBuffer(8 + count * 72), data = new DataView(buffer)
+    data.setUint32(0, 0x47444e34, false)
+    data.setUint32(4, count, true)
+    for (let i = 0; i < count; i++) {
+        const offset = 8 + i * 72, x = (i % 64) / 64, y = (Math.floor(i / 64) % 64) / 64
+        const bounds = [x + 1e-10, y + 2e-10, x + 1 / 64, y + 1 / 64]
+        const area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
+        data.setBigUint64(offset, i < 2 ? BigInt(Number.MAX_SAFE_INTEGER - i) : 0n, true)
+        bounds.forEach((value, k) => data.setFloat64(offset + 8 + k * 8, value, true))
+        const occupied = area * (i < 2 ? 1 : 1 / 3)
+        data.setFloat64(offset + 40, occupied, true)
+        data.setFloat64(offset + 48, i === 0 ? -0 : occupied * (-300.123456789123 + i / 7), true)
+        data.setFloat64(offset + 56, 0.000123456789123, true)
+        data.setUint32(offset + 64, i % 2 + 1, true)
+        data.setUint32(offset + 68, i % 256, true)
+    }
+    return buffer
+}
+
+test('validated production replies restore exact dense fields and cells once per ACK, with both buffers transferred', async t => {
+    await fixture(t)
+    const client = new DisplayGeometryClient(config('EPSG:4326'))
+    t.after(() => client.dispose())
+    const richMeta = { ...meta, grid_info: [[1, 1], [0.01, 0.01]] } as GridDisplayMeta
+    const blocks = [0, 1, 2].map(x => ({ block: block(x), buffer: richWire() }))
+    const expected = blocks.map(item => decodeDisplayBlock(item.buffer, item.block, richMeta))
+    const engine = new DisplayGeometryEngine(config('EPSG:4326'))
+    const prepared = engine.run({ type: 'decode', blocks, meta: richMeta }).prepared
+    let recordReads = 0, boundaryReads = 0
+    const readStages: number[] = []
+    const result = client.run({ type: 'decode', blocks, meta: richMeta }, () => { readStages.push(recordReads); return true })
+    const worker = ProductionWorker.instances.at(-1)!
+    const getId = DataView.prototype.getBigUint64, getUint = DataView.prototype.getUint32
+    for (let i = 0; i < blocks.length; i++) {
+        await until(() => worker.heldDone.length === 1)
+        assert.equal(worker.sent.length, i + 1)
+        assert.equal(recordReads, i * 4098, 'main restoration must wait for this ACK')
+        const reply = worker.heldDone[0]
+        assert.ok(reply.decoded instanceof ArrayBuffer)
+        assert.equal(reply.decoded.byteLength, 8 + 4098 * 72)
+        assert.ok(reply.part?.prepared?.[0].data instanceof Float32Array)
+        assert.equal(reply.part.prepared[0].data.byteLength, 4098 * 64)
+        assert.equal('chunks' in reply.part, false)
+        DataView.prototype.getBigUint64 = function (offset, littleEndian) {
+            assert.equal(worker.sent.length, i + 1, 'next input must wait until restoration finishes')
+            recordReads++
+            return getId.call(this, offset, littleEndian)
+        }
+        DataView.prototype.getUint32 = function (offset, littleEndian) {
+            if (offset === 0) { boundaryReads++; throw new Error('Boundary validator ran on main') }
+            return getUint.call(this, offset, littleEndian)
+        }
+        try { worker.releaseDone() }
+        finally { DataView.prototype.getBigUint64 = getId; DataView.prototype.getUint32 = getUint }
+        assert.equal(recordReads, (i + 1) * 4098)
+        await until(() => worker.transferObservations.length === i + 1)
+        const transfer = worker.transferObservations[i]
+        assert.equal(transfer.before.length, 2)
+        assert.equal(transfer.before[transfer.wire], 8 + 4098 * 72)
+        assert.deepEqual(transfer.prepared.map(index => transfer.before[index]), [4098 * 64])
+        assert.deepEqual(transfer.after, [0, 0], 'wire and prepared buffers must detach on the worker')
+    }
+    const decoded = await result
+    assert.deepEqual(readStages, [4098, 8196, 12294])
+    assert.equal(boundaryReads, 0)
+    assert.deepEqual(blocks.map(item => item.buffer.byteLength), [0, 0, 0])
+    assert.deepEqual(decoded.chunks, expected)
+    assert.deepEqual(decoded.prepared, prepared)
+    const first = decoded.chunks![0]
+    assert.equal(first.cells[0].id, Number.MAX_SAFE_INTEGER)
+    assert.equal(first.cells[1].id, Number.MAX_SAFE_INTEGER - 1)
+    assert.ok(Object.is(first.cells[0].elevation, -0))
+    assert.equal(first.fields[0].occupiedFraction, 1 / 3)
+    assert.equal(first.fields[0].minCellSize, 0.000123456789123)
+    assert.notEqual(first.fields[0].bounds[0], Math.fround(first.fields[0].bounds[0]))
+    assert.notEqual(first.fields[0].elevation, Math.fround(first.fields[0].elevation))
+    await writeFile(resolve(output, 'dense-transfer.json'), JSON.stringify({ recordReads, boundaryReads, readStages,
+        transfers: worker.transferObservations, fields: first.fields.length, cells: first.cells.length }, null, 2) + '\n')
+})
+
+test('malformed wire fails at the production worker boundary and a valid retry remains safe', async t => {
+    await fixture(t)
+    const client = new DisplayGeometryClient(config('EPSG:4326'))
+    t.after(() => client.dispose())
+    const invalid = [
+        new ArrayBuffer(7), new ArrayBuffer(8), gdn4(1, 0).slice(0, 79),
+        ...[(data: DataView) => data.setBigUint64(8, BigInt(Number.MAX_SAFE_INTEGER) + 1n, true),
+            (data: DataView) => data.setFloat64(16, NaN, true),
+            (data: DataView) => data.setFloat64(48, 0, true),
+            (data: DataView) => data.setFloat64(48, 2, true),
+            (data: DataView) => data.setFloat64(56, Infinity, true),
+            (data: DataView) => data.setFloat64(64, 0, true),
+            (data: DataView) => data.setUint32(72, 0, true),
+            (data: DataView) => data.setUint32(76, 256, true),
+        ].map(mutate => { const buffer = gdn4(1, 0); mutate(new DataView(buffer)); return buffer }),
+    ]
+    const duplicate = new ArrayBuffer(152), duplicateView = new DataView(duplicate)
+    new Uint8Array(duplicate).set(new Uint8Array(gdn4(1, 0)))
+    new Uint8Array(duplicate).set(new Uint8Array(gdn4(1, 1), 8), 80)
+    duplicateView.setUint32(4, 2, true)
+    invalid.push(duplicate)
+    for (const buffer of invalid) {
+        const next = gdn4(2, 1)
+        const result = client.run({ type: 'decode', blocks: [{ block: block(0), buffer }, { block: block(1), buffer: next }], meta })
+        const worker = ProductionWorker.instances.at(-1)!
+        await assert.rejects(result, /grid (display|cell)/i)
+        assert.equal(buffer.byteLength, 0)
+        assert.equal(next.byteLength, 80)
+        assert.equal(worker.received.at(-1)?.decoded, undefined)
+        assert.equal(worker.received.at(-1)?.part, undefined)
+        assert.equal(worker.heldDone.length, 0)
+        assert.equal(worker.terminated, false)
+    }
+    const recovered = client.run({ type: 'decode', blocks: [{ block: block(0), buffer: gdn4(1, 0) }], meta })
+    const worker = ProductionWorker.instances.at(-1)!
+    await until(() => worker.heldDone.length === 1)
+    worker.releaseDone()
+    assert.equal((await recovered).chunks![0].cells[0].id, 1)
+})
+
+test('production decode keeps empty blocks finite and immutable cache identities stable', async t => {
+    await fixture(t)
+    const client = new DisplayGeometryClient(config('EPSG:4326'))
+    t.after(() => client.dispose())
+    let loads = 0
+    const cache = new DisplayBlockCache(meta, async blocks => {
+        loads++
+        const result = client.run({ type: 'decode', blocks: blocks.map(block => {
+            const buffer = new ArrayBuffer(8)
+            new DataView(buffer).setUint32(0, 0x47444e34, false)
+            return { block, buffer }
+        }), meta })
+        const worker = ProductionWorker.instances.at(-1)!
+        worker.holdDone = false
+        return (await result).chunks!
+    })
+    const signal = new AbortController().signal
+    const first = await cache.query([block(0)], signal)
+    cache.retain([block(0)], true)
+    assert.equal(await cache.query([block(0)], signal), first)
+    // Nonempty fields make the public canonical view expose the original block.
+    const nonempty = new DisplayBlockCache(meta, async blocks => {
+        loads++
+        const result = await client.run({ type: 'decode', blocks: blocks.map(block => ({ block, buffer: gdn4(0, 0) })), meta })
+        return result.chunks!
+    })
+    const a = await nonempty.query([block(0)], signal)
+    nonempty.retain([block(0)], true)
+    const b = await nonempty.query([block(0)], signal)
+    assert.equal(a, b)
+    assert.equal(a.chunks[0], b.chunks[0])
+    assert.equal(a.chunks[0].fields, b.chunks[0].fields)
+    assert.equal(a.chunks[0].fields[0].occupiedFraction, 1)
+    assert.equal(loads, 2)
+})
+
 test('production worker decodes transferred GDN4 blocks in acknowledged order, including an empty batch', async t => {
     await fixture(t)
     const client = new DisplayGeometryClient(config('EPSG:4326'))
     t.after(() => client.dispose())
     const blocks = [0, 1, 2].map(x => ({ block: block(x), buffer: gdn4(x + 1, x) }))
+    const expected = blocks.map(item => decodeDisplayBlock(item.buffer, item.block, meta))
     const result = client.run({ type: 'decode', blocks, meta })
     const worker = ProductionWorker.instances.at(-1)!
     const id = worker.sent[0].id
@@ -122,7 +292,10 @@ test('production worker decodes transferred GDN4 blocks in acknowledged order, i
         await until(() => worker.heldDone.length === 1)
         assert.equal(worker.sent.length, i + 1)
         assert.equal(worker.received.at(-1)?.id, id)
-        assert.equal(worker.received.at(-1)?.part?.chunks?.[0].cells[0].id, i + 1)
+        const returned = worker.received.at(-1)!
+        assert.equal(returned.decoded?.byteLength, 80)
+        assert.deepEqual(decodeDisplayBlock(returned.decoded!, blocks[i].block, meta), expected[i])
+        assert.equal('chunks' in returned.part!, false, 'the object graph must not be cloned back')
         assert.equal(worker.received.at(-1)?.done, true)
         worker.releaseDone()
         assert.equal(worker.sent.length, Math.min(i + 2, blocks.length))
@@ -130,6 +303,7 @@ test('production worker decodes transferred GDN4 blocks in acknowledged order, i
         detachedStages.push(blocks.map(item => item.buffer.byteLength))
     }
     const decoded = await result
+    assert.deepEqual(decoded.chunks, expected)
     assert.deepEqual(decoded.chunks?.map(item => item.key), ['0:0:0:0', '0:1:0:0', '0:2:0:0'])
     assert.deepEqual(decoded.prepared?.map(item => item.data[9]), [2, 4, 6])
     assert.ok(decoded.prepared?.every(item => item.data.byteLength === 64))
@@ -143,7 +317,7 @@ test('production worker decodes transferred GDN4 blocks in acknowledged order, i
         sent: worker.sent.map(message => ({ id: message.id, type: message.task.type,
             blocks: message.task.type === 'decode' ? message.task.blocks.length : 0, transfers: message.transfers })),
         received: worker.received.map(message => ({ id: message.id, done: !!message.done,
-            chunks: message.part?.chunks?.map(chunk => chunk.key) ?? [],
+            wireBytes: message.decoded?.byteLength ?? 0,
             preparedBytes: message.part?.prepared?.reduce((sum, chunk) => sum + chunk.data.byteLength, 0) ?? 0 })),
     }, null, 2) + '\n')
 })
