@@ -221,23 +221,53 @@ function componentHarness(file, dependencies, props) {
     const states = []
     const effects = []
     let stateIndex = 0
+    let effectIndex = 0
     let mounted = false
+    let tree
     const Component = load(file, { ...dependencies, react: {
         useState: initial => {
             const index = stateIndex++
             if (!mounted) states[index] = typeof initial === 'function' ? initial() : initial
             return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value }]
         },
-        useEffect: effect => { if (!mounted) effects.push(effect) },
+        useEffect: (effect, deps) => {
+            const index = effectIndex++
+            const previous = effects[index]
+            if (!previous || !deps || deps.some((dep, i) => dep !== previous.deps[i])) {
+                effects[index] = { effect, deps, cleanup: previous?.cleanup, pending: true }
+            }
+        },
     } }).default
     return {
         render: () => {
             stateIndex = 0
-            const html = renderToStaticMarkup(Component(props))
+            effectIndex = 0
+            tree = Component(props)
+            const html = renderToStaticMarkup(tree)
             mounted = true
             return html
         },
-        mount: () => effects.map(effect => effect()).filter(Boolean),
+        mount: () => effects.map(record => {
+            if (record.pending) {
+                record.cleanup?.()
+                record.cleanup = record.effect()
+                record.pending = false
+            }
+            return record.cleanup
+        }).filter(Boolean),
+        click: label => {
+            const find = element => {
+                if (!element?.props) return
+                if (element.props.onClick && element.props.children === label) return element.props.onClick
+                for (const child of React.Children.toArray(element.props.children)) {
+                    const found = find(child)
+                    if (found) return found
+                }
+            }
+            const onClick = find(tree)
+            assert.ok(onClick, `Missing button ${label}`)
+            onClick()
+        },
     }
 }
 
@@ -576,4 +606,97 @@ test('initial grid and patch loading failures remain visible and late resolution
     await flush()
     assert.equal(fits, 0)
     assert.match(check.render(), /Loading grid/)
+})
+
+
+test('grid metadata failure Retry starts a new request and displays the recovered grid', async () => {
+    inLanguage('en')
+    const ctx = sessionDependencies()
+    let calls = 0
+    ctx.dependencies['../api/grid'] = {
+        GridDisplayHttpError: class extends Error {},
+        getGridDisplayMeta: async () => {
+            if (++calls === 1) throw new Error('HTTP 500 metadata unavailable')
+            return ctx.meta
+        },
+        createGridDisplayBlockCache: () => ({}),
+    }
+    const sessions = load('template/grid/gridDisplaySession.ts', ctx.dependencies)
+    const node = { nodeInfo: 'grid', name: 'grid' }
+    ctx.map.fitBounds = () => {}
+    const dependencies = checkDependencies({})
+    dependencies['./gridDisplaySession'] = sessions
+    const check = componentHarness('template/grid/gridCheck.tsx', dependencies, { node, context: { map: ctx.map } })
+    check.render(); check.mount()
+    await flush()
+    assert.match(check.render(), /HTTP 500 metadata unavailable/)
+    check.click('Retry')
+    check.render(); check.mount()
+    await flush()
+    const html = check.render()
+    assert.equal(calls, 2)
+    assert.equal(ctx.counts.removed, 1)
+    assert.ok(html.includes('4326') && html.includes('[[1,1]]'))
+    assert.ok(!html.includes('role="alert"'))
+    node.context.__cleanup.topology()
+})
+
+test('patch metadata failure releases the session and reopening makes a successful new request', async () => {
+    const ctx = patchAccessContext()
+    let calls = 0
+    ctx.dependencies['@/template/api/patch'] = { getPatchMeta: async () => {
+        if (++calls === 1) throw new Error('HTTP 500 patch unavailable')
+        return ctx.meta
+    } }
+    const { getPatchDisplay } = load('components/gridDisplay/patchDisplaySession.ts', ctx.dependencies)
+    const node = { nodeInfo: 'patch', lockId: null }
+    await assert.rejects(getPatchDisplay(node, ctx.map, 'r'), /HTTP 500 patch unavailable/)
+    const recovered = await getPatchDisplay(node, ctx.map, 'r')
+    assert.equal(calls, 2)
+    assert.equal(recovered.patch, ctx.meta)
+    assert.equal(recovered.patchCore, ctx.layer.patchCore)
+    assert.deepEqual(ctx.events, ['link:r', 'unlink:r-1', 'link:r'])
+    assert.equal(ctx.counts.removed, 1)
+    node.context.__cleanup.topology()
+})
+
+test('inspection canceled by refresh clears loading, then recovers and still shows ordinary errors', async () => {
+    inLanguage('en')
+    const effects = []
+    const states = []
+    let index = 0
+    const hook = load('components/gridDisplay/useGridInspection.ts', {
+        react: {
+            useEffect: effect => effects.push(effect),
+            useState: initial => { const current = index++; states[current] = initial; return [initial, value => { states[current] = value }] },
+        },
+        '@/i18n/gridDisplay': i18n,
+    }).useGridInspection
+    const map = new TestMap()
+    const pending = deferred()
+    const refresh = new AbortController()
+    let request = 0
+    hook(map, { inspectAt: () => {
+        if (++request === 1) {
+            refresh.signal.addEventListener('abort', () => pending.reject(refresh.signal.reason), { once: true })
+            return pending.promise
+        }
+        if (request === 2) return Promise.resolve({ cell: { id: 42 }, neighbors: [] })
+        return Promise.reject(new Error('HTTP 500 inspect unavailable'))
+    } }, true)
+    const cleanup = effects[0]()
+    const click = [...map.handlers.get('click')][0]
+    const first = click({ point: { x: 1, y: 2 } })
+    assert.equal(states[1], true)
+    refresh.abort()
+    await first
+    assert.equal(states[1], false)
+    assert.equal(states[2], null)
+    await click({ point: { x: 3, y: 4 } })
+    assert.equal(states[0].cell.id, 42)
+    assert.equal(states[1], false)
+    assert.equal(states[2], null)
+    await click({ point: { x: 3, y: 4 } })
+    assert.match(states[2], /HTTP 500 inspect unavailable/)
+    cleanup()
 })

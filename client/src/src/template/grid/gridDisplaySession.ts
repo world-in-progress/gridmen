@@ -1,6 +1,5 @@
 import type { Map as MapboxMap } from 'mapbox-gl'
 import type { ReadOnlyGridSource } from '@/core/grid/displayTypes'
-import type TopologyLayer from '@/views/mapView/topology/TopologyLayer'
 import { ResourceNode } from '../scene/scene'
 import { createGridDisplayBlockCache, getGridDisplayMeta, GridDisplayHttpError, inspectGrid } from '../api/grid'
 import { displayBoundsOn4326 } from '@/components/gridDisplay/displayBounds'
@@ -8,7 +7,7 @@ import { waitForDisplayMap } from '@/components/gridDisplay/mapReady'
 import { layerOrderCoordinator } from '@/views/mapView/layerOrderCoordinator'
 import { ensureTopologyLayerInitialized, getOrCreatePerPatchTopology, removePerPatchTopology } from '@/views/mapView/topology/topologyLayerManager'
 
-async function createGridDisplay(node: ResourceNode, map: MapboxMap, signal: AbortSignal, observe: (layer: TopologyLayer) => void) {
+async function createGridDisplay(node: ResourceNode, map: MapboxMap, signal: AbortSignal, onRevisionChanged: () => void) {
     const meta = await getGridDisplayMeta(node.nodeInfo, signal)
     const boundsOn4326 = await displayBoundsOn4326(meta.bounds, meta.epsg)
     signal.throwIfAborted()
@@ -16,14 +15,13 @@ async function createGridDisplay(node: ResourceNode, map: MapboxMap, signal: Abo
     const { clgId, topologyLayer } = getOrCreatePerPatchTopology(map, node.nodeInfo, `TopologyLayer:${node.nodeInfo}`)
     await ensureTopologyLayerInitialized(topologyLayer)
     signal.throwIfAborted()
-    observe(topologyLayer)
     const cache = createGridDisplayBlockCache(node.nodeInfo, meta)
     const source: ReadOnlyGridSource = {
         meta, cache,
         loadBlocks: (blocks, requestSignal, decode) => cache.query(blocks, AbortSignal.any([signal, requestSignal]), decode),
         inspect: (x, y) => inspectGrid(node.nodeInfo, x, y, signal),
     }
-    await topologyLayer.setReadOnlySource(source)
+    await topologyLayer.setReadOnlySource(source, onRevisionChanged)
     signal.throwIfAborted()
     layerOrderCoordinator.register(node.nodeInfo, [clgId])
     return { meta, topologyLayer, boundsOn4326 }
@@ -47,26 +45,18 @@ export function getGridDisplay(node: ResourceNode, map: MapboxMap): GridSession 
     let disposed = false
     let active: AbortController | undefined
     let refreshing: Promise<Display> | undefined
-    let observed: TopologyLayer | undefined
-    let unsubscribe: (() => void) | undefined
     const dispose = () => {
         if (disposed) return
         disposed = true
         active?.abort()
-        unsubscribe?.()
         removePerPatchTopology(map, node.nodeInfo)
         layerOrderCoordinator.unregister(node.nodeInfo)
         if (sessions.get(node) === session) sessions.delete(node)
     }
-    const observe = (layer: TopologyLayer) => {
-        if (observed === layer) return
-        unsubscribe?.()
-        observed = layer
-        unsubscribe = layer.addErrorListener(error => {
-            if (disposed || refreshing || !revisionChanged(error)) return
-            session.promise = refresh()
-            for (const listener of session.listeners) listener()
-        })
+    const onRevisionChanged = () => {
+        if (disposed || refreshing) return
+        session.promise = refresh()
+        for (const listener of session.listeners) listener()
     }
     const refresh = (): Promise<Display> => {
         if (refreshing) return refreshing
@@ -76,7 +66,7 @@ export function getGridDisplay(node: ResourceNode, map: MapboxMap): GridSession 
                 if (disposed) throw new DOMException('Grid display disposed', 'AbortError')
                 const controller = new AbortController()
                 active = controller
-                try { return await createGridDisplay(node, map, controller.signal, observe) }
+                try { return await createGridDisplay(node, map, controller.signal, onRevisionChanged) }
                 catch (error) {
                     controller.abort()
                     if (disposed || !revisionChanged(error)) throw error
@@ -85,7 +75,10 @@ export function getGridDisplay(node: ResourceNode, map: MapboxMap): GridSession 
                 }
             }
         }
-        const promise = Promise.resolve().then(run).finally(() => { if (refreshing === promise) refreshing = undefined })
+        const promise = Promise.resolve().then(run).catch(error => {
+            dispose()
+            throw error
+        }).finally(() => { if (refreshing === promise) refreshing = undefined })
         refreshing = promise
         return promise
     }

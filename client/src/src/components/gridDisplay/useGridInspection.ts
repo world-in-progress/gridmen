@@ -25,7 +25,7 @@ export function useGridInspection(map: MapboxMap, layer: TopologyLayer, enabled:
                 const result = await layer.inspectAt([event.point.x, event.point.y])
                 if (active && current === request) setInspection(result)
             } catch (cause) {
-                if (active && current === request) setError(errorMessage(cause))
+                if (active && current === request && !(cause instanceof Error && cause.name === 'AbortError')) setError(errorMessage(cause))
             } finally {
                 if (active && current === request) setLoading(false)
             }

@@ -8,6 +8,7 @@ import { ELEVATION_LOW_COLOR, ELEVATION_HIGH_COLOR, OUTLINE_DARKENING } from '..
 import type { CellCheckInfo, MultiCellBaseInfo } from '../../../core/grid/types'
 import VibrantColorGenerator from '../../../core/util/vibrantColorGenerator'
 import * as apis from '../../../template/api/apis'
+import { GridDisplayHttpError } from '../../../template/api/grid'
 import HitBuffer from './hitBuffer'
 import { ChunkBuffers } from './chunkBuffers'
 import type CustomLayerGroup from './customLayerGroup'
@@ -60,6 +61,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     private _index?: DisplayIndex
     private _unsubscribePatch?: () => void
     private _source?: ReadOnlyGridSource
+    private _onRevisionChanged?: () => void
     private _projection?: Converter
     private _projectionDefinition?: string
     private _geometry?: DisplayGeometryClient
@@ -163,9 +165,10 @@ export default class TopologyLayer implements NHCustomLayerInterface {
     set endCallback(callback: () => void) { this._endCallback = () => { callback(); this.map.triggerRepaint() } }
     get endCallback(): () => void { return this._endCallback }
 
-    async setReadOnlySource(source: ReadOnlyGridSource): Promise<void> {
+    async setReadOnlySource(source: ReadOnlyGridSource, onRevisionChanged?: () => void): Promise<void> {
         this.detachSource()
         this._source = source
+        this._onRevisionChanged = onRevisionChanged
         const generation = this._generation
         const crs = `EPSG:${source.meta.epsg}`
         if (!proj4.defs(crs)) proj4.defs(crs, await apis.proj.getProj4Defs(source.meta.epsg))
@@ -457,7 +460,8 @@ export default class TopologyLayer implements NHCustomLayerInterface {
                     this.viewCache.clear()
                     this._pendingView = false
                     this._lastCamera = undefined
-                    this.setError(error)
+                    if (this._source && error instanceof GridDisplayHttpError && error.status === 409) this._onRevisionChanged?.()
+                    else this.setError(error)
                     throw error
                 }
             }
@@ -984,6 +988,7 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this._unsubscribePatch = undefined
         this._patchCore = null
         this._source = undefined
+        this._onRevisionChanged = undefined
         this._index = undefined
         this._projection = undefined
         this._projectionDefinition = undefined
