@@ -22,7 +22,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import display_cache
+# Template hooks use this owner even with Uvicorn's src.* application entrypoint.
+from gridmen_backend import display_cache
 
 FILES = ('grid.meta.json', 'cell_topo.bin', 'edge_topo.bin', 'ne.txt')
 VERSION = 11

@@ -303,6 +303,77 @@ def test_failed_query_releases_its_borrowed_index(sources,monkeypatch):
         assert same is index and same.inspect(1,1)['cell']['id'] == 1
 
 
+def test_uvicorn_entrypoint_unmount_drains_the_live_http_reader(tmp_path,monkeypatch):
+    from importlib import import_module
+    from fastapi.testclient import TestClient
+    from uvicorn.importer import import_from_string
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    app = import_from_string('src.gridmen_backend.main:app')
+    main = import_module('src.gridmen_backend.main')
+    grid = import_module('src.gridmen_backend.api.endpoints.grid')
+    hooks = import_module('templates.grid.hooks')
+    owner = import_module(grid.borrow.__module__)
+    hook_owner = import_module(hooks.removing.__module__)
+    source = write_grid(tmp_path/'resource/g/live', [((0,0,8,8),1,3)])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main,'NOODLE_INIT',lambda app:None)
+    monkeypatch.setattr(main,'NOODLE_TERMINATE',lambda:None)
+    monkeypatch.setattr(grid,'_display_source',lambda key:source)
+    monkeypatch.setattr(grid.settings,'ROOT_DIR',tmp_path)
+    entered,release,progress,attempted = [threading.Event() for _ in range(4)]
+    retire,rmtree = hook_owner._retire,shutil.rmtree
+
+    def retiring(index):
+        result = retire(index)
+        progress.set()
+        return result
+
+    def windows_delete(path,*args,**kwargs):
+        if Path(path) in (source,index.directory):
+            attempted.set()
+            progress.set()
+            assert all(mapping.closed for mapping in mappings)
+            assert index._cell_file.closed and index._edge_file.closed
+            with pytest.raises(sqlite3.ProgrammingError,match='closed'):
+                index._directory_db.execute('SELECT 1')
+        return rmtree(path,*args,**kwargs)
+
+    owner.close_cache()
+    with TestClient(app) as client:
+        meta = client.get('/api/grid/live/display/meta')
+        assert meta.status_code == 200
+        index = next(iter(owner._CACHE.values()))
+        mappings = [index.cells,index.edges,index.offsets._mmap,
+                    *(layer.mapping._mmap for layer in index.layers if layer.mapping is not None)]
+        nodes = index._nodes
+
+        def blocked(*args):
+            entered.set()
+            assert release.wait(5)
+            return nodes(*args)
+
+        monkeypatch.setattr(index,'_nodes',blocked)
+        monkeypatch.setattr(hook_owner,'_retire',retiring)
+        monkeypatch.setattr(shutil,'rmtree',windows_delete)
+        path = f'/api/grid/live/display/nodes/{meta.json()["revision"]}/0/0/0/0'
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            request = workers.submit(client.get,path)
+            try:
+                assert entered.wait(5)
+                removal = workers.submit(hooks.UNMOUNT,'.g.live')
+                assert progress.wait(5)
+                assert not attempted.is_set()
+                assert not removal.done() and source.exists() and not index.cells.closed
+            finally:
+                release.set()
+            response = request.result(timeout=5)
+            removal.result(timeout=5)
+        assert response.status_code == 200 and decode_nodes(response.content)[0][0] == 1
+        assert attempted.is_set() and all(mapping.closed for mapping in mappings)
+        assert not source.exists() and not index.directory.exists()
+
+
 def test_two_processes_publish_the_same_deterministic_key(tmp_path):
     source = write_grid(tmp_path/'source',[((0,0,8,8),1,3)])
     directory = tmp_path/'cache'

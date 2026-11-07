@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from ...core import settings
 from ...schemas.base import BaseResponse
 from ...schemas.grid import GridExportRequest
-from ...display_cache import borrow, close_cache as _close_display_cache
+from gridmen_backend.display_cache import borrow, close_cache as _close_display_cache
 
 logger = logging.getLogger(__name__)
 
