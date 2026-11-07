@@ -323,7 +323,9 @@ async function main() {
     await until(() => editLayer.isReady)
     check('subdivision preserves editor selection and loaded-cell growth', core.cellNum === 7 && editLayer.hitBuffer.size === 4, { count: core.cellNum, selected: editLayer.hitBuffer.all })
     const hanging = await editLayer.inspectAt([320, 384])
-    check('patch inspect returns real hanging neighbors at current storage ids', hanging.cell?.level === 1 && hanging.neighbors.filter(n => n.side === 'west').length === 2 && hanging.neighbors.every(n => n.edgeIds.length > 0), hanging)
+    check('patch inspect returns hanging neighbors without synthetic edge identifiers', hanging.cell?.level === 1
+        && hanging.neighbors.filter(n => n.side === 'west').length === 2
+        && hanging.neighbors.every(n => !('edgeIds' in n) && !('edgeKeys' in n)), hanging)
     editLayer.executeDeleteCells()
     await tick()
     await until(() => editLayer.isReady)

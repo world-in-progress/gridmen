@@ -72,7 +72,8 @@ export interface GridInspection {
     neighbors: {
         side: 'west' | 'east' | 'south' | 'north'
         cell: DisplayCell
-        edgeIds: number[]
+        /** Original grid topology supplies edge IDs; patches omit them. */
+        edgeIds?: number[]
     }[]
 }
 

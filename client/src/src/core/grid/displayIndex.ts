@@ -31,8 +31,6 @@ export default class DisplayIndex {
     private readonly cells = new Map<number, DisplayCell>()
     private readonly levels = new Map<number, LevelStore>()
     private readonly nodes: Map<string, SummaryNode>[]
-    private readonly edgeIds = new Map<string, number>()
-    private readonly edgeKeys = new Map<number, string>()
     private readonly nativeLayers = new Map<number, number>()
     readonly cache = new DisplayViewCache()
     private selectionExceptions = new Set<number>()
@@ -239,17 +237,7 @@ export default class DisplayIndex {
         for (const side of ['west', 'east', 'south', 'north'] as const) {
             const touching = this.sideCandidates(cell, side, showDeleted)
             for (const other of touching) {
-                const vertical = side === 'west' || side === 'east'
-                const from = vertical
-                    ? Math.max(cell.bounds[1], other.bounds[1])
-                    : Math.max(cell.bounds[0], other.bounds[0])
-                const to = vertical
-                    ? Math.min(cell.bounds[3], other.bounds[3])
-                    : Math.min(cell.bounds[2], other.bounds[2])
-                const coordinate = vertical
-                    ? (side === 'west' ? cell.bounds[0] : cell.bounds[2])
-                    : (side === 'south' ? cell.bounds[1] : cell.bounds[3])
-                neighbors.push({ side, cell: other, edgeIds: [this.edgeId(vertical, coordinate, from, to)] })
+                neighbors.push({ side, cell: other })
             }
         }
         return { cell, neighbors }
@@ -462,29 +450,5 @@ export default class DisplayIndex {
             }
         }
         return [...found.values()].sort((a, b) => a.bounds[1] - b.bounds[1] || a.bounds[0] - b.bounds[0] || a.id - b.id)
-    }
-
-    private edgeId(vertical: boolean, coordinate: number, from: number, to: number): number {
-        const axisOrigin = vertical ? this.originX : this.originY
-        const axisUnit = vertical ? this.unitX : this.unitY
-        const lengthOrigin = vertical ? this.originY : this.originX
-        const lengthUnit = vertical ? this.unitY : this.unitX
-        const key = `${vertical ? 'v' : 'h'}:${Math.round((coordinate - axisOrigin) / axisUnit)}:` +
-            `${Math.round((from - lengthOrigin) / lengthUnit)}:${Math.round((to - lengthOrigin) / lengthUnit)}`
-        let id = this.edgeIds.get(key)
-        if (!id) {
-            let hash = 14695981039346656037n
-            for (let i = 0; i < key.length; i++) {
-                hash ^= BigInt(key.charCodeAt(i))
-                hash = (hash * 1099511628211n) & 0xffffffffffffffffn
-            }
-            id = Number(hash & 0x1fffffffffffffn) || 1
-            while (this.edgeKeys.has(id) && this.edgeKeys.get(id) !== key) {
-                id = id === Number.MAX_SAFE_INTEGER ? 1 : id + 1
-            }
-            this.edgeIds.set(key, id)
-            this.edgeKeys.set(id, key)
-        }
-        return id
     }
 }

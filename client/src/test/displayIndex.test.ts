@@ -206,14 +206,21 @@ test('centered line density and fixed four CSS pixel transition agree at DPR 1 a
     for (const dpr of [1, 2]) assert.equal(outlineCoverage(dpr, 4 * dpr), 0.4375)
 })
 
-test('inspection preserves hanging-edge neighbors and stable segment IDs', () => {
+test('patch inspection preserves hanging-edge neighbors without synthetic edge identifiers', () => {
     const index = new DisplayIndex([0, 0, 2, 1], { grid_info: [[1, 1], [0.5, 0.5]], alignment_origin: [0, 0] })
     index.load([cell(10, [0, 0, 1, 1], 0), cell(11, [1, 0, 1.5, 0.5], 1), cell(12, [1, 0.5, 1.5, 1], 1)])
     const inspection = index.inspect(0.5, 0.5)
     assert.equal(inspection.cell?.id, 10)
     assert.deepEqual(inspection.neighbors.map(n => [n.side, n.cell.id]), [['east', 11], ['east', 12]])
-    assert.notEqual(inspection.neighbors[0].edgeIds[0], inspection.neighbors[1].edgeIds[0])
-    assert.equal(index.inspect(1.25, 0.25).neighbors.find(n => n.cell.id === 10)?.edgeIds[0], inspection.neighbors[0].edgeIds[0])
+    for (const neighbor of inspection.neighbors) {
+        assert.equal('edgeIds' in neighbor, false)
+        assert.equal('edgeKeys' in neighbor, false)
+    }
+    const reverse = index.inspect(1.25, 0.25).neighbors.find(n => n.cell.id === 10)
+    assert.ok(reverse)
+    assert.equal(reverse.side, 'west')
+    assert.equal('edgeIds' in reverse, false)
+    assert.equal('edgeKeys' in reverse, false)
     assert.deepEqual(index.selectBounds([0.9, 0.1, 1.1, 0.9]), [10, 11, 12])
     index.upsert(cell(11, [1, 0, 1.5, 0.5], 1, 0, 0, true))
     assert.deepEqual(index.inspect(0.5, 0.5, false).neighbors.map(n => n.cell.id), [12])
