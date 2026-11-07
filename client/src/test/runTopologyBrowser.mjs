@@ -9,6 +9,10 @@ import { build } from 'esbuild'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const hardware = process.env.GRID_TEST_ANGLE === 'metal'
+const selectionSide = Number(process.argv[2] ?? 256)
+if (!Number.isSafeInteger(selectionSide) || selectionSide < 256 || selectionSide > 1024 || (selectionSide & (selectionSide - 1)) !== 0) {
+  throw new Error('Expected a selection patch side of 256, 512, or 1024')
+}
 const temporary = await mkdtemp(join(tmpdir(), 'gridmen-browser-'))
 
 async function findChrome() {
@@ -59,8 +63,9 @@ try {
     ['/displayGeometry.worker.ts', [worker, 'text/javascript']], ['/shaders/patch/display.glsl', [shader, 'text/plain']],
   ])
   server = createServer((req, res) => {
-    if (req.url === '/favicon.ico') { res.writeHead(204); res.end(); return }
-    const route = routes.get(req.url)
+    const path = new URL(req.url, 'http://127.0.0.1').pathname
+    if (path === '/favicon.ico') { res.writeHead(204); res.end(); return }
+    const route = routes.get(path)
     if (!route) { res.writeHead(404); res.end(); return }
     res.setHeader('Content-Type', route[1]); res.end(route[0])
   })
@@ -107,8 +112,9 @@ try {
   await send('Runtime.enable', {}, sessionId)
   await send('Page.enable', {}, sessionId)
   await send('Page.bringToFront', {}, sessionId)
-  await send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/` }, sessionId)
-  const deadline = Date.now() + 45000
+  await send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?selectionSide=${selectionSide}` }, sessionId)
+  const timeoutMs = selectionSide === 1024 ? 180000 : 45000
+  const deadline = Date.now() + timeoutMs
   let done = false
   while (Date.now() < deadline) {
     const { result } = await send('Runtime.evaluate', { expression: 'document.documentElement.dataset.done === "true"', returnByValue: true }, sessionId)
@@ -116,7 +122,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   const { result } = await send('Runtime.evaluate', { expression: 'document.querySelector("#result")?.textContent', returnByValue: true }, sessionId)
-  if (!done) throw new Error(`Fixture did not finish within 45s: ${result.value}`)
+  if (!done) throw new Error(`Fixture did not finish within ${timeoutMs / 1000}s: ${result.value}`)
   const report = JSON.parse(result.value)
   console.log(JSON.stringify(report, null, 2))
   if (!report.ok || messages.some(message => message.method === 'Runtime.exceptionThrown')) {

@@ -7,6 +7,7 @@ import { DisplayBlockCache, DisplayViewCache } from '../src/core/grid/displayBlo
 import type Dispatcher from '../src/core/message/dispatcher'
 import BoundingBox2D from '../src/core/util/boundingBox2D'
 import type { DisplayBlock, GridDisplayView, ReadOnlyGridSource } from '../src/core/grid/displayTypes'
+import type { ChunkBuffer, ChunkBuffers } from '../src/views/mapView/topology/chunkBuffers'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#gl')!
 const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false })!
@@ -24,8 +25,8 @@ function check(name: string, condition: unknown, detail?: unknown): void {
 }
 function near(a: number, b: number, tolerance = 3): boolean { return Math.abs(a - b) <= tolerance }
 function tick(): Promise<void> { return new Promise(resolve => setTimeout(resolve, 0)) }
-async function until(condition: () => boolean): Promise<void> {
-    const deadline = performance.now() + 5000
+async function until(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+    const deadline = performance.now() + timeoutMs
     while (!condition()) {
         if (performance.now() > deadline) throw new Error('Timed out waiting for display worker/lifecycle')
         await new Promise(resolve => setTimeout(resolve, 5))
@@ -41,6 +42,7 @@ function deferred<T>() {
 }
 
 class PublicCamera {
+    size = SIZE
     span = SPAN
     centerX = 0
     centerY = 0
@@ -52,7 +54,7 @@ class PublicCamera {
     getProjection() { return { name: 'mercator' } }
     getPitch() { return 0 }
     getBearing() { return 0 }
-    getZoom() { return Math.log2(SIZE * EARTH / this.span / 512) }
+    getZoom() { return Math.log2(this.size * EARTH / this.span / 512) }
     getCanvas() { return canvas }
     getContainer() { return canvas.parentElement! }
     on(event: string, listener: () => void) {
@@ -65,11 +67,11 @@ class PublicCamera {
     project(lngLat: [number, number]) {
         const x = lngLat[0] * EARTH / 360
         const y = Math.log(Math.tan(Math.PI / 4 + lngLat[1] * Math.PI / 360)) * EARTH / (2 * Math.PI)
-        return { x: SIZE / 2 + (x - this.centerX) * SIZE / this.span, y: SIZE / 2 - (y - this.centerY) * SIZE / this.span }
+        return { x: this.size / 2 + (x - this.centerX) * this.size / this.span, y: this.size / 2 - (y - this.centerY) * this.size / this.span }
     }
     unproject(point: [number, number]) {
-        const x = this.centerX + (point[0] - SIZE / 2) * this.span / SIZE
-        const y = this.centerY - (point[1] - SIZE / 2) * this.span / SIZE
+        const x = this.centerX + (point[0] - this.size / 2) * this.span / this.size
+        const y = this.centerY - (point[1] - this.size / 2) * this.span / this.size
         return { lng: x / EARTH * 360, lat: (2 * Math.atan(Math.exp(y * 2 * Math.PI / EARTH)) - Math.PI / 2) * 180 / Math.PI }
     }
     matrix(): number[] {
@@ -104,6 +106,16 @@ function draw(layer: TopologyLayer, camera: PublicCamera) {
     gl.clear(gl.COLOR_BUFFER_BIT)
     layer.render(gl, camera.matrix())
     gl.finish()
+}
+function gpuChunks(layer: TopologyLayer): ChunkBuffer[] {
+    return [...(Reflect.get(layer, '_buffers') as ChunkBuffers).chunks.values()]
+}
+function selectionFlags(chunk: ChunkBuffer): number[] {
+    const data = new Float32Array(chunk.count * 16)
+    gl.bindBuffer(gl.ARRAY_BUFFER, chunk.buffer)
+    gl.getBufferSubData(gl.ARRAY_BUFFER, 0, data)
+    gl.bindBuffer(gl.ARRAY_BUFFER, null)
+    return Array.from({ length: chunk.count }, (_, index) => data[index * 16 + 14])
 }
 function cacheSource(source: Omit<ReadOnlyGridSource, 'cache'> & { cache?: DisplayViewCache }): ReadOnlyGridSource {
     const cache = source.cache ?? new DisplayViewCache()
@@ -266,6 +278,27 @@ async function main() {
     core.init = callback => callback?.(undefined as never)
     editLayer.patchCore = core
     await until(() => editLayer.isReady)
+    const originalChunks = gpuChunks(editLayer)
+    const distantOriginals = originalChunks.filter(chunk => chunk.source.cells.every(cell => cell.id !== 0))
+    const selectionBufferData = gl.bufferData.bind(gl)
+    const selectionUploads = new Set<WebGLBuffer>()
+    gl.bufferData = ((...args: Parameters<typeof gl.bufferData>) => {
+        selectionUploads.add(gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer)
+        selectionBufferData(...args)
+    }) as typeof gl.bufferData
+    for (const action of ['select', 'deselect', 'select', 'clear'] as const) {
+        selectionUploads.clear()
+        if (action === 'clear') editLayer.executeClearSelection()
+        else editLayer.executePickCells('brush', action === 'select', [64, 448])
+        const selected = action === 'select'
+        const chunks = gpuChunks(editLayer)
+        const target = chunks.filter(chunk => chunk.source.cells.some(cell => cell.id === 0))
+        check(`spanning original ${action} updates one real draw instance and keeps distant GPU objects`, target.length === 1
+            && selectionFlags(target[0])[0] === Number(selected) && editLayer.hitBuffer.isHit(0) === selected
+            && distantOriginals.length > 0 && distantOriginals.every(chunk => chunks.includes(chunk) && !selectionUploads.has(chunk.buffer)),
+            { action, instances: target.length, uploads: selectionUploads.size })
+    }
+    gl.bufferData = selectionBufferData
     const originalDrawInstances = gl.drawArraysInstanced.bind(gl)
     let drawnVaos = new Set<WebGLVertexArrayObject>()
     gl.drawArraysInstanced = (...args) => {
@@ -371,6 +404,131 @@ async function main() {
     stopPatchErrors()
     editLayer.remove(camera as never, gl)
     check('editable cleanup releases all GPU bytes', editLayer.getDisplayStats().gpuBytes === 0)
+
+    // The optional 1024-side campaign fits the whole million-cell patch into
+    // 1024 CSS pixels with 262144 nonempty 2x2-cell field samples.
+    const selectionSide = Number(new URLSearchParams(location.search).get('selectionSide') ?? 256)
+    canvas.style.width = `${selectionSide}px`; canvas.style.height = `${selectionSide}px`
+    canvas.width = selectionSide; canvas.height = selectionSide
+    const selectionCamera = new PublicCamera()
+    selectionCamera.size = selectionSide; selectionCamera.span = selectionSide
+    selectionCamera.centerX = selectionSide / 2; selectionCamera.centerY = selectionSide / 2
+    const selectionCore = new PatchCore({ nodeInfo: 'selection-fixture', lockId: 'lock', srcCS: 'EPSG:3857', targetCS: 'EPSG:4326',
+        bBox: new BoundingBox2D(0, 0, selectionSide, selectionSide), rules: [[selectionSide, selectionSide], [2, 2]] }, { dispatcher })
+    selectionCore.updateMultiCellRenderInfo({ levels: new Uint8Array(selectionSide ** 2).fill(1), globalIds: Uint32Array.from({ length: selectionSide ** 2 }, (_, i) => i) })
+    selectionCore.init = callback => callback?.(undefined as never)
+    const selectionLayer = new TopologyLayer(selectionCamera as never)
+    await selectionLayer.initialize(selectionCamera as never, gl)
+    selectionLayer.patchCore = selectionCore
+    await until(() => selectionLayer.isReady, 30000)
+    const selectionIndex = Reflect.get(selectionLayer, '_index') as DisplayIndex
+    const queryFraction = selectionIndex.selectedFraction.bind(selectionIndex)
+    let fractionQueries = 0
+    selectionIndex.selectedFraction = (...args) => { fractionQueries++; return queryFraction(...args) }
+    const targetId = selectionSide * 5 + 5
+    const targetPoint: [number, number] = [5.5, selectionSide - 5.5]
+    const fieldFlag = (x: number, y: number) => {
+        for (const chunk of gpuChunks(selectionLayer)) {
+            const index = chunk.source.fields.findIndex(field => field.bounds[0] <= x && x < field.bounds[2] && field.bounds[1] <= y && y < field.bounds[3])
+            if (index >= 0) return selectionFlags(chunk)[chunk.visibleCells + index]
+        }
+    }
+    const fieldStats = selectionLayer.getDisplayStats()
+    check('full patch selection fixture renders nonempty fields in several blocks', fieldStats.visibleCells === 0
+        && fieldStats.visibleChunks > 1 && fieldStats.fieldSamples === selectionSide ** 2 / 4, fieldStats)
+    const distantFields = gpuChunks(selectionLayer).filter(chunk => chunk.source.bounds[0] >= selectionSide / 2)
+    gl.bufferData = ((...args: Parameters<typeof gl.bufferData>) => {
+        selectionUploads.add(gl.getParameter(gl.ARRAY_BUFFER_BINDING) as WebGLBuffer)
+        selectionBufferData(...args)
+    }) as typeof gl.bufferData
+    const partialMeasurements = []
+    for (const action of ['select', 'deselect', 'select', 'clear'] as const) {
+        selectionUploads.clear(); fractionQueries = 0
+        if (action === 'clear') selectionLayer.executeClearSelection()
+        else selectionLayer.executePickCells('brush', action === 'select', targetPoint)
+        const selected = action === 'select'
+        const chunks = gpuChunks(selectionLayer)
+        check(`partial field ${action} preserves exact area and distant GPU objects`, fieldFlag(5.5, 5.5) === (selected ? 0.25 : 0)
+            && selectionLayer.hitBuffer.isHit(targetId) === selected && fractionQueries < fieldStats.fieldSamples
+            && distantFields.length > 0 && distantFields.every(chunk => chunks.includes(chunk) && !selectionUploads.has(chunk.buffer)),
+            { flag: fieldFlag(5.5, 5.5), fractionQueries, fields: fieldStats.fieldSamples, uploads: selectionUploads.size })
+        partialMeasurements.push({ action, fractionQueries, uploadedChunks: selectionUploads.size, flag: fieldFlag(5.5, 5.5) })
+    }
+    selectionLayer.executePickCells('brush', true, targetPoint)
+    selectionLayer.executePickCells('brush', true, [selectionSide - 0.5, 0.5])
+    check('selection in separated blocks updates both exact field fractions', selectionLayer.hitBuffer.size === 2
+        && fieldFlag(5.5, 5.5) === 0.25 && fieldFlag(selectionSide - 0.5, selectionSide - 0.5) === 0.25)
+    selectionLayer.executeClearSelection()
+    check('partial clear covers the union of separated real-cell bounds', selectionLayer.hitBuffer.size === 0
+        && gpuChunks(selectionLayer).every(chunk => selectionFlags(chunk).every(flag => flag === 0)))
+    const bulkMeasurements = []
+    for (const selected of [true, false]) {
+        fractionQueries = 0
+        const start = performance.now()
+        if (selected) selectionLayer.executePickAllCells()
+        else selectionLayer.executeClearSelection()
+        const cpuMs = performance.now() - start
+        draw(selectionLayer, selectionCamera)
+        const completeMs = performance.now() - start
+        check(`field bulk ${selected ? 'selection' : 'clear'} updates every real cell and GPU flag without summary queries`, fractionQueries === 0
+            && selectionLayer.hitBuffer.size === (selected ? selectionCore.cellNum : 0)
+            && gpuChunks(selectionLayer).every(chunk => selectionFlags(chunk).every(flag => flag === Number(selected))),
+            { selected: selectionLayer.hitBuffer.size, fractionQueries })
+        bulkMeasurements.push({ selected, cpuMs, completeMs })
+    }
+    selectionLayer.executePickAllCells()
+    const beforeBulkException = gpuChunks(selectionLayer).filter(chunk => chunk.source.bounds[0] >= selectionSide / 2)
+    selectionLayer.executePickCells('brush', false, targetPoint)
+    check('a bulk selection exception keeps exact fractional area and distant GPU identity', fieldFlag(5.5, 5.5) === 0.75
+        && beforeBulkException.every(chunk => gpuChunks(selectionLayer).includes(chunk)))
+    fractionQueries = 0
+    selectionLayer.executeClearSelection()
+    check('clearing bulk selection exceptions derives the all-unselected state without summary queries', fractionQueries === 0
+        && selectionLayer.hitBuffer.size === 0 && gpuChunks(selectionLayer).every(chunk => selectionFlags(chunk).every(flag => flag === 0)))
+    gl.bufferData = selectionBufferData
+    selectionLayer.executePickCells('brush', true, targetPoint)
+    selectionLayer.executeDeleteCells()
+    await until(() => selectionLayer.isReady, 30000)
+    check('deleted field cell retains its original selection fraction', selectionCore.isDeleted(targetId) && fieldFlag(5.5, 5.5) === 0.25)
+    selectionLayer.showDeletedCells = false
+    await until(() => selectionLayer.isReady, 30000)
+    check('hidden deleted selection contributes no live field area', fieldFlag(5.5, 5.5) === 0
+        && selectionIndex.selectedFraction([4, 4, 6, 6], false) === 0)
+    selectionLayer.executePickAllCells()
+    check('bulk selection in the live view still selects all real cells and only nonempty live fields', selectionLayer.hitBuffer.size === selectionCore.cellNum
+        && gpuChunks(selectionLayer).every(chunk => selectionFlags(chunk).every(flag => flag === 1)))
+    selectionLayer.executeClearSelection()
+    selectionLayer.restoreCells([targetId])
+    await until(() => selectionLayer.isReady, 30000)
+    check('restoring a selected cell restores its exact live field fraction', !selectionCore.isDeleted(targetId) && fieldFlag(5.5, 5.5) === 0.25)
+    const selectionWorker = (Reflect.get(selectionLayer, '_geometry') as { worker: Worker }).worker
+    const selectionMessage = selectionWorker.onmessage!
+    const heldSelection: MessageEvent[] = []
+    selectionWorker.onmessage = event => { heldSelection.push(event) }
+    selectionCore.markCellsAsDeleted([targetId])
+    await until(() => heldSelection.some(event => event.data.done), 30000)
+    selectionLayer.executeClearSelection()
+    selectionWorker.onmessage = selectionMessage
+    for (const event of heldSelection) selectionMessage.call(selectionWorker, event)
+    await until(() => selectionLayer.isReady, 30000)
+    check('selection cleared during worker preparation cannot reappear from an obsolete edit', selectionLayer.hitBuffer.size === 0
+        && gpuChunks(selectionLayer).every(chunk => selectionFlags(chunk).every(flag => flag === 0))
+        && selectionIndex.summarize([4, 4, 6, 6], false)?.occupiedFraction === 0.75)
+    selectionLayer.showDeletedCells = true
+    await until(() => selectionLayer.isReady, 30000)
+    selectionLayer.executePickCells('brush', true, [selectionSide - 0.5, 0.5])
+    selectionCore.deleteCellsLocally([targetId])
+    await until(() => selectionLayer.isReady, 30000)
+    check('storage compaction keeps selection on the moved real geometry', selectionLayer.hitBuffer.all.join(',') === String(targetId)
+        && selectionCore.getInfoByStorageId(targetId)[1] === selectionSide ** 2 - 1 && fieldFlag(selectionSide - 0.5, selectionSide - 0.5) === 0.25)
+    const beforeCompactedClear = gpuChunks(selectionLayer).filter(chunk => chunk.source.bounds[2] <= selectionSide / 2)
+    selectionLayer.executeClearSelection()
+    check('clearing a compacted selection refreshes its new bounds and retains distant chunks', fieldFlag(selectionSide - 0.5, selectionSide - 0.5) === 0
+        && beforeCompactedClear.every(chunk => gpuChunks(selectionLayer).includes(chunk)))
+    measurements.selection = { cells: selectionSide ** 2, side: selectionSide, stats: fieldStats, partial: partialMeasurements, bulk: bulkMeasurements }
+    selectionLayer.remove(selectionCamera as never, gl)
+    canvas.style.width = `${SIZE}px`; canvas.style.height = `${SIZE}px`
+    canvas.width = SIZE; canvas.height = SIZE
 
     const densityStats: { originals: number; fields: number; gpuBytes: number }[] = []
     for (const side of [128, 256]) {

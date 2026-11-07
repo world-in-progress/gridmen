@@ -190,6 +190,54 @@ test('selection shares all and live ancestor summaries through edits', () => {
     assert.equal(index.selectedFraction(root), 0)
 })
 
+test('uniform selection follows bulk epochs and exceptions without selecting empty nodes', () => {
+    const index = new DisplayIndex([0, 0, 4, 2], {
+        grid_info: [[2, 2], [0.5, 0.5]], alignment_origin: [0, 0],
+    })
+    const coarse = cell(1, [0, 0, 2, 2], 0)
+    const fine = cell(2, [2, 0, 2.5, 0.5], 1, 0, 0, true)
+    const root: Bounds = [0, 0, 4, 4]
+    const hole: Bounds = [3, 0, 4, 1]
+    assert.equal(index.uniformSelection, false)
+    index.selectAll(true)
+    assert.equal(index.uniformSelection, true)
+    assert.equal(index.selectedFraction(root), 0, 'an empty index still has no selected area')
+    index.load([coarse, fine])
+    for (const selected of [false, true, false, true]) {
+        index.selectAll(selected)
+        assert.equal(index.uniformSelection, selected)
+        assert.equal(index.selectedFraction(root), Number(selected))
+        assert.equal(index.selectedFraction(root, false), Number(selected))
+        assert.equal(index.selectedFraction(hole), 0)
+        assert.equal(index.selectedFraction(fine.bounds, false), 0, 'a deleted-only node is empty in the live view')
+        assert.equal(index.selectedFraction([0, 0, 0.5, 0.5]), Number(selected), 'subnodes of a spanning original retain its selection')
+    }
+    index.setSelected(coarse.id, false)
+    assert.equal(index.uniformSelection, undefined)
+    assert.equal(index.selectedFraction(root), 1 / 17)
+    assert.equal(index.selectedFraction(root, false), 0)
+    index.upsert({ ...fine, deleted: false })
+    assert.equal(index.selectedFraction(root, false), 1 / 17)
+    index.setSelected(coarse.id, true)
+    assert.equal(index.uniformSelection, true, 'removing the last exception restores the bulk default')
+    index.remove(fine.id)
+    index.upsert({ ...fine, deleted: false })
+    assert.equal(index.uniformSelection, undefined, 'a new cell is initially unselected after bulk selection')
+    assert.equal(index.selectedFraction(root), 16 / 17)
+    index.remove(fine.id)
+    assert.equal(index.uniformSelection, true, 'removing an exceptional cell restores uniform selection')
+    index.selectAll(false)
+    assert.equal(index.uniformSelection, false)
+    assert.equal(index.selectedFraction(root), 0)
+    index.setSelected(coarse.id, true)
+    assert.equal(index.uniformSelection, true, 'all cells can also be selected individually')
+    index.selectAll(true)
+    index.setSelected(coarse.id, false)
+    assert.equal(index.uniformSelection, false, 'all cells can also be deselected individually')
+    assert.equal(index.selectedFraction(root), 0)
+    assert.throws(() => index.selectedFraction([0, 0, 1.5, 0.5]), /display node/)
+})
+
 test('removing the only finest cell restores the coarser minimum real cell side', () => {
     const index = new DisplayIndex([0, 0, 2, 2], { grid_info: [[1, 1], [0.25, 0.25]], alignment_origin: [0, 0] })
     index.load([cell(1, [0, 0, 1, 1], 0), cell(2, [1, 0, 1.25, 0.25], 1)])

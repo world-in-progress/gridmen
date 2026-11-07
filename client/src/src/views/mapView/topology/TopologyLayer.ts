@@ -15,7 +15,7 @@ import type { NHCustomLayerInterface } from './interfaces'
 import type { TopologyRenderSample } from './renderSample'
 import { chunkMatrix, chunkOnScreen, displayCamera, gridPoint, polygonIntersectsBox, type DisplayCamera } from './displayProjection'
 import { blockKey, requiredDisplayRadius, selectDisplayBlocks } from '../../../core/grid/displayHierarchy'
-import { CELL_PIXEL_THRESHOLD } from '../../../core/grid/displayMath'
+import { CELL_PIXEL_THRESHOLD, intersects } from '../../../core/grid/displayMath'
 import i18n from '@/i18n'
 import { DisplayGeometryClient } from '../../../core/worker/displayGeometryClient'
 
@@ -582,17 +582,35 @@ export default class TopologyLayer implements NHCustomLayerInterface {
         this.selectionChanged(changed)
     }
     private fieldSelection(field: DisplayField): number {
+        // Render fields always have occupied area. General bounds queries must
+        // still look up their summary so empty nodes retain a zero fraction.
+        const uniform = this._index?.uniformSelection
+        if (uniform !== undefined) return uniform ? 1 : 0
         return this._index?.selectedFraction(field.bounds, this._showDeletedCells) ?? 0
     }
     private selectionChanged(ids: Set<number>): void {
         if (!ids.size) return
-        for (const id of ids) this._index?.setSelected(id, this.hitBuffer.isHit(id))
-        this.refreshSelection()
+        let bounds: Bounds | undefined
+        for (const id of ids) {
+            this._index?.setSelected(id, this.hitBuffer.isHit(id))
+            const cell = this._index?.getCell(id)
+            if (!cell) continue
+            if (!bounds) bounds = [...cell.bounds]
+            else {
+                bounds[0] = Math.min(bounds[0], cell.bounds[0])
+                bounds[1] = Math.min(bounds[1], cell.bounds[1])
+                bounds[2] = Math.max(bounds[2], cell.bounds[2])
+                bounds[3] = Math.max(bounds[3], cell.bounds[3])
+            }
+        }
+        if (bounds) this.refreshSelection(bounds)
     }
-    private refreshSelection(): void {
+    private refreshSelection(bounds?: Bounds): void {
         this._editVersion++
-        // Only viewport work is uploaded, independent of how many cells changed.
-        this._view = { chunks: this._view.chunks.map(chunk => this.viewCache.refreshChunk(chunk)) }
+        // A cell can affect fields in every intersecting block, or be an
+        // original spanning several blocks. Other chunks keep their GPU identity.
+        this._view = { chunks: this._view.chunks.map(chunk => !bounds || intersects(bounds, chunk.bounds)
+            ? this.viewCache.refreshChunk(chunk) : chunk) }
         this.syncGPU()
         if (this._loading) this.requestView()
         this.map.triggerRepaint()

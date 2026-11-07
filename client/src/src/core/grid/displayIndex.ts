@@ -128,6 +128,13 @@ export default class DisplayIndex {
         this.selectionEpoch++
     }
 
+    /** Uniform selection is valid for nonempty render fields, including after a bulk epoch change. */
+    get uniformSelection(): boolean | undefined {
+        if (this.selectionExceptions.size === 0) return this.selectionDefault
+        if (this.selectionExceptions.size === this.cells.size) return !this.selectionDefault
+        return undefined
+    }
+
     /** Selection opacity is queried on the exact same display node, without leaf descent. */
     selectedFraction(bounds: Bounds, showDeleted = true): number {
         const summary = this.summaryFor(bounds, showDeleted)
