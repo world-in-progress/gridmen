@@ -37,7 +37,6 @@ def test_ns_is_neither_parsed_nor_part_of_revision(tmp_path):
                                'grid_info', 'elevationRange', 'landClasses'}
     assert set(index.manifest) == {'source', 'meta', 'layers', 'layerTiles', 'rootHistograms'}
     assert not list(index.directory.glob('hist-*'))
-    assert not list(cache.glob('*.current.json'))
     assert not (index.directory/'identity.json').exists()
     index.close()
     (source/'ns.txt').unlink()

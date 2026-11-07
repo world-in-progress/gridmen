@@ -75,7 +75,8 @@ def main():
     before_source = fingerprint(source)
     started = time.perf_counter()
     index = GridDisplayIndex(source, cache)
-    emit(stage='index', source=str(source), cells=index.manifest['meta']['cellCount'],
+    cell_count = len(index.offsets)
+    emit(stage='index', source=str(source), cells=cell_count,
          revision=index.revision, buildOrOpenSeconds=round(time.perf_counter()-started, 3),
          peakRssBytes=peak_rss(),
          cacheBytes=sum(file.stat().st_size for file in index.directory.rglob('*') if file.is_file()))
@@ -89,7 +90,7 @@ def main():
     before_cache = snapshot(index.directory)
     block_layer = next(i for i, layer in enumerate(index.layers) if layer.w >= 256 and layer.h >= 256)
     choices = []
-    for cid in (1, max(2, index.manifest['meta']['cellCount']//2), index.manifest['meta']['cellCount']):
+    for cid in (1, max(2, cell_count//2), cell_count):
         bounds = index._cell(cid)[0]['bounds']
         x, y = index.layers[block_layer].locate((bounds[0]+bounds[2])/2,
                                                  (bounds[1]+bounds[3])/2, index.origin)

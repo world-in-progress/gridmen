@@ -61,7 +61,7 @@ def mixed(tmp_path):
 
 
 def test_metadata_and_intervention_attributes(mixed):
-    assert mixed.manifest['meta']['cellCount'] == 4
+    assert len(mixed.offsets) == 4
     assert mixed.meta['landClasses'] == [3,4,9]
     assert mixed.meta['elevationRange'] == [2,100]
     assert mixed.inspect(1,1)['cell'] == {'id':1,'bounds':[0,0,8,8],'level':1,'elevation':100,'landClass':9}
@@ -357,6 +357,8 @@ def test_http_nodes_revision_cache_and_removed_query(mixed,monkeypatch):
         assert cached.status_code == 304 and not cached.content
         assert client.get(path.replace(mixed.revision,'stale')).status_code == 409
         assert client.get(path.replace('/2/0/0/0','/2/99/0/0')).status_code == 422
+        for selection in ('2.5/0/0/0', '2/0.5/0/0', '2/0/0.5/0', '2/0/0/0.5'):
+            assert client.get(path.replace('2/0/0/0', selection)).status_code == 422
         ancestor_path = path.replace('/2/0/0/0','/82/0/0/82')
         ancestor = client.get(ancestor_path,headers={'Accept-Encoding':'identity'})
         assert ancestor.status_code == 200

@@ -48,13 +48,6 @@ def _collect(key):
                 shutil.rmtree(directory)
             except FileNotFoundError:
                 pass
-            # Remove the pointer belonging to a pre-deterministic generation.
-            for pointer in directory.parent.glob('*.current.json'):
-                try:
-                    if json.loads(pointer.read_text())['directory'] == directory.name:
-                        pointer.unlink(missing_ok=True)
-                except FileNotFoundError:
-                    pass
             deleted.add(directory)
     finally:
         with _OWNERS:
@@ -80,7 +73,7 @@ def prune(source, cache, keep=None):
         directory = manifest.parent
         if directory != keep and not directory.name.startswith('building-'):
             try:
-                if json.loads(manifest.read_text()).get('source') == str(source):
+                if json.loads(manifest.read_text())['source'] == str(source):
                     directories.append(directory)
             except FileNotFoundError:
                 pass  # Another publisher has already removed this generation.

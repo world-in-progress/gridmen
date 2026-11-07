@@ -196,11 +196,9 @@ def test_new_generation_cleans_legacy_versions_only_for_its_source(tmp_path):
         old.mkdir(parents=True)
         (old/'manifest.json').write_text(json.dumps({'version':display.VERSION-1,'source':str(owner)}))
         (old/'identity.json').write_text('{}')
-    pointer = directory/'old-key.current.json'
-    pointer.write_text(json.dumps({'version':display.VERSION-1,'directory':'old-version'}))
     index = display.GridDisplayIndex(source,directory)
     try:
-        assert not (directory/'old-version').exists() and not pointer.exists()
+        assert not (directory/'old-version').exists()
         assert (directory/'other-source').exists()
     finally:
         index.close()
@@ -534,7 +532,6 @@ def test_two_processes_publish_the_same_deterministic_key(tmp_path):
     legacy = directory/'previous-version'
     legacy.mkdir(parents=True)
     (legacy/'manifest.json').write_text(json.dumps({'source':str(source),'version':display.VERSION-1}))
-    (directory/'previous-key.current.json').write_text(json.dumps({'directory':legacy.name}))
     script = '''
 from pathlib import Path
 import os,sys,time

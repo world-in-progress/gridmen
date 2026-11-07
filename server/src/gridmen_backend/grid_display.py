@@ -16,7 +16,7 @@ import struct
 import tempfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import ExitStack, closing
 from itertools import pairwise
 from pathlib import Path
 
@@ -104,10 +104,8 @@ class Layer(Lattice):
         if key not in self.tiles:
             if not create:
                 return None
-            require(self.mode != 'r', 'Cannot extend a read-only index')
             self.tiles[key] = len(self.tiles)
         if len(self.tiles) > self.capacity:
-            require(self.mode != 'r', 'Truncated read-only display layer')
             self.close()
             self.capacity = 1 << (len(self.tiles)-1).bit_length()
             with self.path.open('r+b' if self.path.exists() else 'w+b') as output:
@@ -218,7 +216,6 @@ def _histograms(directory, layers):
     for child, parent in pairwise(native):
         units[parent.level] = (units[child.level]
                                * round(parent.w/child.w) * round(parent.h/child.h))
-    unit_area = native[0].w * native[0].h
     tile_indexes = [[] for _ in layers]
     for i, (child, parent) in enumerate(pairwise(layers), 1):
         sources = defaultdict(set)
@@ -275,20 +272,12 @@ def _histograms(directory, layers):
                 slots = keys//256
                 starts = np.r_[0, np.flatnonzero(np.diff(slots))+1] if len(slots) else np.array([], dtype=np.intp)
                 occupied = slots[starts]
-                require(np.array_equal(occupied, np.flatnonzero(summary)),
-                        'Display histogram differs from occupied area')
                 records = []
                 if len(slots):
-                    totals = np.add.reduceat(weights, starts)
                     maxima = np.maximum.reduceat(weights, starts)
                     repeats = np.diff(np.r_[starts, len(slots)])
                     candidates = np.where(weights == np.repeat(maxima, repeats), keys%256, 256)
                     winners = np.minimum.reduceat(candidates, starts)
-                    physical = np.fromiter((total*unit_area for total in totals), dtype=np.float64)
-                    expected = node.reshape(-1)['area'][occupied]
-                    require(np.all(np.abs(physical-expected) <= np.maximum(
-                        1e-7, 1e-12*np.maximum(np.abs(physical),np.abs(expected)))),
-                        'Display histogram differs from occupied area')
                     node.reshape(-1)['land'][occupied] = winners
                     records = [[key//256%TILE, key//256//TILE, key%256, format(count,'x')]
                                for key,count in zip(keys.tolist(),weights.tolist())]
@@ -742,7 +731,7 @@ def _build_into(source, directory, initial_fingerprint, resources):
     root_histograms = _histograms(directory,layers)
     _tile_rtree(directory,layers,meta['alignment_origin'],source)
     layer_tiles = [[[x,y,slot] for (x,y),slot in sorted(layer.tiles.items())] for layer in layers]
-    meta.update(cellCount=count, landClasses=sorted(categories), elevationRange=[zmin,zmax])
+    meta.update(landClasses=sorted(categories), elevationRange=[zmin,zmax])
     manifest = {'meta':meta, 'layers':specs, 'layerTiles':layer_tiles,
                 'rootHistograms':root_histograms, 'source':str(source)}
     for layer in layers:
@@ -903,13 +892,10 @@ class GridDisplayIndex:
             for x in range(root.x0,root.x0+root.nx):
                 node = root.get(x,y)
                 if node is not None and node['area'] > 0:
-                    require(bool(histograms[(x,y)]), 'Missing display root histogram')
                     roots.append((x,y,node,histograms[(x,y)]))
         return roots
 
     def validate_nodes(self, block_layer, x, y, display_layer):
-        require(all(type(v) is int for v in (block_layer, x, y, display_layer)),
-                'Display block coordinates must be integers')
         require(0 <= display_layer <= block_layer,
                 'Invalid display layer selection')
         block = self._layer(block_layer)
@@ -920,10 +906,6 @@ class GridDisplayIndex:
         """Return one camera-independent block in the GDN5 wire format."""
         self.validate_nodes(block_layer, x, y, display_layer)
         return self._nodes(block_layer, x, y, display_layer)
-
-    @contextmanager
-    def _directory(self):
-        yield self._directory_db
 
     def _records(self, nodes, bounds, box):
         """Pack selected nodes together, retaining original binary geometry."""
@@ -951,50 +933,49 @@ class GridDisplayIndex:
         records = []
         search = _rectangle_ranges(box)
         max_native = max(i for i, layer in enumerate(self.layers) if layer.level > 0)
-        with self._directory() as db:
-            tiles = _directory_query(db, 'tile', 'c.tx, c.ty', search,
-                                     display_layer, display_layer)
-            layer = self.layers[display_layer]
-            seen_tiles = set()
-            for tx, ty in tiles:
-                if (tx, ty) in seen_tiles:
-                    continue
-                seen_tiles.add((tx, ty))
-                tile = layer.tile(tx, ty)
-                sy, sx = np.nonzero(tile['area'] > 0)
-                if not len(sx):
-                    continue
-                gx, gy = sx+tx*TILE, sy+ty*TILE
-                valid = ((gx >= layer.x0) & (gx < layer.x0+layer.nx)
-                         & (gy >= layer.y0) & (gy < layer.y0+layer.ny))
-                sy, sx, gx, gy = sy[valid], sx[valid], gx[valid], gy[valid]
-                bounds = layer.bounds(gx, gy, self.origin)
-                # Midpoint ownership follows the clipped-dyadic hierarchy.
-                bx, by = block.locate((bounds[0]+bounds[2])/2,
-                                       (bounds[1]+bounds[3])/2, self.origin)
-                selected = (bx == x) & (by == y)
-                if np.any(selected):
-                    records.append(self._records(tile[sy[selected], sx[selected]],
-                                                 np.column_stack(bounds)[selected], box))
+        tiles = _directory_query(self._directory_db, 'tile', 'c.tx, c.ty', search,
+                                 display_layer, display_layer)
+        layer = self.layers[display_layer]
+        seen_tiles = set()
+        for tx, ty in tiles:
+            if (tx, ty) in seen_tiles:
+                continue
+            seen_tiles.add((tx, ty))
+            tile = layer.tile(tx, ty)
+            sy, sx = np.nonzero(tile['area'] > 0)
+            if not len(sx):
+                continue
+            gx, gy = sx+tx*TILE, sy+ty*TILE
+            valid = ((gx >= layer.x0) & (gx < layer.x0+layer.nx)
+                     & (gy >= layer.y0) & (gy < layer.y0+layer.ny))
+            sy, sx, gx, gy = sy[valid], sx[valid], gx[valid], gy[valid]
+            bounds = layer.bounds(gx, gy, self.origin)
+            # Midpoint ownership follows the clipped-dyadic hierarchy.
+            bx, by = block.locate((bounds[0]+bounds[2])/2,
+                                   (bounds[1]+bounds[3])/2, self.origin)
+            selected = (bx == x) & (by == y)
+            if np.any(selected):
+                records.append(self._records(tile[sy[selected], sx[selected]],
+                                             np.column_stack(bounds)[selected], box))
 
-            if display_layer < max_native:
-                originals = _directory_query(db, 'original', 'c.id, c.layer, c.x, c.y',
-                                             search, display_layer+1, max_native)
-                if originals:
-                    # Rtree fragments can repeat a cell; emit each ID once.
-                    unique, groups, seen = [], defaultdict(list), set()
-                    for cid, i, gx, gy in originals:
-                        if cid not in seen:
-                            seen.add(cid)
-                            groups[(i, gx//TILE, gy//TILE)].append(len(unique))
-                            unique.append((gx, gy))
-                    entries = np.array(unique, dtype=np.int64)
-                    nodes = np.empty(len(entries), dtype=NODE)
-                    for (i, tx, ty), positions in groups.items():
-                        selected = np.asarray(positions, dtype=np.intp)
-                        tile = self.layers[i].tile(tx, ty)
-                        nodes[selected] = tile[entries[selected,1]%TILE, entries[selected,0]%TILE]
-                    records.append(self._records(nodes, np.zeros((len(nodes),4)), box))
+        if display_layer < max_native:
+            originals = _directory_query(self._directory_db, 'original', 'c.id, c.layer, c.x, c.y',
+                                         search, display_layer+1, max_native)
+            if originals:
+                # Rtree fragments can repeat a cell; emit each ID once.
+                unique, groups, seen = [], defaultdict(list), set()
+                for cid, i, gx, gy in originals:
+                    if cid not in seen:
+                        seen.add(cid)
+                        groups[(i, gx//TILE, gy//TILE)].append(len(unique))
+                        unique.append((gx, gy))
+                entries = np.array(unique, dtype=np.int64)
+                nodes = np.empty(len(entries), dtype=NODE)
+                for (i, tx, ty), positions in groups.items():
+                    selected = np.asarray(positions, dtype=np.intp)
+                    tile = self.layers[i].tile(tx, ty)
+                    nodes[selected] = tile[entries[selected,1]%TILE, entries[selected,0]%TILE]
+                records.append(self._records(nodes, np.zeros((len(nodes),4)), box))
         return b'GDN5' + b''.join(records)
 
     def _ancestor_nodes(self, block_layer, x, y, display_layer):

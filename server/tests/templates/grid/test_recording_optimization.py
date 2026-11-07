@@ -90,6 +90,7 @@ def test_topology_replace_failure_keeps_existing_file(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == [path]
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX umask permissions')
 @pytest.mark.parametrize('mask,expected', [('022', '0644'), ('027', '0640')])
 @pytest.mark.parametrize('kind', ['cell', 'edge'])
 @pytest.mark.parametrize('existing', [False, True])
