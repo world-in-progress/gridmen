@@ -71,7 +71,8 @@ try {
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   chrome = spawn(await findChrome(), [
-    ...(hardware ? ['--use-angle=metal'] : ['--headless=new', '--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader']),
+    '--headless=new',
+    ...(hardware ? ['--use-angle=metal'] : ['--use-angle=swiftshader-webgl', '--enable-unsafe-swiftshader']),
     '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     '--disable-extensions', '--disable-sync', '--disable-gpu-sandbox',
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
