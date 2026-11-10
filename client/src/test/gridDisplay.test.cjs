@@ -24,12 +24,25 @@ function load(file, dependencies = {}, globals = {}) {
     return module.exports
 }
 const translations = load('i18n/gridDisplay.ts')
-const appI18n = load('i18n/index.ts', { './gridDisplay': translations }).default
+const creationTranslations = load('i18n/gridCreation.ts')
+const appI18n = load('i18n/index.ts', { './gridDisplay': translations, './gridCreation': creationTranslations }).default
 const i18n = { ...translations, useGridDisplayTranslation: () => ({ t: appI18n.getFixedT(null, 'gridDisplay') }) }
 function inLanguage(language) {
     void appI18n.changeLanguage(language)
     return i18n
 }
+
+test('shared i18n instance registers the grid creation namespace in both languages', () => {
+    const resources = creationTranslations.gridCreationResources
+    assert.deepEqual(Object.keys(resources.en).sort(), Object.keys(resources.zh).sort())
+    for (const language of ['en', 'zh']) {
+        for (const key of Object.keys(resources[language])) {
+            assert.equal(appI18n.exists(`gridCreation:${key}`, { lng: language }), true)
+        }
+    }
+    assert.equal(appI18n.t('gridCreation:preserveLulc', { lng: 'en' }), 'Preserve LULC')
+    assert.equal(appI18n.t('gridCreation:preserveLulc', { lng: 'zh' }), '保留 LULC')
+})
 
 // These boundary values test UI wiring; this does not substitute for engine integration.
 const colorContract = {

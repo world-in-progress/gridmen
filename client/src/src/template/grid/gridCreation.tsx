@@ -26,6 +26,8 @@ import { addMapPatchBounds, clearMapPatchBounds, cn, convertBoundsCoordinates } 
 import { Fullscreen, GripVertical, MapPin, RotateCcw, Square, SquaresUnite, Upload, X } from 'lucide-react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import store from "@/store/store"
+import { useGridCreationTranslation } from '@/i18n/gridCreation'
+import { parsePreservedLulcClasses } from './preservedLulc'
 
 interface GridCreationProps {
     node: IResourceNode
@@ -68,6 +70,9 @@ interface SelectedVectorItem {
 
     lumEnabled: boolean
     lumValue: number | null
+    preserveLumEnabled: boolean
+    preserveLumInput: string
+    preserveLumClasses: number[] | null
 }
 
 interface PageContext {
@@ -120,6 +125,7 @@ const getAllPatches = (patchMap: Map<string, PatchMapInfo[]>): PatchMapInfo[] =>
 }
 
 export default function GridCreation({ node, context }: GridCreationProps) {
+    const { t } = useGridCreationTranslation()
     const mapContext = context as MapViewContext
     const map = mapContext.map!
 
@@ -517,6 +523,9 @@ export default function GridCreation({ node, context }: GridCreationProps) {
 
             lumEnabled: false,
             lumValue: null,
+            preserveLumEnabled: false,
+            preserveLumInput: '',
+            preserveLumClasses: null,
         })
 
         triggerRepaint()
@@ -594,6 +603,15 @@ export default function GridCreation({ node, context }: GridCreationProps) {
             toast.error(`Please enter a valid value for ${invalid.nodeInfo.split(".").pop()}`)
             return
         }
+        for (const item of pageContext.current.selectedVectors) {
+            if (item.preserveLumEnabled) {
+                item.preserveLumClasses = parsePreservedLulcClasses(item.preserveLumInput)
+                if (item.preserveLumClasses === null) {
+                    toast.error(t('preserveLulcInvalid', { name: item.nodeInfo.split('.').pop() }))
+                    return
+                }
+            }
+        }
         if (pageContext.current.baseGridNodeInfo) {
             setAssemblyDialogOpen(true)
             return
@@ -625,6 +643,9 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                     type: "set",
                     value: v.lumValue,
                 }
+            }
+            if (v.preserveLumEnabled) {
+                item.preserve_lum = v.preserveLumClasses
             }
 
             return item
@@ -1150,6 +1171,35 @@ export default function GridCreation({ node, context }: GridCreationProps) {
                                                                         />
                                                                     </div>
                                                                 </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 bg-slate-50 rounded-sm p-2 border border-slate-200" title={t('preserveLulcTip')}>
+                                                                <label className="flex items-center gap-2 shrink-0 text-sm text-slate-800">
+                                                                    <Checkbox
+                                                                        className="cursor-pointer"
+                                                                        checked={item.preserveLumEnabled}
+                                                                        onCheckedChange={(checked) => {
+                                                                            item.preserveLumEnabled = Boolean(checked)
+                                                                            if (!item.preserveLumEnabled) {
+                                                                                item.preserveLumInput = ''
+                                                                                item.preserveLumClasses = null
+                                                                            }
+                                                                            triggerRepaint()
+                                                                        }}
+                                                                    />
+                                                                    {t('preserveLulc')}
+                                                                </label>
+                                                                <Input
+                                                                    value={item.preserveLumInput}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    onChange={(e) => {
+                                                                        item.preserveLumInput = e.target.value
+                                                                        triggerRepaint()
+                                                                    }}
+                                                                    disabled={!item.preserveLumEnabled}
+                                                                    aria-label={t('preserveLulc')}
+                                                                    placeholder={t('preserveLulcPlaceholder')}
+                                                                    className="min-w-0 w-full h-6 rounded-sm text-base text-black border-slate-300 focus:border-purple-400"
+                                                                />
                                                             </div>
                                                         </div>
                                                     </div>

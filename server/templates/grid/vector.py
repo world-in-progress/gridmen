@@ -10,6 +10,7 @@ Selection rule (which cells and edges an intervention acts on):
   - LineString / MultiLineString: cells and edges the line passes through or touches.
   - Point / MultiPoint: cells and edges that contain the point.
 Interventions apply in list order; a later one overrides an earlier one where they overlap.
+preserve_lum excludes selected cells and edges by their own current LULC class before any operation.
 set/add/subtract use the supplied value; max flattens the selection to its highest
 current cell elevation. crest is line-only and only raises cells: each selected
 cell takes the maximum of its current elevation (after preceding interventions),
@@ -121,6 +122,7 @@ class Intervention:
     points: np.ndarray                         # (k, 2)
     dem: tuple[str, float | None] | None       # (op, value); max ignores value, crest has an optional minimum
     lum: int | None                            # LULC class to set
+    preserve_lum: list[int] | None             # Current LULC classes to leave unchanged
 
 
 def load_interventions(raw: list) -> list[Intervention]:
@@ -156,6 +158,14 @@ def _load_intervention(item: dict, position: int) -> Intervention:
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not float(value).is_integer() or not 0 <= value <= 255:
             raise ValueError(f'{where} ({node_key}): LULC class must be an integer in 0-255, got {value!r}')
         lum = int(value)
+
+    preserve_lum = item.get('preserve_lum')
+    if preserve_lum is not None:
+        if (not isinstance(preserve_lum, list) or not preserve_lum
+                or any(not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 255
+                       for value in preserve_lum)
+                or len(set(preserve_lum)) != len(preserve_lum)):
+            raise ValueError(f'{where} ({node_key}): preserve_lum must be a nonempty array of unique integers in 0-255')
 
     if dem is None and lum is None:
         raise ValueError(f'{where} ({node_key}): the intervention sets neither DEM nor LULC')
@@ -200,6 +210,7 @@ def _load_intervention(item: dict, position: int) -> Intervention:
         points=np.asarray(points, dtype=np.float64).reshape(-1, 2),
         dem=dem,
         lum=lum,
+        preserve_lum=preserve_lum,
     )
 
 
@@ -286,6 +297,15 @@ def _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_siz
                     cell_sel[cell_boxes.hit_segment(px, py, px, py)] = True
                     edge_sel[edge_boxes.hit_segment(px, py, px, py)] = True
 
+            preserved_cells = preserved_edges = 0
+            if item.preserve_lum is not None:
+                preserved_cell_sel = cell_sel & np.isin(grid.cell_type, item.preserve_lum)
+                preserved_edge_sel = edge_sel & np.isin(grid.edge_type, item.preserve_lum)
+                preserved_cells = int(preserved_cell_sel.sum())
+                preserved_edges = int(preserved_edge_sel.sum())
+                cell_sel &= ~preserved_cell_sel
+                edge_sel &= ~preserved_edge_sel
+
             if item.dem is not None:
                 op, value = item.dem
                 if op == 'crest':
@@ -324,6 +344,9 @@ def _apply_interventions(grid, interventions, grid_crs, dem_src, finest_cell_siz
                 'node_key': item.node_key,
                 'dem': None if item.dem is None else {'type': item.dem[0], 'value': item.dem[1]},
                 'lum': item.lum,
+                'preserve_lum': item.preserve_lum,
+                'preserved_cells': preserved_cells,
+                'preserved_edges': preserved_edges,
                 'cells': int(cell_sel.sum()),
                 'edges': int(edge_sel.sum()),
             })

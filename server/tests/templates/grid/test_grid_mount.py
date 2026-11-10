@@ -150,6 +150,77 @@ def test_interventions_apply_in_order_and_max_flattens_to_highest_cell(tmp_path)
     assert set(grid.edge_z.tolist()) == {2.0}
 
 
+@pytest.mark.parametrize('op, expected_z, expected_edges', [
+    ('set', [5, 2], [5, 5, 5, 5, 2.5, 2.25, 2]),
+    ('add', [6, 2], [6.5, 6.75, 6.25, 6, 2.5, 2.25, 2]),
+    ('subtract', [-4, 2], [-3.5, -3.25, -3.75, -4, 2.5, 2.25, 2]),
+])
+def test_polygon_preserves_lulc_classes_before_all_operations(tmp_path, op, expected_z, expected_edges):
+    key = _write_vector(tmp_path, 'area', _square(-1, -1, 9, 5))
+    grid, stats = _apply(tmp_path, [{
+        'node_key': key, 'dem': {'type': op, 'value': 5},
+        'lum': {'type': 'set', 'value': 9}, 'preserve_lum': [4],
+    }])
+    assert grid.cell_z.tolist() == expected_z
+    assert grid.edge_z.tolist() == expected_edges
+    assert grid.cell_type.tolist() == [9, 4]
+    assert grid.edge_type.tolist() == [9, 9, 9, 9, 4, 4, 4]
+    assert stats == [{
+        'node_key': key, 'dem': {'type': op, 'value': 5.0}, 'lum': 9,
+        'preserve_lum': [4], 'preserved_cells': 1, 'preserved_edges': 3,
+        'cells': 1, 'edges': 4,
+    }]
+
+
+def test_preserve_lulc_uses_current_classes_in_intervention_order(tmp_path):
+    left = _write_vector(tmp_path, 'left', _square(-1, -1, 3, 5))
+    area = _write_vector(tmp_path, 'area', _square(-1, -1, 9, 5))
+    change = {'node_key': left, 'lum': {'type': 'set', 'value': 9}}
+    preserve = {'node_key': area, 'dem': {'type': 'set', 'value': 8},
+                'lum': {'type': 'set', 'value': 7}, 'preserve_lum': [3, 4]}
+    grid, stats = _apply(tmp_path, [change, preserve])
+    assert grid.cell_z.tolist() == [8, 2]
+    assert grid.cell_type.tolist() == [7, 4]
+    assert grid.edge_z.tolist() == [8, 1.75, 8, 8, 2.5, 2.25, 2]
+    assert grid.edge_type.tolist() == [7, 3, 7, 7, 4, 4, 4]
+    assert (stats[1]['preserved_cells'], stats[1]['preserved_edges']) == (1, 4)
+    reversed_grid, _ = _apply(tmp_path, [preserve, change])
+    assert reversed_grid.cell_z.tolist() == [1, 2]
+    assert reversed_grid.cell_type.tolist() == [9, 4]
+
+
+def test_max_uses_only_remaining_cells(tmp_path):
+    area = _write_vector(tmp_path, 'area', _square(-1, -1, 9, 5))
+    grid, stats = _apply(tmp_path, [{
+        'node_key': area, 'dem': {'type': 'max'}, 'preserve_lum': [4],
+    }])
+    assert grid.cell_z.tolist() == [1, 2]
+    assert grid.edge_z.tolist() == [1, 1, 1, 1, 2.5, 2.25, 2]
+    assert (stats[0]['cells'], stats[0]['edges']) == (1, 4)
+
+
+@pytest.mark.parametrize('value', [[], 8, '8', {}, [1.5], [8.0], ['8'], [True], [False], [-1], [256], [8, 8], [[]]])
+def test_preserve_lulc_rejects_invalid_lists(tmp_path, value):
+    with pytest.raises(ValueError, match=r'vector\[0\] \(\.v\.area\): preserve_lum must be a nonempty array of unique integers in 0-255'):
+        vector.load_interventions([{
+            'node_key': '.v.area', 'dem': {'type': 'set', 'value': 1}, 'preserve_lum': value,
+        }])
+
+
+def test_absent_and_null_preserve_lulc_have_identical_results(tmp_path):
+    key = _write_vector(tmp_path, 'area', _square(-1, -1, 9, 5))
+    item = {'node_key': key, 'dem': {'type': 'add', 'value': 0.125}, 'lum': {'type': 'set', 'value': 8}}
+    grid, stats = _apply(tmp_path, [item])
+    null_grid, null_stats = _apply(tmp_path, [{**item, 'preserve_lum': None}])
+    for name in ('cell_z', 'edge_z', 'cell_type', 'edge_type'):
+        assert getattr(grid, name).tobytes() == getattr(null_grid, name).tobytes()
+    assert stats == null_stats == [{
+        'node_key': key, 'dem': {'type': 'add', 'value': 0.125}, 'lum': 8,
+        'preserve_lum': None, 'preserved_cells': 0, 'preserved_edges': 0, 'cells': 2, 'edges': 7,
+    }]
+    assert vector.load_interventions([{**item, 'preserve_lum': [0, 255]}])[0].preserve_lum == [0, 255]
+
+
 @pytest.mark.parametrize("item, message", [
     ({"node_key": ".v.pond", "dem": {"type": "set", "value": None}}, "needs a finite number"),
     ({"node_key": ".v.pond", "dem": {"type": "raise", "value": 1}}, "unknown DEM operation"),
@@ -189,7 +260,10 @@ def test_grid_from_base_grid_reuses_binaries_and_reproduces_scenarios(tmp_path):
     report = json.loads((grids["a"] / "build_report.json").read_text(encoding="utf-8"))
     assert report["base"] == {"base_grid": ".g.base"}
     assert (report["cells"], report["edges"]) == (2, 7)
-    assert report["interventions"][0]["cells"] == 1
+    assert report["interventions"] == [{
+        'node_key': pond, 'dem': {'type': 'subtract', 'value': 5.0}, 'lum': None,
+        'preserve_lum': None, 'preserved_cells': 0, 'preserved_edges': 0, 'cells': 1, 'edges': 3,
+    }]
     assert {"MOUNT", "grid.base", "grid.interventions"} <= {s["stage"] for s in report["stages"]}
 
 
@@ -237,6 +311,29 @@ def _run_crest(tmp_path, item, dem_path, *, finest=4):
         dem_path=dem_path, finest_cell_size=finest,
     )
     return grid, stats
+
+
+@pytest.mark.parametrize('classes, expected_cells, expected_edges, counts', [
+    ([4], [7, 20], [7, 7, 1.25, 1, 2.5, 2.25, 2], (1, 1)),
+    ([3], [1, 20], [1.5, 1.75, 1.25, 1, 20, 2.25, 2], (1, 2)),
+    ([3, 4], [1, 20], [1.5, 1.75, 1.25, 1, 2.5, 2.25, 2], (2, 3)),
+])
+def test_crest_uses_only_remaining_cells_and_adjacent_cells(tmp_path, classes, expected_cells, expected_edges, counts):
+    cells = [CELLS[0], (CELLS[1][0], 20, 4, CELLS[1][3])]
+    _write_base_grid(tmp_path / 'grid', cells=cells)
+    item = _crest_intervention(tmp_path, [[0, 1], [8, 1]])
+    item['preserve_lum'] = classes
+    item['lum'] = {'type': 'set', 'value': 9}
+    grid, stats = _run_crest(tmp_path, item, _crest_dem(tmp_path))
+    assert grid.cell_z.tolist() == expected_cells
+    assert grid.edge_z.tolist() == expected_edges
+    assert grid.cell_type.tolist() == [3 if 3 in classes else 9, 4 if 4 in classes else 9]
+    assert grid.edge_type.tolist() == [
+        3 if 3 in classes else 9, 3 if 3 in classes else 9, 3, 3,
+        4 if 4 in classes else 9, 4, 4,
+    ]
+    assert (stats[0]['preserved_cells'], stats[0]['preserved_edges']) == counts
+    assert (stats[0]['cells'], stats[0]['edges']) == (2 - counts[0], 3 - counts[1])
 
 
 @pytest.mark.parametrize('dem, expected_cells, expected_crossed', [

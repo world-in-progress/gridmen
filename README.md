@@ -114,6 +114,21 @@ Crossed or touched edges retain at least their previous elevation and the highes
 
 An intervention can also `set` LULC for the selected cells and edges, with or without an elevation operation. The code field `lum` denotes LULC. Every grid computes its solver input afresh from base attributes and its ordered interventions; exporting does not modify the base binaries or compound a previous scenario's edits.
 
+An intervention may specify `preserve_lum`, a nonempty JSON array of unique integer LULC classes from 0 to 255 (booleans are invalid); omitting it or using `null` preserves no class. After geometry selection, cells and edges whose current LULC class is listed are removed from the selection, leaving both their elevation and LULC unchanged. Each cell and each edge is checked against its own class. Current classes include changes made by preceding interventions, so preservation depends on intervention order. All elevation operations and LULC `set` use the remaining selection: `max` takes the highest remaining cell elevation; `crest` raises only remaining cells, and remaining edges refer only to remaining adjacent cells. For example:
+
+```json
+{
+  "vector": [
+    {
+      "node_key": ".vectors.area",
+      "dem": { "type": "add", "value": 1 },
+      "lum": { "type": "set", "value": 5 },
+      "preserve_lum": [8]
+    }
+  ]
+}
+```
+
 Base sampling reads band 1. A cell takes the mean elevation and the majority LULC class (ties go to the smaller class value) of the valid pixels whose centres fall in its footprint; a cell holding at most one pixel centre reads that pixel, or the pixel at its centre. An edge reads the pixel at its midpoint. Without a valid pixel, the elevation becomes `-9999` and the LULC class `0`.
 
 ## Export files
