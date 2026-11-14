@@ -15,10 +15,12 @@ from typing import Callable
 # from crms.patch import Patch
 from icrms.ipatch import IPatch
 from functools import partial
+from contextlib import contextmanager
 from rasterio.transform import rowcol
-from pyproj import Transformer
+from pyproj import CRS
+from uuid import uuid4
 
-from ._timing import timed, timing_logger, log_debug
+from ._timing import timed, timing_logger, log_debug, record_value
 
 # --- Define Constants and Enums locally or import if shared ---
 EDGE_CODE_INVALID = -1
@@ -829,76 +831,184 @@ def _generate_cell_record_from_geometry(
         *north,
     )
 
-def _sample_raster_values(src, points: list[tuple[float, float]], src_crs: str = "EPSG:4326") -> list[float | None]:
-    if not points:
-        return []
+def _validate_raster(path, grid_crs):
+    if not path or not os.path.exists(path):
+        return
+    with rasterio.open(path) as src:
+        transform = src.transform
+        raster_crs = CRS.from_user_input(src.crs) if src.crs is not None else None
+        raster_epsg = src.crs.to_epsg() if src.crs is not None else None
+        if raster_epsg is None and raster_crs is not None:
+            authority = raster_crs.to_json_dict().get('id', {})
+            if authority.get('authority') == 'EPSG':
+                raster_epsg = int(authority['code'])
+        grid_epsg = grid_crs.to_epsg()
+        same_crs = raster_crs is not None and (
+            (raster_epsg is not None and raster_epsg == grid_epsg)
+            or raster_crs.equals(grid_crs, ignore_axis_order=True)
+        )
+        if (not same_crs
+                or transform.a <= 0 or transform.e >= 0
+                or transform.b != 0 or transform.d != 0):
+            raise ValueError(
+                f"Raster {path} must have the schema CRS ({grid_crs.to_string()}) "
+                "and a north-up, unrotated transform; reproject the raster to the schema CRS first."
+            )
 
-    xs = [point[0] for point in points]
-    ys = [point[1] for point in points]
 
-    if src_crs is not None and src.crs is not None:
-        transformer = Transformer.from_crs(src_crs, src.crs, always_xy=True)
-        target_xs, target_ys = transformer.transform(xs, ys)
-    else:
-        target_xs, target_ys = xs, ys
+def _valid_raster_values(data, nodata):
+    valid = ~np.isnan(data)
+    if nodata is not None:
+        valid &= ~(np.isclose(data, nodata) | (data == nodata))
+    return valid
 
-    values: list[float | None] = [None] * len(points)
-    valid_indices: list[int] = []
-    valid_xs: list[float] = []
-    valid_ys: list[float] = []
 
-    for index, (target_x, target_y) in enumerate(zip(target_xs, target_ys)):
-        if (
-            target_x < src.bounds.left
-            or target_x > src.bounds.right
-            or target_y < src.bounds.bottom
-            or target_y > src.bounds.top
-        ):
-            continue
+def _sample_raster_values(src, xs, ys) -> np.ndarray:
+    """Sampling rule: the value of the band-1 pixel containing each point.
 
-        valid_indices.append(index)
-        valid_xs.append(target_x)
-        valid_ys.append(target_y)
-
-    if not valid_indices:
+    Returns float64 values, NaN where the point is outside the raster or the pixel is NaN / NoData.
+    Each raster block touched by the points is read once.
+    """
+    xs = np.asarray(xs, dtype=np.float64)
+    ys = np.asarray(ys, dtype=np.float64)
+    values = np.full(xs.shape[0], np.nan)
+    if xs.size == 0:
         return values
 
-    rows, cols = rowcol(src.transform, valid_xs, valid_ys)
+    bounds = src.bounds
+    inside = np.flatnonzero((xs >= bounds.left) & (xs <= bounds.right) & (ys >= bounds.bottom) & (ys <= bounds.top))
+    if inside.size == 0:
+        return values
+
+    rows, cols = rowcol(src.transform, xs[inside], ys[inside])
+    rows = np.asarray(rows, dtype=np.int64)
+    cols = np.asarray(cols, dtype=np.int64)
     block_height, block_width = src.block_shapes[0] if getattr(src, "block_shapes", None) else (1, 1)
     src_height = getattr(src, "height", 0)
     src_width = getattr(src, "width", 0)
-    blocks: dict[tuple[int, int], tuple[np.ndarray, int, int]] = {}
+    in_range = np.ones(rows.size, dtype=bool)
+    if src_height > 0:
+        in_range &= (rows >= 0) & (rows < src_height)
+    if src_width > 0:
+        in_range &= (cols >= 0) & (cols < src_width)
+    inside, rows, cols = inside[in_range], rows[in_range], cols[in_range]
+    if inside.size == 0:
+        return values
 
-    for value_index, row, col in zip(valid_indices, rows, cols):
-        row = int(row)
-        col = int(col)
-        block_row = (row // block_height) * block_height
-        block_col = (col // block_width) * block_width
-        block_key = (block_row, block_col)
+    block_rows = rows // block_height
+    block_cols = cols // block_width
+    order = np.lexsort((block_cols, block_rows))
+    keys = np.stack([block_rows[order], block_cols[order]], axis=1)
+    starts = np.flatnonzero(np.r_[True, np.any(keys[1:] != keys[:-1], axis=1)])
+    ends = np.r_[starts[1:], order.size]
 
-        if block_key not in blocks:
-            window_height = block_height if src_height <= 0 else min(block_height, src_height - block_row)
-            window_width = block_width if src_width <= 0 else min(block_width, src_width - block_col)
-            window = rasterio.windows.Window(block_col, block_row, window_width, window_height)
-            blocks[block_key] = (src.read(1, window=window), block_row, block_col)
+    sampled = np.empty(inside.size, dtype=np.float64)
+    for start, end in zip(starts, ends):
+        group = order[start:end]
+        block_row = int(block_rows[group[0]]) * block_height
+        block_col = int(block_cols[group[0]]) * block_width
+        window_height = block_height if src_height <= 0 else min(block_height, src_height - block_row)
+        window_width = block_width if src_width <= 0 else min(block_width, src_width - block_col)
+        window = rasterio.windows.Window(block_col, block_row, window_width, window_height)
+        data = src.read(1, window=window)
+        sampled[group] = data[rows[group] - block_row, cols[group] - block_col]
 
-        data, origin_row, origin_col = blocks[block_key]
-        val = data[row - origin_row, col - origin_col]
-
-        if np.issubdtype(data.dtype, np.floating) and np.isnan(val):
-            continue
-
-        if src.nodata is not None and (np.isclose(val, src.nodata) or val == src.nodata):
-            continue
-
-        values[value_index] = float(val)
-
+    sampled[~_valid_raster_values(sampled, src.nodata)] = np.nan
+    values[inside] = sampled
     return values
 
 
-def _get_raster_value(src, x: float, y: float, src_crs: str = "EPSG:4326") -> float | None:
-    values = _sample_raster_values(src, [(x, y)], src_crs=src_crs)
-    return values[0] if values else None
+def _sample_cell_raster_values(src, bounds, *, categorical=False) -> np.ndarray:
+    """Aggregate pixel centres in [x_min, x_max) x [y_min, y_max)."""
+    bounds = np.asarray(bounds, dtype=np.float64).reshape(-1, 4)
+    values = np.full(len(bounds), np.nan)
+    if src is None or len(bounds) == 0:
+        return values
+
+    transform = src.transform
+    x_centres = transform.c + (np.arange(src.width) + 0.5) * transform.a
+    y_centres = transform.f + (src.height - np.arange(src.height) - 0.5) * transform.e
+    c0 = np.searchsorted(x_centres, bounds[:, 0])
+    c1 = np.searchsorted(x_centres, bounds[:, 2])
+    r0 = src.height - np.searchsorted(y_centres, bounds[:, 3])
+    r1 = src.height - np.searchsorted(y_centres, bounds[:, 1])
+    pixel_counts = (c1 - c0) * (r1 - r0)
+
+    points = np.flatnonzero(pixel_counts <= 1)
+    xs = (bounds[points, 0] + bounds[points, 2]) / 2.0
+    ys = (bounds[points, 1] + bounds[points, 3]) / 2.0
+    single = pixel_counts[points] == 1
+    xs[single] = x_centres[c0[points[single]]]
+    ys[single] = transform.f + (r0[points[single]] + 0.5) * transform.e
+    values[points] = _sample_raster_values(src, xs, ys)
+
+    # Windows start at fixed 512-pixel tile origins, so a cell's prefix sums (and its mean,
+    # to the last bit) depend only on its own footprint, not on the other cells in the batch.
+    multiple = np.flatnonzero(pixel_counts > 1)
+    order = np.lexsort((c0[multiple] // 512, r0[multiple] // 512))
+    multiple = multiple[order]
+    keys = np.column_stack((r0[multiple] // 512, c0[multiple] // 512))
+    starts = np.flatnonzero(np.r_[True, np.any(keys[1:] != keys[:-1], axis=1)]) if multiple.size else []
+    for start, end in zip(starts, np.r_[starts[1:], multiple.size]):
+        group = multiple[start:end]
+        top, bottom = int(keys[start, 0]) * 512, int(r1[group].max())
+        left, right = int(keys[start, 1]) * 512, int(c1[group].max())
+        window = rasterio.windows.Window(left, top, right - left, bottom - top)
+        data = src.read(1, window=window).astype(np.float64)
+        valid = _valid_raster_values(data, src.nodata)
+        rows0, rows1 = r0[group] - top, r1[group] - top
+        cols0, cols1 = c0[group] - left, c1[group] - left
+        if categorical:
+            for i, y0, y1, x0, x1 in zip(group, rows0, rows1, cols0, cols1):
+                pixels = data[y0:y1, x0:x1][valid[y0:y1, x0:x1]]
+                if pixels.size:
+                    classes, counts = np.unique(pixels, return_counts=True)
+                    values[i] = classes[counts.argmax()]
+        else:
+            def rectangle_sums(array):
+                integral = np.zeros((data.shape[0] + 1, data.shape[1] + 1), dtype=array.dtype)
+                np.cumsum(array, axis=0, out=integral[1:, 1:])
+                np.cumsum(integral[1:, 1:], axis=1, out=integral[1:, 1:])
+                return (integral[rows1, cols1] - integral[rows0, cols1]
+                        - integral[rows1, cols0] + integral[rows0, cols0])
+
+            counts = rectangle_sums(valid.astype(np.int64))
+            sums = rectangle_sums(np.where(valid, data, 0.0))
+            nonempty = counts > 0
+            # A fully flooded cell stores area * (water level - mean elevation).
+            values[group[nonempty]] = sums[nonempty] / counts[nonempty]
+    return values
+
+
+def _sample_altitudes(dem_src, xs, ys) -> np.ndarray:
+    altitudes = np.full(len(xs), -9999.0)
+    if dem_src:
+        values = _sample_raster_values(dem_src, xs, ys)
+        valid = ~np.isnan(values)
+        altitudes[valid] = values[valid]
+    return altitudes
+
+
+def _lum_types_from_values(values, lum_src, xs, ys, element):
+    lum_types = np.zeros(len(xs), dtype=np.int64)
+    if lum_src:
+        valid = np.flatnonzero(~np.isnan(values))
+        raw = values[valid].astype(np.int64)
+        out_of_range = (raw < 0) | (raw > 255)
+        if out_of_range.any():
+            first = valid[np.argmax(out_of_range)]
+            print(f"[WARNING] {int(out_of_range.sum())} {element} lum_type values out of uint8 range "
+                  f"(first raw_val={values[first]} at ({xs[first]:.2f}, {ys[first]:.2f}), "
+                  f"raster_dtype={lum_src.dtypes[0]}, nodata={lum_src.nodata}). Clamping to 0.",
+                  flush=True)
+            raw[out_of_range] = 0
+        lum_types[valid] = raw
+    return lum_types
+
+
+def _sample_lum_types(lum_src, xs, ys, element: str) -> np.ndarray:
+    values = _sample_raster_values(lum_src, xs, ys) if lum_src else np.full(len(xs), np.nan)
+    return _lum_types_from_values(values, lum_src, xs, ys, element)
 
 
 def _make_phase_stats() -> dict[str, float]:
@@ -927,7 +1037,7 @@ def _log_phase_totals(label: str, stats: dict[str, float], *, n_batches: int) ->
 def _batch_cell_records_worker(
     args: tuple[bytes, list[list[set[int]]]], bbox: list[float],
     meta_level_info: list[dict[str, int]], grid_info: list[list[float]],
-    dem_path: str = None, lum_path: str = None, src_crs: str = "EPSG:4326"
+    dem_path: str = None, lum_path: str = None
 ) -> tuple[bytearray, dict[str, float]]:
     cell_data, cell_edges, offset = args
 
@@ -951,39 +1061,18 @@ def _batch_cell_records_worker(
             identities.append((level, global_id))
             geometries.append((min_xs, min_ys, max_xs, max_ys, center_x, center_y))
 
-        altitudes = [-9999.0] * cell_count
+        center_xs = np.array([g[4] for g in geometries], dtype=np.float64)
+        center_ys = np.array([g[5] for g in geometries], dtype=np.float64)
+        bounds = np.array([g[:4] for g in geometries], dtype=np.float64)
+
         dem_started = time.perf_counter()
-        if dem_src:
-            altitude_values = _sample_raster_values(
-                dem_src,
-                [(center_x, center_y) for _, _, _, _, center_x, center_y in geometries],
-                src_crs=src_crs,
-            )
-            for i, val in enumerate(altitude_values):
-                if val is not None:
-                    altitudes[i] = float(val)
+        values = _sample_cell_raster_values(dem_src, bounds)
+        altitudes = np.where(np.isnan(values), -9999.0, values).tolist()
         phase_stats["dem_sample"] = time.perf_counter() - dem_started
 
-        lum_types = [0] * cell_count
         lum_started = time.perf_counter()
-        if lum_src:
-            lum_values = _sample_raster_values(
-                lum_src,
-                [(center_x, center_y) for _, _, _, _, center_x, center_y in geometries],
-                src_crs=src_crs,
-            )
-            for i, val in enumerate(lum_values):
-                if val is not None:
-                    raw_lum = int(val)
-                    center_x = geometries[i][4]
-                    center_y = geometries[i][5]
-                    if not (0 <= raw_lum <= 255):
-                        print(f"[WARNING] Cell lum_type={raw_lum} out of uint8 range at ({center_x:.2f}, {center_y:.2f}), "
-                              f"raw_val={val}, raster_dtype={lum_src.dtypes[0]}, nodata={lum_src.nodata}. Clamping to 0.",
-                              flush=True)
-                        lum_types[i] = 0
-                    else:
-                        lum_types[i] = raw_lum
+        values = _sample_cell_raster_values(lum_src, bounds, categorical=True)
+        lum_types = _lum_types_from_values(values, lum_src, center_xs, center_ys, "cell").tolist()
         phase_stats["lum_sample"] = time.perf_counter() - lum_started
 
         pack_started = time.perf_counter()
@@ -1011,13 +1100,28 @@ def _batch_cell_records_worker(
 
     return records, phase_stats
 
+@contextmanager
+def _topology_output(path):
+    """Keep existing readers on the old file until the replacement is closed."""
+    path = Path(path)
+    temporary = path.with_name(f'.{path.name}-{uuid4().hex}')
+    with temporary.open('xb') as output:
+        try:
+            yield output
+            output.close()
+            temporary.replace(path)
+        finally:
+            output.close()
+            temporary.unlink(missing_ok=True)
+
+
 def _record_cell_topology(
     grid_cache: GridCache,
     meta_bounds: list[float],
     meta_level_info: list[dict[str, int]],
     grid_info: list[list[float]],
     grid_record_path: str,
-    dem_path: str = None, lum_path: str = None, src_crs: str = "EPSG:4326"
+    dem_path: str = None, lum_path: str = None
 ):
     batch_size = 10000
     batch_args = [
@@ -1031,17 +1135,18 @@ def _record_cell_topology(
         grid_info=grid_info,
         dem_path=dem_path,
         lum_path=lum_path,
-        src_crs=src_crs
     )
     
     num_processes = min(os.cpu_count(), len(batch_args))
     phase_totals = _make_phase_stats()
     with timed("record.cell.pool_total", n_batches=len(batch_args), dem=bool(dem_path), lum=bool(lum_path)):
-        with mp.Pool(processes=num_processes) as pool, open(grid_record_path, 'wb') as f:
+        with mp.Pool(processes=num_processes) as pool, _topology_output(grid_record_path) as f:
             for cell_records_chunk, batch_stats in pool.imap(batch_func, batch_args):
                 f.write(cell_records_chunk)
                 _merge_phase_stats(phase_totals, batch_stats)
     _log_phase_totals("record.cell.phase_totals", phase_totals, n_batches=len(batch_args))
+    # Elapsed seconds per phase summed over worker batches; exceeds wall time when workers overlap.
+    record_value("record_cell_worker_seconds_sum", phase_totals)
 
 def _slice_edge_info(
     start_index: int, length: int,
@@ -1120,7 +1225,7 @@ def _generate_edge_record_from_geometry(
     )
     return record
 
-def _batch_edge_records_worker(args: tuple[list[bytes], list[list[int | None]]], bbox: list[float], dem_path: str = None, lum_path: str = None, src_crs: str = "EPSG:4326") -> tuple[bytes, dict[str, float]]:
+def _batch_edge_records_worker(args: tuple[list[bytes], list[list[int | None]]], bbox: list[float], dem_path: str = None, lum_path: str = None) -> tuple[bytes, dict[str, float]]:
     edge_data, edge_cells, offset = args
 
     # Open rasters
@@ -1131,7 +1236,6 @@ def _batch_edge_records_worker(args: tuple[list[bytes], list[list[int | None]]],
     phase_stats = _make_phase_stats()
 
     try:
-        edge_count = len(edge_data)
         geometries: list[tuple[int, float, float, float, float, float, float]] = []
         for edge in edge_data:
             direction, x_min, y_min, x_max, y_max = _get_edge_coordinates(edge, bbox)
@@ -1139,39 +1243,15 @@ def _batch_edge_records_worker(args: tuple[list[bytes], list[list[int | None]]],
             center_y = (y_min + y_max) / 2.0
             geometries.append((direction, x_min, y_min, x_max, y_max, center_x, center_y))
 
-        altitudes = [-9999.0] * edge_count
+        center_xs = np.array([g[5] for g in geometries], dtype=np.float64)
+        center_ys = np.array([g[6] for g in geometries], dtype=np.float64)
+
         dem_started = time.perf_counter()
-        if dem_src:
-            altitude_values = _sample_raster_values(
-                dem_src,
-                [(center_x, center_y) for _, _, _, _, _, center_x, center_y in geometries],
-                src_crs=src_crs,
-            )
-            for i, val in enumerate(altitude_values):
-                if val is not None:
-                    altitudes[i] = float(val)
+        altitudes = _sample_altitudes(dem_src, center_xs, center_ys).tolist()
         phase_stats["dem_sample"] = time.perf_counter() - dem_started
 
-        lum_types = [0] * edge_count
         lum_started = time.perf_counter()
-        if lum_src:
-            lum_values = _sample_raster_values(
-                lum_src,
-                [(center_x, center_y) for _, _, _, _, _, center_x, center_y in geometries],
-                src_crs=src_crs,
-            )
-            for i, val in enumerate(lum_values):
-                if val is not None:
-                    raw_lum = int(val)
-                    center_x = geometries[i][5]
-                    center_y = geometries[i][6]
-                    if not (0 <= raw_lum <= 255):
-                        print(f"[WARNING] Edge lum_type={raw_lum} out of uint8 range at ({center_x:.2f}, {center_y:.2f}), "
-                              f"raw_val={val}, raster_dtype={lum_src.dtypes[0]}, nodata={lum_src.nodata}. Clamping to 0.",
-                              flush=True)
-                        lum_types[i] = 0
-                    else:
-                        lum_types[i] = raw_lum
+        lum_types = _sample_lum_types(lum_src, center_xs, center_ys, "edge").tolist()
         phase_stats["lum_sample"] = time.perf_counter() - lum_started
 
         pack_started = time.perf_counter()
@@ -1201,7 +1281,7 @@ def _record_edge_topology(
     edge_adj_cell_indices: list[list[int | None]],
     meta_bounds: list[float],
     edge_record_path: str,
-    dem_path: str = None, lum_path: str = None, src_crs: str = "EPSG:4326"
+    dem_path: str = None, lum_path: str = None
 ):
     batch_size = 10000
     batch_args = [
@@ -1213,18 +1293,23 @@ def _record_edge_topology(
         bbox=meta_bounds,
         dem_path=dem_path,
         lum_path=lum_path,
-        src_crs=src_crs
     )
     num_processes = min(os.cpu_count(), len(batch_args))
     phase_totals = _make_phase_stats()
     with timed("record.edge.pool_total", n_batches=len(batch_args), dem=bool(dem_path), lum=bool(lum_path)):
-        with mp.Pool(processes=num_processes) as pool, open(edge_record_path, 'wb') as f:
+        with mp.Pool(processes=num_processes) as pool, _topology_output(edge_record_path) as f:
             for edge_records_chunk, batch_stats in pool.imap(batch_func, batch_args):
                 f.write(edge_records_chunk)
                 _merge_phase_stats(phase_totals, batch_stats)
     _log_phase_totals("record.edge.phase_totals", phase_totals, n_batches=len(batch_args))
+    # Elapsed seconds per phase summed over worker batches; exceeds wall time when workers overlap.
+    record_value("record_edge_worker_seconds_sum", phase_totals)
 
 def assembly(resource_dir: str, schema_node_key: str, patch_node_keys: list[str], grading_threshold: int = 1, dem_path: str = None, lum_path: str = None):
+        if not dem_path:
+            raise ValueError("Assembly requires 'dem_path'.")
+        dem_path = str(Path(dem_path).resolve(strict=True))
+
     # Create workspace directory (already done by resource_dir, but for consistency with original arg)
         workspace = resource_dir
 
@@ -1241,6 +1326,9 @@ def assembly(resource_dir: str, schema_node_key: str, patch_node_keys: list[str]
         schema_path = Path(schema_file_path)
         schema = json.load(open(schema_path, 'r', encoding='utf-8'))
         epsg: int = schema['epsg']
+        grid_crs = CRS.from_epsg(epsg)
+        _validate_raster(dem_path, grid_crs)
+        _validate_raster(lum_path, grid_crs)
         grid_info: list[list[float]] = schema['grid_info']
         first_level_resolution: list[float] = grid_info[0]
         alignment_origin: list[float] = schema['alignment_origin']
@@ -1378,7 +1466,6 @@ def assembly(resource_dir: str, schema_node_key: str, patch_node_keys: list[str]
                 str(cell_record_path),
                 dem_path=dem_path,
                 lum_path=lum_path,
-                src_crs=f"EPSG:{epsg}"
             )
 
         # Create edge topology records
@@ -1391,12 +1478,12 @@ def assembly(resource_dir: str, schema_node_key: str, patch_node_keys: list[str]
                 str(edge_record_path),
                 dem_path=dem_path,
                 lum_path=lum_path,
-                src_crs=f"EPSG:{epsg}"
             )
         
         # Create meta json
         meta_info = {
             'epsg': epsg,
+            'dem_path': dem_path,
             'bounds': meta_bounds,
             'grid_info': grid_info,
             'level_info': meta_level_info,

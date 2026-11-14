@@ -1,359 +1,60 @@
-import React, { useEffect, useReducer, useRef, useState } from 'react'
-import { IViewContext } from '@/views/IViewContext'
-import { MapViewContext } from '@/views/mapView/mapView'
-import { IResourceNode } from '../scene/iscene'
-import { ResourceNode } from '../scene/scene'
+import { useEffect, useState } from 'react'
+import { MapPin, SquareMousePointer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, MapPin, SquareMousePointer } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { linkNode } from '../api/node'
-import { PatchMeta } from '../api/types'
-import * as api from '../api/apis'
-import { convertBoundsCoordinates, waitForMapLoad } from '@/utils/utils'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import TopologyLayer from '@/views/mapView/topology/TopologyLayer'
-import { ensureTopologyLayerInitialized, getOrCreatePerPatchTopology } from '@/views/mapView/topology/topologyLayerManager'
-import { layerOrderCoordinator } from '@/views/mapView/layerOrderCoordinator'
-import store from '@/store/store'
-import PatchCore from '@/core/grid/patchCore'
-import { PatchContext } from '@/core/grid/types'
-import { boundingBox2D } from '@/core/util/boundingBox2D'
-import CapacityBar from '@/components/ui/capacityBar'
+import GridDisplayPanel from '@/components/gridDisplay/GridDisplayPanel'
+import { getPatchDisplay } from '@/components/gridDisplay/patchDisplaySession'
+import { errorMessage, useGridDisplayTranslation } from '@/i18n/gridDisplay'
+import type { IViewContext } from '@/views/IViewContext'
+import { MapViewContext } from '@/views/mapView/mapView'
+import type { IResourceNode } from '../scene/iscene'
+import { ResourceNode } from '../scene/scene'
 
-interface PatchCheckProps {
-    node: IResourceNode
-    context: IViewContext
-}
+type Display = Awaited<ReturnType<typeof getPatchDisplay>>
 
-interface PageContext {
-    patch: PatchMeta | null
-    topologyLayer: TopologyLayer | null
-    boundsOn4326: [number, number, number, number] | null
-    perPatchCLGId: string | null
-}
-
-const topologyTips = [
-    { tip: 'Hold Shift to select/deselect grids with Brush or Box.' },
-    { tip: 'Subdivide splits grids; Merge combines.' },
-    { tip: 'Delete removes grids; Recover restores.' },
-    { tip: 'Check mode shows grid details; Ctrl+A selects all.' },
-]
-
-export default function PatchCheck({ node, context }: PatchCheckProps) {
-    const mapContext = context as MapViewContext
-    const map = mapContext.map!
-    const topologyLayerId = `TopologyLayer:${(node as ResourceNode).nodeInfo}`
-
-    const pageContext = useRef<PageContext>({
-        patch: null,
-        topologyLayer: null,
-        boundsOn4326: null,
-        perPatchCLGId: null,
-    })
-
-    const [, triggerRepaint] = useReducer(x => x + 1, 0)
+export default function PatchCheck({ node, context }: { node: IResourceNode; context: IViewContext }) {
+    const { t } = useGridDisplayTranslation()
+    const map = (context as MapViewContext).map!
+    const [display, setDisplay] = useState<Display | null>(null)
+    const [error, setError] = useState<string | null>(null)
+    const [revision, setRevision] = useState(0)
 
     useEffect(() => {
-        loadContext()
+        let active = true
+        setDisplay(null)
+        setError(null)
+        void getPatchDisplay(node as ResourceNode, map, 'r').then(result => {
+            if (!active) return
+            setDisplay(result)
+            map.fitBounds(result.boundsOn4326, { padding: 100, duration: 1000 })
+        }).catch(cause => { if (active) setError(errorMessage(cause)) })
+        return () => { active = false }
+    }, [node, map, revision])
 
-        return () => {
-            unloadContext()
-        }
-    }, [])
-
-    const loadContext = async () => {
-        if (!(node as ResourceNode).lockId) {
-            store.get<{ on: Function, off: Function }>('isLoading')!.on()
-            const linkResponse = await linkNode('gridmen/IPatch/1.0.0', node.nodeInfo, 'r');
-            (node as ResourceNode).lockId = linkResponse.lock_id
-            store.get<{ on: Function, off: Function }>('isLoading')!.off()
-        }
-
-        if ((node as ResourceNode).context !== undefined) {
-            console.log('Restore patch check context from node context')
-            console.log((node as ResourceNode).context)
-            pageContext.current = { ...(node as ResourceNode).context.patch }
-        }
-
-        if ((node as ResourceNode).mountParams === undefined) {
-            const patchInfo = await api.patch.getPatchMeta(node.nodeInfo, (node as ResourceNode).lockId!);
-            (node as ResourceNode).mountParams = patchInfo
-            pageContext.current.patch = patchInfo
-            pageContext.current.boundsOn4326 = await convertBoundsCoordinates(pageContext.current.patch.bounds, pageContext.current.patch.epsg, 4326)
-        } else {
-            pageContext.current.patch = (node as ResourceNode).mountParams
-            pageContext.current.boundsOn4326 = await convertBoundsCoordinates(pageContext.current.patch!.bounds, pageContext.current.patch!.epsg, 4326)
-        }
-
-        await waitForMapLoad(map)
-
-        const gridContext: PatchContext = {
-            nodeInfo: node.nodeInfo,
-            lockId: (node as ResourceNode).lockId!,
-            srcCS: `EPSG:${pageContext.current!.patch!.epsg}`,
-            targetCS: 'EPSG:4326',
-            bBox: boundingBox2D(...pageContext.current!.patch!.bounds as [number, number, number, number]),
-            rules: pageContext.current!.patch!.subdivide_rules
-        }
-
-        const { clgId, topologyLayer: gridLayer } = getOrCreatePerPatchTopology(
-            map, node.nodeInfo, topologyLayerId,
-        )
-        pageContext.current.perPatchCLGId = clgId
-
-        const patchCore: PatchCore = new PatchCore(gridContext)
-        await ensureTopologyLayerInitialized(gridLayer, map)
-
-        gridLayer.patchCore = patchCore
-        pageContext.current.topologyLayer = gridLayer
-
-        layerOrderCoordinator.register(node.nodeInfo, [clgId])
-
-        map.fitBounds(pageContext.current.boundsOn4326!, {
-            padding: 200,
-            duration: 1000,
-        });
-
-        (node as ResourceNode).context = {
-            ...((node as ResourceNode).context ?? {}),
-            __cleanup: {
-                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
-                topology: () => {
-                    const id = pageContext.current.perPatchCLGId
-                    if (id && map.getLayer(id)) map.removeLayer(id)
-                    pageContext.current.perPatchCLGId = null
-                    pageContext.current.topologyLayer = null
-                    layerOrderCoordinator.unregister(node.nodeInfo)
-                },
-            },
-        }
-
-        triggerRepaint()
-    }
-
-    const unloadContext = () => {
-        // NOTE: Do not remove topology layer here.
-        // Layer lifetime is managed by ResourceNode.close() via __cleanup,
-        // so switching between views (Check/Edit) won't accidentally unload the grid
-
-        // console.log(pageContext.current.editingState)
-        // pageContext.current.editingState.select = selectTab
-        // pageContext.current.editingState.pick = pickingTab
-        // pageContext.current.isChecking = checkSwitchOn
-        (node as ResourceNode).context = {
-            ...pageContext.current,
-            topologyLayerId,
-            __cleanup: {
-                ...(((node as ResourceNode).context as any)?.__cleanup ?? {}),
-
-                topology: () => {
-                    const id = pageContext.current.perPatchCLGId
-                    if (id && map.getLayer(id)) map.removeLayer(id)
-                    pageContext.current.perPatchCLGId = null
-                    pageContext.current.topologyLayer = null
-                    layerOrderCoordinator.unregister(node.nodeInfo)
-                },
-            }
-        }
-    }
-
-
-    return (
-        <div className='w-full h-full flex flex-col'>
-            <div className='flex-none w-full border-b border-gray-700 flex flex-col'>
-                {/* ------------*/}
-                {/* Page Avatar */}
-                {/* ------------*/}
-                <div className='w-full flex justify-center items-center gap-4 p-4'>
-                    <Avatar className='h-10 w-10 border-2 border-white'>
-                        <AvatarFallback className='bg-[#007ACC]'>
-                            <SquareMousePointer className='h-6 w-6 text-white' />
-                        </AvatarFallback>
-                    </Avatar>
-                    <h1 className='font-bold text-[25px] relative flex items-center'>
-                        Check Patch Cells
-                        <span className=" bg-[#D63F26] rounded px-0.5 mb-2 text-[12px] inline-flex items-center mx-1">WorkSpace</span>
-                    </h1>
-                </div>
-                {/* -----------------*/}
-                {/* Page Description */}
-                {/* -----------------*/}
-                <div className='w-full p-4 pb-2 space-y-2 -mt-2 text-white'>
-                    {/* ----------*/}
-                    {/* Page Tips */}
-                    {/* ----------*/}
-                    <div className='text-sm px-4'>
-                        <ul className='list-disc space-y-1'>
-                            {topologyTips.map((tip, index) => (
-                                <li key={index}>
-                                    {Object.values(tip)[0]}
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                    <div className='text-sm w-full flex flex-row items-center px-4'>
-                        {/* <CapacityBar gridCore={pageContext.current.patchCore!} /> */}
-                        <Button
-                            className='bg-sky-500 hover:bg-sky-600 h-8 text-white cursor-pointer rounded-sm flex'
-                            onClick={() => {
-                                map.fitBounds(pageContext.current.boundsOn4326!, {
-                                    padding: 200,
-                                    duration: 1000
-                                })
-                            }}
-                        >
-                            <MapPin className='w-4 h-4' />
-                            <span>Navigate</span>
-                        </Button>
-                    </div>
-                </div>
+    return <div className='w-full h-full flex flex-col text-white'>
+        <div className='flex-none border-b border-gray-700 p-4 space-y-3'>
+            <div className='flex justify-center items-center gap-4'>
+                <Avatar className='h-10 w-10 border-2 border-white'><AvatarFallback className='bg-[#007ACC]'><SquareMousePointer className='h-6 w-6 text-white' /></AvatarFallback></Avatar>
+                <h1 className='font-bold text-[25px]'>{t('patchTitle')}</h1>
             </div>
-            <div className='flex-1 overflow-y-auto min-h-0 scrollbar-hide'>
-                <div className='w-4/5 mx-auto p-2'>
-                    <div className='text-sm text-white mt-1 grid gap-1'>
-                        <div>
-                            <span className='font-bold'>Patch Name: </span>
-                            {pageContext.current?.patch?.name}
-                        </div>
-                        <div>
-                            <span className='font-bold'>Schema: </span>
-                            {pageContext.current?.patch?.schema_node_key?.split('.').pop()}
-                        </div>
-                        <div>
-                            <span className='font-bold'>EPSG: </span>
-                            {pageContext.current?.patch?.epsg}
-                        </div>
-                        <div className='flex items-start flex-row gap-0.5'>
-                            <div className={`font-bold w-[35%]`}>Grid Levels(m): </div>
-                            <div className='space-y-1'>
-                                {pageContext.current?.patch?.grid_info && (
-                                    pageContext.current?.patch?.grid_info.map(
-                                        (level: number[], index: number) => {
-                                            const color = pageContext.current.topologyLayer!.paletteColorList ?
-                                                [pageContext.current.topologyLayer!.paletteColorList[(index + 1) * 3], pageContext.current.topologyLayer!.paletteColorList[(index + 1) * 3 + 1], pageContext.current.topologyLayer!.paletteColorList[(index + 1) * 3 + 2]] : null
-                                            const colorStyle = color ? `rgb(${color[0]}, ${color[1]}, ${color[2]})` : undefined
-
-                                            return (
-                                                <div key={index} className='text-sm'
-                                                    style={{ color: colorStyle }}
-                                                >
-                                                    level {index + 1}: [{level.join(', ')}]
-                                                </div>
-                                            )
-                                        }
-                                    )
-                                )}
-                            </div>
-                        </div>
-                        <div className='font-bold'>
-                            <span className='text-white'>BoundingBox:</span>
-                            {/* {bounds ? ( */}
-                            <div className='grid grid-cols-3 gap-1 text-xs text-white mt-4'>
-                                {/* Top Left Corner */}
-                                <div className='relative h-8 flex items-center justify-center'>
-                                    <div className='absolute top-0 left-1/4 w-3/4 h-1/2 border-t border-l border-gray-300 rounded-tl'></div>
-                                </div>
-                                {/* North/Top */}
-                                <div className='text-center'>
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <div className='flex flex-col items-center'>
-                                                    <ArrowUp className='h-4 w-4 text-blue-500' />
-                                                    <span className='font-bold text-blue-500 text-sm mb-1'>N</span>
-                                                </div>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                                <div className='text-[12px] space-y-1'>
-                                                    <p className='font-bold text-blue-500'>North</p>
-                                                    <p>{pageContext.current?.patch?.bounds[3]?.toFixed(6)}</p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
-                                </div>
-                                {/* Top Right Corner */}
-                                <div className='relative h-8 flex items-center justify-center'>
-                                    <div className='absolute top-0 right-1/4 w-3/4 h-1/2 border-t border-r border-gray-300 rounded-tr'></div>
-                                </div>
-                                {/* West/Left */}
-                                <div className='text-center'>
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <div className='flex flex-row items-center justify-center gap-1 mt-2'>
-                                                    <ArrowLeft className='h-4 w-4 text-green-500' />
-                                                    <span className='font-bold text-green-500 text-sm mr-1 mt-1'>W</span>
-                                                </div>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                                <div className='text-[12px]'>
-                                                    <p className='font-bold mb-1 text-green-500'>West</p>
-                                                    <p>{pageContext.current?.patch?.bounds[0]?.toFixed(6)}</p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
-                                </div>
-                                {/* Center */}
-                                <div className='text-center'>
-                                    <span className='font-bold text-[14px] text-orange-500'>Center</span>
-                                    <div className='text-[12px]'>
-                                        <div>{pageContext.current?.patch?.bounds && (((pageContext.current.patch.bounds[0] + pageContext.current.patch.bounds[2]) / 2).toFixed(6))}</div>
-                                        <div>{pageContext.current?.patch?.bounds && (((pageContext.current.patch.bounds[1] + pageContext.current.patch.bounds[3]) / 2).toFixed(6))}</div>
-                                    </div>
-                                </div>
-                                {/* East/Right */}
-                                <div className='text-center'>
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <div className='flex flex-row items-center justify-center gap-1 mt-2'>
-                                                    <span className='font-bold text-red-500 text-sm mt-1 ml-4'>E</span>
-                                                    <ArrowRight className='h-4 w-4 text-red-500' />
-                                                </div>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                                <div className='text-[12px]'>
-                                                    <p className='font-bold mb-1 text-red-500'>East</p>
-                                                    <p>{pageContext.current?.patch?.bounds[2].toFixed(6)}</p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
-                                </div>
-                                {/* Bottom Left Corner */}
-                                <div className='relative h-8 flex items-center justify-center'>
-                                    <div className='absolute bottom-0 left-1/4 w-3/4 h-1/2 border-b border-l border-gray-300 rounded-bl'></div>
-                                </div>
-                                {/* South/Bottom */}
-                                <div className='text-center'>
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <div className='flex flex-col items-center'>
-                                                    <span className='font-bold text-purple-500 text-sm mt-1'>S</span>
-                                                    <ArrowDown className='h-4 w-4 text-purple-500' />
-                                                </div>
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                                <div className='text-[12px]'>
-                                                    <p className='font-bold mb-1 text-purple-500'>South</p>
-                                                    <p>{pageContext.current?.patch?.bounds[1].toFixed(6)}</p>
-                                                </div>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
-                                </div>
-                                {/* Bottom Right Corner */}
-                                <div className='relative h-8 flex items-center justify-center'>
-                                    <div className='absolute bottom-0 right-1/4 w-3/4 h-1/2 border-b border-r border-gray-300 rounded-br'></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <p className='text-sm break-words'>{t('name')}: {node.name}</p>
+            {display && <Button className='bg-sky-500 hover:bg-sky-600 h-8 text-white rounded-sm cursor-pointer'
+                onClick={() => map.fitBounds(display.boundsOn4326, { padding: 100, duration: 1000 })}>
+                <MapPin className='w-4 h-4' />{t('navigate')}
+            </Button>}
         </div>
-    )
+        <div className='flex-1 overflow-y-auto min-h-0 p-4 space-y-3'>
+            {error ? <div role='alert' className='text-sm text-red-400 break-words'>
+                <p>{t('loadError', { message: error })}</p><Button variant='outline' onClick={() => setRevision(value => value + 1)}>{t('retry')}</Button>
+            </div> : !display && <p role='status'>{t('loading')}</p>}
+            {display && <>
+                <dl className='text-sm grid grid-cols-2 gap-1'>
+                    <dt>{t('schema')}</dt><dd>{display.patch.schema_node_key.split('.').pop()}</dd>
+                    <dt>{t('epsg')}</dt><dd>{display.patch.epsg}</dd>
+                    <dt>{t('bounds')}</dt><dd className='break-words'>{display.patch.bounds.join(', ')}</dd>
+                </dl>
+                <GridDisplayPanel map={map} layer={display.topologyLayer} attributes={['level']} gridInfo={display.patch.grid_info} />
+            </>}
+        </div>
+    </div>
 }

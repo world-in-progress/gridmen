@@ -1,3 +1,4 @@
+import './i18n'
 import App from './App.tsx'
 import { createRoot } from 'react-dom/client'
 

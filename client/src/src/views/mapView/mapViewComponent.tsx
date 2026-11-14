@@ -1,8 +1,8 @@
 
-import { useEffect, useRef, forwardRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { create } from 'zustand'
 import mapboxgl from 'mapbox-gl'
-import MapboxDraw from '@mapbox/mapbox-gl-draw'
+import MapboxDrawModule from '@mapbox/mapbox-gl-draw'
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css'
 // @ts-expect-error no declare file for rectangle mode
 import DrawRectangle from 'mapbox-gl-draw-rectangle-mode'
@@ -32,6 +32,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog'
 import { getMapboxAccessToken, mapboxTokenEnvName } from '@/utils/mapboxToken'
+import { lockedMapCameraOptions, lockMapCamera } from './lockedMapCamera'
 
 const initialZoom = 11
 const maxZoom = 22
@@ -60,7 +61,7 @@ const useMapStore = create<MapViewContext>((set) => ({
     setDrawInstance: (drawInstance: MapboxDraw) => set({ drawInstance }),
 }))
 
-const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad, onDrawReady, onOpenSettings }, ref) => {
+function MapContainer({ onMapLoad, onDrawReady, onOpenSettings }: MapContainerProps) {
 
     const isProcessingDrawEventRef = useRef(false)
     const drawInstanceRef = useRef<MapboxDraw | null>(null)
@@ -77,14 +78,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
     const mapFromStore = useMapStore((s) => s.map)
     const mapboxAccessToken = getMapboxAccessToken(savedMapboxAccessToken)
 
-    // Keep existing map centered on the configured initial center.
-    // This also makes settings changes immediately reflect on the map.
-    useEffect(() => {
-        if (!mapFromStore) return
-        mapFromStore.easeTo({ center: [mapInitialLongitude, mapInitialLatitude], duration: 300 })
-    }, [mapFromStore, mapInitialLongitude, mapInitialLatitude])
-
-    const handleDrawCreate = useCallback((e: any) => {
+    const handleDrawCreate = useCallback((e: MapboxDraw.DrawCreateEvent) => {
         if (isProcessingDrawEventRef.current) return
 
         isProcessingDrawEventRef.current = true
@@ -127,6 +121,8 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
             const currentDraw = useMapStore.getState().drawInstance
 
             if (currentMap) {
+                lockMapCamera(currentMap)
+
                 try {
                     const oldContainer = currentMap.getContainer()
                     if (oldContainer && oldContainer.parentNode) {
@@ -157,33 +153,40 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
                     center: [lng, lat],
                     zoom: initialZoom,
                     maxZoom: maxZoom,
-                    pitch: 0,
-                    pitchWithRotate: false,
+                    ...lockedMapCameraOptions,
                     attributionControl: false,
                     boxZoom: false,
                 })
+
+                lockMapCamera(mapInstance)
 
                 mapInstance.on('style.load', () => {
                     mapInstance.setFog({})
                 })
 
-                mapInstance.on('load', async () => {
+                mapInstance.on('load', () => {
                     layerOrderCoordinator.setMap(mapInstance)
                 })
 
                 const drawColor = '#F06B00'
-                const drawColorExpr: any = ['coalesce', ['get', 'user_color'], drawColor]
+                const drawColorExpr: mapboxgl.ExpressionSpecification = ['coalesce', ['get', 'user_color'], drawColor]
 
-                const MapboxDrawAny = MapboxDraw as any
-                const draw = new MapboxDrawAny({
+                // The local ambient module shadows the default import's class type.
+                // Use the installed Draw declaration's constructor and mode interfaces.
+                const Draw = MapboxDrawModule as unknown as {
+                    new (options: MapboxDraw.MapboxDrawOptions): MapboxDraw
+                    modes: MapboxDraw.Modes
+                }
+                const draw = new Draw({
                     displayControlsDefault: false,
                     boxSelect: false,
                     userProperties: true,
                     modes: {
-                        ...MapboxDrawAny.modes,
+                        ...Draw.modes,
                         draw_rectangle: DrawRectangle,
-                        [VECTOR_DRAFT_LINE_MODE]: VectorDraftLineMode,
-                        [VECTOR_DRAFT_POLYGON_MODE]: VectorDraftPolygonMode,
+                        // Draft modes use an extended context beyond Draw's declaration.
+                        [VECTOR_DRAFT_LINE_MODE]: VectorDraftLineMode as unknown as MapboxDraw.DrawCustomMode,
+                        [VECTOR_DRAFT_POLYGON_MODE]: VectorDraftPolygonMode as unknown as MapboxDraw.DrawCustomMode,
                     },
                     styles: [
                         // Active point style
@@ -288,11 +291,6 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
         return () => {
             initializedRef.current = false
 
-            const currentMap = useMapStore.getState().map
-            // if (currentMap) {
-            //     currentMap.off('draw.create', handleDrawCreate)
-            // }
-
             if (resizer && currentMapWrapper) {
                 resizer.unobserve(currentMapWrapper)
                 resizer.disconnect()
@@ -300,6 +298,13 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
         }
 
     }, [onMapLoad, onDrawReady, setMap, setDrawInstance, handleDrawCreate, mapboxAccessToken])
+
+    // Keep existing map centered on the configured initial center.
+    // Run after reuse: jumpTo must not cancel this settings recenter animation.
+    useEffect(() => {
+        if (!mapFromStore) return
+        mapFromStore.easeTo({ center: [mapInitialLongitude, mapInitialLatitude], duration: 300 })
+    }, [mapFromStore, mapInitialLongitude, mapInitialLatitude])
 
     if (!mapboxAccessToken) {
         return (
@@ -351,7 +356,7 @@ const MapContainer = forwardRef<HTMLDivElement, MapContainerProps>(({ onMapLoad,
             <div className='relative w-full h-full hide-mapbox-branding' ref={mapWrapperRef} />
         </div>
     )
-})
+}
 
 interface MapViewComponentProps {
     templateName?: string

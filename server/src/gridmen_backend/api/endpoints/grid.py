@@ -2,15 +2,15 @@ import os
 import json
 import shutil
 import logging
-from functools import lru_cache
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from pynoodle import noodle
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 
-from ...core import settings
 from ...schemas.base import BaseResponse
 from ...schemas.grid import GridExportRequest
+from gridmen_backend.display_cache import borrow, cache_root, cleanup_building, close_cache as _close_display_cache
 
 logger = logging.getLogger(__name__)
 
@@ -120,67 +120,69 @@ def create_empty_grid(node_key: str):
         raise HTTPException(status_code=500, detail=f'Failed to create empty grid: {str(e)}')
 
 
-@router.get('/{node_key}/blocks/meta')
-def get_blocks_metadata(node_key: str):
-    """
-    Get block spatial index metadata (block_meta.json).
-    The frontend determines which blocks are contained in the frustum based on this file.
-    """
+def _display_source(node_key: str) -> Path:
+    record = noodle._load_node_record(node_key, is_cascade=False)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f'Grid node {node_key} not found')
+    params = json.loads(record.launch_params)
+    return Path(params['resource_space']).resolve()
+
+
+@asynccontextmanager
+async def _display_lifespan(app):
+    cleanup_building()
+    yield
+    _close_display_cache()
+
+
+@contextmanager
+def _display(node_key: str):
+    # Node lookup/path resolution does not use live index mappings. Let that
+    # I/O overlap a different request's query before taking index ownership.
     try:
-        if not noodle._has_node(node_key):
-            raise HTTPException(status_code=404, detail=f'Grid node {node_key} not found')
-            
-        node_record = noodle._load_node_record(node_key, is_cascade=False)
-        launch_params = json.loads(node_record.launch_params) if node_record.launch_params else {}
-
-        resource_dir_str = launch_params.get('resource_space')
-        if not resource_dir_str:
-            raise HTTPException(status_code=500, detail="Resource directory not found in node configuration")
-        resource_dir = Path(resource_dir_str)
-        
-        meta_path = resource_dir / "blocks" / "block_meta.json"
-        
-        if not meta_path.exists():
-            raise HTTPException(status_code=404, detail='Block metadata not found. Please ensure blocks are generated.')
-            
-        with open(meta_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to get block metadata: {str(e)}')
-
-
-@router.get('/{node_key}/blocks/{block_name}')
-def get_block_data(node_key: str, block_name: str):
-    """
-    Download the specific Block binary data (.bin).
-    block_name should contain the extension, for example 'my_grid_1.bin'
-    """
+        source = _display_source(node_key)
+    except (OSError,ValueError,KeyError) as exc:
+        raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
     try:
-        if not noodle._has_node(node_key):
-            raise HTTPException(status_code=404, detail=f'Grid node {node_key} not found')
-            
-        node_record = noodle._load_node_record(node_key, is_cascade=False)
-        launch_params = json.loads(node_record.launch_params) if node_record.launch_params else {}
-        resource_dir = Path(launch_params.get('resource_space'))
+        with borrow(source, cache_root()) as index:
+            yield index
+    except (OSError,ValueError,KeyError) as exc:
+        raise HTTPException(status_code=500,detail=f'Invalid grid display resource: {exc}') from exc
 
-        if not block_name.endswith('.bin'):
-            block_name += '.bin'
-        
-        blocks_dir = (resource_dir / "blocks").resolve()
-        block_path = (blocks_dir / block_name).resolve()
-        
-        if not str(block_path).startswith(str(blocks_dir)):
-             raise HTTPException(status_code=403, detail='Access denied: Invalid block path')
 
-        if not block_path.exists():
-            raise HTTPException(status_code=404, detail=f'Block {block_name} not found, {block_path}')
-        
-        return FileResponse(path=block_path, media_type='application/octet-stream', filename=block_name)
+display_router = APIRouter(lifespan=_display_lifespan)
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to get block data: {str(e)}')
+
+@display_router.get('/{node_key}/display/meta')
+def display_meta(node_key: str):
+    with _display(node_key) as index:
+        return index.meta
+
+
+@display_router.get('/{node_key}/display/nodes/{revision}/{block_layer}/{x}/{y}/{display_layer}')
+def display_nodes(node_key: str, revision: str, block_layer: int, x: int, y: int,
+                  display_layer: int, request: Request):
+    with _display(node_key) as index:
+        if revision != index.revision:
+            raise HTTPException(status_code=409, detail='Grid display revision changed')
+        try:
+            index.validate_nodes(block_layer, x, y, display_layer)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        etag = f'W/"{revision}:{block_layer}:{x}:{y}:{display_layer}"'
+        headers = {'ETag':etag, 'Cache-Control':'public, max-age=31536000, immutable'}
+        validators = {value.strip() for value in request.headers.get('if-none-match','').split(',')}
+        if '*' in validators or etag in validators:
+            return Response(status_code=304, headers=headers)
+        payload = index._nodes(block_layer, x, y, display_layer)
+    return Response(payload,media_type='application/octet-stream',headers=headers)
+
+
+@display_router.get('/{node_key}/display/inspect')
+def display_inspect(node_key: str, x: float = Query(allow_inf_nan=False),
+                    y: float = Query(allow_inf_nan=False)):
+    with _display(node_key) as index:
+        return index.inspect(x, y)
+
+
+router.include_router(display_router)

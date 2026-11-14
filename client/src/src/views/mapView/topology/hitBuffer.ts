@@ -1,56 +1,35 @@
 export default class HitBuffer {
-    private _hitBuffer: Uint8Array
-    private _hitCount: number = 0
+    private _hits = new Set<number>()
 
-    constructor(size: number) {
-        this._hitBuffer = new Uint8Array(size)
-    }
+    get size(): number { return this._hits.size }
 
     get all(): number[] {
-        const all: number[] = new Array(this._hitCount)
-        let index = 0
-        for (let i = 0; i < this._hitBuffer.length; i++) {
-            if (this._hitBuffer[i] !== 0) {
-                all[index++] = i
-            }
-        }
-        return all
+        return [...this._hits].sort((a, b) => a - b)
     }
 
-    set all(indicies: number[]) {
-        this._hitBuffer.fill(0)
-        this._hitCount = indicies.length
-        for (const index of indicies) {
-            this._hitBuffer[index] = 1
-        }
+    set all(indices: number[]) {
+        this._hits = new Set(indices)
     }
 
     get isHitting(): boolean {
-        return this._hitCount > 0
+        return this._hits.size > 0
     }
 
     isHit(index: number): boolean {
-        return this._hitBuffer[index] != 0
+        return this._hits.has(index)
     }
 
     add(index: number): void {
-        if (!this.isHit(index)) {
-            this._hitBuffer[index] = 1
-            this._hitCount++
-        }
+        this._hits.add(index)
     }
 
     remove(storageId: number): void {
-        if (this.isHit(storageId)) {
-            this._hitBuffer[storageId] = 0
-            this._hitCount--
-        }
+        this._hits.delete(storageId)
     }
 
     clear(): number[] {
         const all = this.all
-        this._hitBuffer.fill(0)
-        this._hitCount = 0
+        this._hits.clear()
         return all
     }
 }

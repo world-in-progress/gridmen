@@ -12,5 +12,5 @@
     "start:server": "cd server && uv run main.py"
   },
   "author": "",
-  "license": "ISC"
+  "license": "MIT"
 }

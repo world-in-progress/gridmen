@@ -1,0 +1,107 @@
+{
+  "layerFields": ["width", "height", "x0", "y0", "nx", "ny", "nativeLevel", "xLayout", "yLayout"],
+  "cases": [
+    {
+      "name": "uniform-hk",
+      "meta": {"bounds": [808357.5, 827445.5, 833573.5, 844213.5], "alignment_origin": [808357.5, 830133.5], "grid_info": [[64, 64], [32, 32], [16, 16], [8, 8], [4, 4]]},
+      "layers": [
+        [4, 4, 0, -672, 6304, 4192, 5, null, null],
+        [8, 8, 0, -336, 3152, 2096, 4, null, null],
+        [16, 16, 0, -168, 1576, 1048, 3, null, null],
+        [32, 32, 0, -84, 788, 524, 2, null, null],
+        [64, 64, 0, -42, 394, 262, 1, null, null],
+        [128, 128, 0, -21, 197, 131, null, null, null],
+        [256, 256, 0, -11, 99, 66, null, null, null],
+        [512, 512, 0, -6, 50, 34, null, null, null],
+        [1024, 1024, 0, -3, 25, 17, null, null, null],
+        [2048, 2048, 0, -2, 13, 9, null, null, null],
+        [4096, 4096, 0, -1, 7, 5, null, null, null],
+        [8192, 8192, 0, -1, 4, 3, null, null, null],
+        [16384, 16384, 0, -1, 2, 2, null, null, null]
+      ]
+    },
+    {
+      "name": "nonbinary",
+      "meta": {"bounds": [-26, -10, 26, 10], "alignment_origin": [0, 0], "grid_info": [[13, 5], [1, 1]]},
+      "layers": [
+        [1, 1, -26, -10, 52, 20, 2, null, null],
+        [2, 2, -14, -6, 28, 12, null, [13, 7], [5, 3]],
+        [4, 4, -8, -4, 16, 8, null, [13, 4], [5, 2]],
+        [8, 5, -4, -2, 8, 4, null, [13, 2], null],
+        [13, 5, -2, -2, 4, 4, 1, null, null],
+        [26, 10, -1, -1, 2, 2, null, null, null]
+      ]
+    },
+    {
+      "name": "decimal",
+      "meta": {"bounds": [-7.8, -7, 7.8, 7], "alignment_origin": [0.15, -0.35], "grid_info": [[3.9, 3.5], [0.3, 0.7]]},
+      "layers": [
+        [0.3, 0.7, -27, -10, 53, 21, 2, null, null],
+        [0.6, 1.4, -15, -6, 29, 13, null, [3.9, 7], [3.5, 3]],
+        [1.2, 2.8, -9, -4, 17, 9, null, [3.9, 4], [3.5, 2]],
+        [2.4, 3.5, -5, -2, 9, 5, null, [3.9, 2], null],
+        [3.9, 3.5, -3, -2, 5, 5, 1, null, null],
+        [7.8, 7.0, -2, -1, 3, 3, null, null, null],
+        [15.6, 14.0, -1, -1, 2, 2, null, null, null]
+      ]
+    },
+    {
+      "name": "skinny",
+      "meta": {"bounds": [0, 0, 128, 4], "alignment_origin": [0, 0], "grid_info": [[64, 1], [1, 1]]},
+      "layers": [
+        [1, 1, 0, 0, 128, 4, 2, null, null],
+        [2, 1, 0, 0, 64, 4, null, null, null],
+        [4, 1, 0, 0, 32, 4, null, null, null],
+        [8, 1, 0, 0, 16, 4, null, null, null],
+        [16, 1, 0, 0, 8, 4, null, null, null],
+        [32, 1, 0, 0, 4, 4, null, null, null],
+        [64, 1, 0, 0, 2, 4, 1, null, null],
+        [128, 2, 0, 0, 1, 2, null, null, null]
+      ]
+    },
+    {
+      "name": "zero-exclusive",
+      "meta": {"bounds": [-13, -5, 0, 0], "alignment_origin": [0, 0], "grid_info": [[13, 5], [1, 1]]},
+      "layers": [
+        [1, 1, -13, -5, 13, 5, 2, null, null],
+        [2, 2, -7, -3, 7, 3, null, [13, 7], [5, 3]],
+        [4, 4, -4, -2, 4, 2, null, [13, 4], [5, 2]],
+        [8, 5, -2, -1, 2, 1, null, [13, 2], null],
+        [13, 5, -1, -1, 1, 1, 1, null, null],
+        [26, 10, -1, -1, 1, 1, null, null, null]
+      ]
+    },
+    {
+      "name": "unequal",
+      "meta": {"bounds": [-130, -42, 130, 42], "alignment_origin": [-0.5, 0.25], "grid_info": [[65, 21], [13, 7], [1, 1]]},
+      "layers": [
+        [1, 1, -130, -43, 261, 85, 3, null, null],
+        [2, 2, -70, -25, 141, 49, null, [13, 7], [7, 4]],
+        [4, 4, -40, -13, 81, 25, null, [13, 4], [7, 2]],
+        [8, 7, -20, -7, 41, 13, null, [13, 2], null],
+        [13, 7, -10, -7, 21, 13, 2, null, null],
+        [26, 14, -6, -5, 13, 9, null, [65, 3], [21, 2]],
+        [52, 21, -4, -3, 9, 5, null, [65, 2], null],
+        [65, 21, -2, -3, 5, 5, 1, null, null],
+        [130, 42, -1, -2, 3, 3, null, null, null],
+        [260, 84, -1, -1, 2, 2, null, null, null]
+      ]
+    },
+    {
+      "name": "single-native",
+      "meta": {"bounds": [818917.5, 833781.5, 823013.5, 837877.5], "alignment_origin": [818917.5, 833781.5], "grid_info": [[4, 4]]},
+      "layers": [
+        [4, 4, 0, 0, 1024, 1024, 1, null, null],
+        [8, 8, 0, 0, 512, 512, null, null, null],
+        [16, 16, 0, 0, 256, 256, null, null, null],
+        [32, 32, 0, 0, 128, 128, null, null, null],
+        [64, 64, 0, 0, 64, 64, null, null, null],
+        [128, 128, 0, 0, 32, 32, null, null, null],
+        [256, 256, 0, 0, 16, 16, null, null, null],
+        [512, 512, 0, 0, 8, 8, null, null, null],
+        [1024, 1024, 0, 0, 4, 4, null, null, null],
+        [2048, 2048, 0, 0, 2, 2, null, null, null]
+      ]
+    }
+  ]
+}

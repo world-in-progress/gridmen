@@ -7,9 +7,3 @@ class IGrid:
         Get metadata for the grid.
         """
         ...
-
-    def get_cells(self):
-        """
-        Get the grid cells.
-        """
-        ...

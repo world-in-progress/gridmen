@@ -33,9 +33,9 @@
         "rule": "@typescript-eslint/no-unused-expressions"
       }
     ],
-    "eslint.workingDirectories": ["../src/frontend/"],
-    "eslint.nodePath": "./../node_modules",
-    "typescript.tsdk": "node_modules/typescript/lib",
+    "eslint.workingDirectories": ["./src"],
+    "eslint.nodePath": "./src/node_modules",
+    "typescript.tsdk": "src/node_modules/typescript/lib",
     "editor.codeActionsOnSave": {
       "source.fixAll.eslint": "always"
     }

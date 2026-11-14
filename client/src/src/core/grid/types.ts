@@ -9,26 +9,6 @@ export type PatchContext = {
     rules: [number, number][]
 }
 
-export type GridContext = {
-    nodeInfo: string
-    lockId: string
-    srcCS: string
-    targetCS: string
-    bBox: BoundingBox2D
-}
-
-export interface StructuredCellRenderVertices {
-    tl: Float32Array
-    tr: Float32Array
-    bl: Float32Array
-    br: Float32Array
-
-    tlLow: Float32Array
-    trLow: Float32Array
-    blLow: Float32Array
-    brLow: Float32Array
-}
-
 export type MultiCellBaseInfo = {
     levels: Uint8Array
     globalIds: Uint32Array
@@ -93,7 +73,7 @@ export class MultiCellInfoParser {
         return MultiCellInfoParser.fromBuffer(buffer);
     }
 
-    static async fromPostUrl(url: string, data: any): Promise<MultiCellBaseInfo> {
+    static async fromPostUrl(url: string, data: unknown): Promise<MultiCellBaseInfo> {
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -154,12 +134,6 @@ export class MultiCellInfoParser {
     }
 }
 
-export type MultiBlockCellInfo = {
-    bBoxes: Float64Array
-    altitudes: Float32Array
-    lums: Uint8Array
-}
-
 export type GridBlockMetaInfo = {
     epsg: number
     blockExtents: number[]
@@ -180,114 +154,24 @@ export type GridBlockMetaInfo = {
 // }
 
 export class CellKeyHashTable {
-    private _keyHashTable: Uint32Array
-    private _storageIdTable: Uint32Array
-    private _hashTableSize: number
-    private _hashTableMask: number
-
-    constructor(size: number) {
-        this._hashTableSize = Math.max(8192, size * 2)
-        this._hashTableSize = Math.pow(2, Math.ceil(Math.log2(this._hashTableSize)))
-        this._hashTableMask = this._hashTableSize - 1
-
-        this._keyHashTable = new Uint32Array(this._hashTableSize * 2)
-        this._storageIdTable = new Uint32Array(this._hashTableSize)
-        this._storageIdTable.fill(0xFFFFFFFF)
-    }
-
-    private _hash(level: number, globalId: number): number {
-        // Simplified version of FNV-1a hash algorithm
-        let hash = 2166136261
-        hash ^= level
-        hash *= 16777619
-        hash ^= globalId
-        hash *= 16777619
-        return (hash >>> 0) & this._hashTableMask // ensure positive value and limit within table size
-    }
-
-    private _findSlot(level: number, globalId: number): number {
-        let hash = this._hash(level, globalId)
-
-        while (this._storageIdTable[hash] !== 0xFFFFFFFF) {
-            const storedLevel = this._keyHashTable[hash * 2]
-            const storedGlobalId = this._keyHashTable[hash * 2 + 1]
-
-            if (storedLevel === level && storedGlobalId === globalId) {
-                return hash
-            }
-
-            hash = (hash + 1) & this._hashTableMask
-        }
-
-        return hash
-    }
+    private _levels = new Map<number, Map<number, number>>()
 
     get(level: number, globalId: number): number | undefined {
-        let hash = this._hash(level, globalId)
+        return this._levels.get(level)?.get(globalId)
+    }
 
-        while (this._storageIdTable[hash] !== 0xFFFFFFFF) {
-            const storedLevel = this._keyHashTable[hash * 2]
-            const storedGlobalId = this._keyHashTable[hash * 2 + 1]
-
-            if (storedLevel === level && storedGlobalId === globalId) {
-                return this._storageIdTable[hash]
-            }
-
-            hash = (hash + 1) & this._hashTableMask
+    update(storageId: number, level: number, globalId: number): void {
+        let cells = this._levels.get(level)
+        if (!cells) {
+            cells = new Map<number, number>()
+            this._levels.set(level, cells)
         }
-
-        return undefined
+        cells.set(globalId, storageId)
     }
 
-    update(storageId: number, level: number, globalId: number) {
-        const slot = this._findSlot(level, globalId)
-        this._keyHashTable[slot * 2] = level
-        this._keyHashTable[slot * 2 + 1] = globalId
-        this._storageIdTable[slot] = storageId
+    delete(level: number, globalId: number): void {
+        const cells = this._levels.get(level)
+        cells?.delete(globalId)
+        if (cells?.size === 0) this._levels.delete(level)
     }
-
-    delete(level: number, globalId: number) {
-        let hash = this._hash(level, globalId)
-
-        while (this._storageIdTable[hash] !== 0xFFFFFFFF) {
-            const storedLevel = this._keyHashTable[hash * 2]
-            const storedGlobalId = this._keyHashTable[hash * 2 + 1]
-
-            if (storedLevel === level && storedGlobalId === globalId) {
-                this._storageIdTable[hash] = 0xFFFFFFFF
-
-                let nextHash = (hash + 1) & this._hashTableMask
-                while (this._storageIdTable[nextHash] !== 0xFFFFFFFF) {
-                    const nextLevel = this._keyHashTable[nextHash * 2]
-                    const nextGlobalId = this._keyHashTable[nextHash * 2 + 1]
-                    const nextStorageId = this._storageIdTable[nextHash]
-
-                    this._storageIdTable[nextHash] = 0xFFFFFFFF
-                    this.update(nextStorageId, nextLevel, nextGlobalId)
-
-                    nextHash = (nextHash + 1) & this._hashTableMask
-                }
-                break
-            }
-
-            hash = (hash + 1) & this._hashTableMask
-        }
-    }
-}
-
-
-// Helpers //////////////////////////////////////////////////////////////////////////////////////////////////////
-
-function lerp(a: number, b: number, t: number): number {
-    return (1.0 - t) * a + t * b;
-}
-
-function simplifyFraction(n: number, m: number): [number, number] {
-    let a = n,
-        b = m;
-    while (b !== 0) {
-        [a, b] = [b, a % b];
-    }
-
-    return [n / a, m / a];
 }

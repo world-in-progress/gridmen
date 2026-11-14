@@ -21,3 +21,15 @@ __pycache__/
 output/
 paper/
 templates/
+
+# Local configuration, verification state, and generated grid exports
+.env
+.env.*
+!.env.example
+.verification/
+**/cell_topo.bin
+**/edge_topo.bin
+**/grid.meta.json
+**/build_report.json
+**/ne.txt
+**/ns.txt
